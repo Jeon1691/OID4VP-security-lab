@@ -6,6 +6,12 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Sender-side sealing and known-answer-test helpers (`test_support`, `open_base`,
+# `RecipientPrivateKey::derive_from_ikm`). For fixtures and the wallet simulator only; the
+# Verifier must not enable it.
+test-support = []
+
 [dependencies]
 base64 = { workspace = true }
 hpke = { workspace = true }
@@ -16,6 +22,8 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 getrandom = { workspace = true }
+# Self dev-dependency: this crate's own tests always build with `test-support`.
+jose-hpke = { path = ".", features = ["test-support"] }
 
 [lints]
 workspace = true

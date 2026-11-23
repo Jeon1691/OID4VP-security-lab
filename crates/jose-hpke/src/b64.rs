@@ -26,6 +26,7 @@ pub(crate) fn decode(encoded: &str, segment: Segment) -> Result<Vec<u8>, Error> 
         .map_err(|_| Error::Base64(segment))
 }
 
+#[cfg(feature = "test-support")]
 pub(crate) fn encode(bytes: &[u8]) -> String {
     BASE64URL.encode(bytes)
 }

@@ -35,8 +35,14 @@
 //!
 //! Verifier flow: [`CompactJwe::parse`] (all key-independent checks), select the key by
 //! [`ProtectedHeader::kid`], compute [`SessionInfo::from_binding`] from the stored
-//! `protocol_model::RequestBinding`, then [`CompactJwe::open`]. Sender-side sealing lives in
-//! [`test_support`] only.
+//! `protocol_model::RequestBinding`, then [`CompactJwe::open`].
+//!
+//! # `test-support` feature
+//!
+//! Off by default. It enables `test_support` (sender-side sealing for fixtures and the wallet
+//! simulator), `open_base` (raw RFC 9180 single-shot open, used by the known-answer tests) and
+//! `RecipientPrivateKey::derive_from_ikm` (deterministic keys from `ikm`). A Verifier build
+//! must not enable it; this crate's own tests enable it through a self dev-dependency.
 
 mod b64;
 mod error;
@@ -44,12 +50,15 @@ mod header;
 mod hpke0;
 mod jwe;
 mod session_info;
+#[cfg(feature = "test-support")]
 pub mod test_support;
 
 pub use error::{Error, Segment};
 pub use header::ProtectedHeader;
 pub use hpke::rand_core;
-pub use hpke0::{RecipientPrivateKey, RecipientPublicKey, open_base, suite};
+#[cfg(feature = "test-support")]
+pub use hpke0::open_base;
+pub use hpke0::{RecipientPrivateKey, RecipientPublicKey, suite};
 pub use jwe::{CompactJwe, open_compact};
 pub use session_info::SessionInfo;
 
