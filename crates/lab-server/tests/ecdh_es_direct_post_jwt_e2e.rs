@@ -13,8 +13,17 @@
 //!
 //! The handler is test scaffolding only; production routing lands in a later sprint. All keys
 //! and presentations are synthetic, and the HTTP client refuses anything but loopback.
+//!
+//! Every test pins `flavor = "current_thread"`: upstream `MemoryStore` takes its lock with
+//! `try_lock()` and errors instead of waiting, so a multi-threaded runtime could let the test's
+//! `poll_status` and the server's `update_status` collide and fail spuriously. On one thread the
+//! server task only runs while the test awaits, and no store lock is held across an await.
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::{
+    cell::RefCell,
+    sync::{Arc, Mutex, MutexGuard},
+    time::Duration,
+};
 
 use anyhow::{Context as _, Result, ensure};
 use async_trait::async_trait;
@@ -26,8 +35,10 @@ use axum::{
     routing::post,
 };
 use josekit::{
-    jwe::{ECDH_ES, alg::ecdh_es::EcdhEsJweDecrypter},
-    jwk::KeyPair as _,
+    JoseHeader as _,
+    jwe::{ECDH_ES, JweDecrypter, JweHeader, alg::ecdh_es::EcdhEsJweDecrypter},
+    jwk::{Jwk, KeyPair as _},
+    jwt::JwtPayload,
 };
 use openid4vp::{
     core::{
@@ -62,7 +73,7 @@ use ssi::{
     dids::{DIDKey, VerificationMethodDIDResolver},
     verification_methods::AnyJwkMethod,
 };
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, task::JoinHandle};
 use uuid::Uuid;
 
 /// did:key of `fixtures/spruce_verifier.jwk`
@@ -85,9 +96,28 @@ const CREDENTIAL_QUERY_ID: &str = "synthetic-credential";
 /// Opaque synthetic presentation. G0-D tests transport encryption, not VP verification, so the
 /// validator only checks that this exact value survives the encrypt/POST/decrypt round trip.
 const SYNTHETIC_PRESENTATION: &str = "g0d-synthetic-presentation";
+/// Synthetic Request Object nonce. The ECDH-ES flow only needs it to be present in the signed
+/// request (byte-exact nonce handling is covered by G0-C), so a plain ASCII value suffices.
 const TEST_NONCE: &str = "g0d-synthetic-nonce";
 /// `kid` of the generated encryption key; OpenID4VP 1.0 §8.3 requires the JWE to echo it.
 const ENCRYPTION_KID: &str = "g0d-ecdh-es-1";
+/// A `kid` the Verifier never advertised.
+const UNKNOWN_KID: &str = "g0d-unknown-kid";
+/// JWK `use` value for encryption keys (RFC 7517 §4.2).
+const KEY_USE_ENC: &str = "enc";
+/// A valid AES-GCM `enc` (RFC 7518 §5.1) that the Verifier did not advertise.
+const UNADVERTISED_JWE_ENC: &str = "A256GCM";
+/// DEFLATE, the only registered JWE `zip` value (RFC 7516 §4.1.3).
+const JWE_ZIP_DEFLATE: &str = "DEF";
+/// Typ of the JWE SpruceID's `JweBuilder` emits (an encrypted JWT).
+const JWE_TYP_JWT: &str = "JWT";
+/// Upper bound for one loopback request; a wedged server fails the test instead of hanging it.
+const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
+/// `Outcome::Failure` reason prefixes, so tests can tell which validator step refused a JWE.
+const REASON_HEADER_REJECTED: &str = "JWE protected header rejected";
+const REASON_DECRYPT_FAILED: &str = "JWE decryption failed";
+/// Key in `Outcome::Success.info` holding the validator run that produced the outcome.
+const INFO_DECRYPT_ATTEMPT: &str = "decrypt_attempt";
 /// Key agreement algorithm advertised in `jwks` (the only one SpruceID's `JweBuilder` supports).
 const EXPECTED_JWE_ALG: &str = "ECDH-ES";
 /// Content encryption used when `encrypted_response_enc_values_supported` is absent
@@ -129,6 +159,10 @@ struct Lab {
     wallet: LoopbackWallet,
     /// Public half of the encryption key, as published in `client_metadata.jwks`.
     encryption_jwk: Map<String, Value>,
+    /// The `axum::serve` task. Checked in [`Lab::shutdown`] so a serve loop that exited or
+    /// panicked mid-test fails the test. (A panicking handler only kills its connection task;
+    /// the client then sees a connection error and the test's `expect` fails.)
+    server: JoinHandle<()>,
 }
 
 impl Lab {
@@ -138,6 +172,16 @@ impl Lab {
 
     async fn status(&self, id: Uuid) -> Status {
         self.verifier.poll_status(id).await.expect("session exists")
+    }
+
+    /// Stops the server, surfacing a panic or early exit of the serve task.
+    async fn shutdown(self) {
+        self.server.abort();
+        match self.server.await {
+            Err(e) if e.is_cancelled() => {}
+            Err(e) => std::panic::resume_unwind(e.into_panic()),
+            Ok(()) => panic!("lab server exited during the test"),
+        }
     }
 }
 
@@ -156,6 +200,7 @@ impl LoopbackHttpClient {
         let client = reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
+            .timeout(HTTP_TIMEOUT)
             .build()
             .expect("reqwest client builds");
         Self(client)
@@ -166,6 +211,9 @@ impl LoopbackHttpClient {
 impl AsyncHttpClient for LoopbackHttpClient {
     async fn execute(&self, request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>> {
         let host = request.uri().host().context("request has a host")?;
+        // Fails closed: only a literal IP that is loopback passes. Host names (`localhost`) and
+        // IPv6 loopback are refused on purpose: `Uri::host()` keeps the brackets of `[::1]`, so
+        // it never parses as an `IpAddr`. The lab only binds 127.0.0.1, so nothing else is needed.
         ensure!(
             host.parse::<std::net::IpAddr>()
                 .is_ok_and(|ip| ip.is_loopback()),
@@ -252,14 +300,14 @@ fn encryption_key_pair() -> (EcdhEsJweDecrypter<NistP256>, Map<String, Value>) {
         .expect("P-256 key pair generates");
 
     let mut private = key_pair.to_jwk_key_pair();
-    private.set_key_use("enc");
+    private.set_key_use(KEY_USE_ENC);
     private.set_key_id(ENCRYPTION_KID);
     let decrypter = ECDH_ES
         .decrypter_from_jwk::<NistP256>(&private)
         .expect("ECDH-ES decrypter from private JWK");
 
     let mut public = key_pair.to_jwk_public_key();
-    public.set_key_use("enc");
+    public.set_key_use(KEY_USE_ENC);
     public.set_algorithm(EXPECTED_JWE_ALG);
     public.set_key_id(ENCRYPTION_KID);
     (decrypter, public.into())
@@ -307,7 +355,8 @@ async fn start_lab() -> Lab {
             decrypter: Arc::new(decrypter),
             observations: observations.clone(),
         });
-    tokio::spawn(async move { axum::serve(listener, app).await.expect("lab server runs") });
+    let server =
+        tokio::spawn(async move { axum::serve(listener, app).await.expect("lab server runs") });
 
     Lab {
         verifier,
@@ -318,6 +367,7 @@ async fn start_lab() -> Lab {
             trusted_dids: vec![VERIFIER_DID.to_owned()],
         },
         encryption_jwk,
+        server,
     }
 }
 
@@ -376,8 +426,28 @@ fn is_form_urlencoded(headers: &HeaderMap) -> bool {
         .is_some_and(|essence| essence.trim().eq_ignore_ascii_case(FORM_CONTENT_TYPE))
 }
 
+/// Protected-header policy: only exactly what the Verifier advertised is accepted (fail closed).
+/// Upstream `verify_response` and josekit alone would accept any registered `enc` and `zip`.
+fn check_protected_header(header: &JweHeader) -> Result<(), String> {
+    let expect = |name: &str, got: Option<&str>, want: &str| {
+        if got == Some(want) {
+            Ok(())
+        } else {
+            Err(format!("{name} {got:?} is not {want:?}"))
+        }
+    };
+    expect("alg", header.algorithm(), EXPECTED_JWE_ALG)?;
+    expect("enc", header.content_encryption(), EXPECTED_JWE_ENC)?;
+    expect("kid", header.key_id(), ENCRYPTION_KID)?;
+    if let Some(zip) = header.claim("zip") {
+        return Err(format!("zip {zip} is not allowed"));
+    }
+    Ok(())
+}
+
 /// Verifier-side decryption, following spruceid/openid4vp@c57a8958
-/// `examples/verifier-conformance-adapter/crypto/jwe.rs` (`decrypt_jwe`).
+/// `examples/verifier-conformance-adapter/crypto/jwe.rs` (`decrypt_jwe`). The header policy runs
+/// in josekit's decrypter selector, i.e. before key agreement or content decryption.
 fn decrypt_and_validate(
     decrypter: &EcdhEsJweDecrypter<NistP256>,
     observations: &Mutex<Observations>,
@@ -389,14 +459,32 @@ fn decrypt_and_validate(
             reason: "direct_post.jwt requires an encrypted response".into(),
         };
     };
-    lock(observations).decrypt_attempts += 1;
+    let attempt = {
+        let mut observations = lock(observations);
+        observations.decrypt_attempts += 1;
+        observations.decrypt_attempts
+    };
 
-    let (plaintext, header) = match josekit::jwe::deserialize_compact(jwe, decrypter) {
+    let header_rejection = RefCell::new(None);
+    let decrypted =
+        josekit::jwe::deserialize_compact_with_selector(
+            jwe,
+            |header| match check_protected_header(header) {
+                Ok(()) => Ok(Some(decrypter as &dyn JweDecrypter)),
+                Err(reason) => {
+                    *header_rejection.borrow_mut() = Some(reason);
+                    Ok(None)
+                }
+            },
+        );
+    let (plaintext, header) = match decrypted {
         Ok(decrypted) => decrypted,
         Err(e) => {
-            return Outcome::Failure {
-                reason: format!("JWE decryption failed: {e}"),
+            let reason = match header_rejection.into_inner() {
+                Some(rejection) => format!("{REASON_HEADER_REJECTED}: {rejection}"),
+                None => format!("{REASON_DECRYPT_FAILED}: {e}"),
             };
+            return Outcome::Failure { reason };
         }
     };
     let Ok(payload) = serde_json::from_slice::<Value>(&plaintext) else {
@@ -421,7 +509,7 @@ fn decrypt_and_validate(
 
     if answers_every_query {
         Outcome::Success {
-            info: json!({ "decrypted": true }),
+            info: json!({ INFO_DECRYPT_ATTEMPT: attempt }),
         }
     } else {
         Outcome::Failure {
@@ -520,6 +608,34 @@ async fn post_raw(
         .status()
 }
 
+/// Encrypts the synthetic response with josekit directly (not SpruceID's `JweBuilder`) to the
+/// advertised public key, so the protected header can deviate from what the Verifier advertised.
+fn encrypt_with_header(lab: &Lab, enc: &str, kid: &str, zip: Option<&str>) -> String {
+    let jwk = Jwk::from_map(lab.encryption_jwk.clone()).expect("advertised JWK parses");
+    let encrypter = ECDH_ES
+        .encrypter_from_jwk::<NistP256>(&jwk)
+        .expect("ECDH-ES encrypter from advertised JWK");
+
+    let mut header = JweHeader::new();
+    header.set_token_type(JWE_TYP_JWT);
+    header.set_algorithm(EXPECTED_JWE_ALG);
+    header.set_content_encryption(enc);
+    header.set_key_id(kid);
+    if let Some(zip) = zip {
+        header.set_compression(zip);
+    }
+
+    let vp_token = serde_json::to_value(vp_token()).expect("vp_token serializes");
+    let payload = JwtPayload::from_map(
+        json!({ "vp_token": vp_token })
+            .as_object()
+            .cloned()
+            .expect("object"),
+    )
+    .expect("JWT payload");
+    josekit::jwt::encode_with_encrypter(&payload, &header, &encrypter).expect("josekit encrypts")
+}
+
 async fn assert_rejected_before_decryption(lab: &Lab, id: Uuid, got: StatusCode, want: StatusCode) {
     assert_eq!(got, want);
     assert_eq!(
@@ -534,7 +650,43 @@ async fn assert_rejected_before_decryption(lab: &Lab, id: Uuid, got: StatusCode,
     );
 }
 
-#[tokio::test]
+/// The `reason` of a `Complete(Failure)` session; panics on any other status.
+async fn failure_reason(lab: &Lab, id: Uuid) -> String {
+    match lab.status(id).await {
+        Status::Complete(Outcome::Failure { reason }) => reason,
+        other => panic!("expected Complete(Failure), got {other:?}"),
+    }
+}
+
+/// The validator run recorded in a `Complete(Success)` session; panics on any other status.
+async fn success_attempt(lab: &Lab, id: Uuid) -> u64 {
+    match lab.status(id).await {
+        Status::Complete(Outcome::Success { info }) => info[INFO_DECRYPT_ATTEMPT]
+            .as_u64()
+            .expect("success info records the attempt"),
+        other => panic!("expected Complete(Success), got {other:?}"),
+    }
+}
+
+/// Posts a JWE whose protected header deviates from the advertised key and checks that the
+/// header policy refused it before any decryption.
+async fn assert_header_rejected(
+    lab: &Lab,
+    id: Uuid,
+    request: &AuthorizationRequestObject,
+    jwe: String,
+) {
+    let got = post_raw(lab, request, FORM_CONTENT_TYPE, jwe_form_body(&jwe)).await;
+    assert_eq!(got, StatusCode::BAD_REQUEST);
+
+    let reason = failure_reason(lab, id).await;
+    assert!(reason.starts_with(REASON_HEADER_REJECTED), "{reason}");
+    let observations = lab.observations();
+    assert_eq!(observations.decrypt_attempts, 1, "validator ran once");
+    assert!(observations.decrypted.is_empty(), "nothing decrypted");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn ecdh_es_direct_post_jwt_round_trip_completes_with_success() {
     let lab = start_lab().await;
     let (id, request) = issue_request(&lab).await;
@@ -557,59 +709,92 @@ async fn ecdh_es_direct_post_jwt_round_trip_completes_with_success() {
         .await
         .expect("verifier accepts the encrypted response");
     assert_eq!(redirect, None);
+    assert_eq!(success_attempt(&lab, id).await, 1);
 
-    assert!(matches!(
-        lab.status(id).await,
-        Status::Complete(Outcome::Success { .. })
-    ));
-
-    let observations = lab.observations();
-    assert_eq!(observations.decrypt_attempts, 1);
-    let [decrypted] = observations.decrypted.as_slice() else {
-        panic!("exactly one decrypted JWE: {observations:?}");
-    };
-    assert_eq!(
-        decrypted.jwe, jwe,
-        "server decrypted the bytes sent over HTTP"
-    );
-    assert_eq!(decrypted.jwe.split('.').count(), JWE_COMPACT_SEGMENTS);
-    assert_eq!(decrypted.alg.as_deref(), Some(EXPECTED_JWE_ALG));
-    assert_eq!(decrypted.enc.as_deref(), Some(EXPECTED_JWE_ENC));
-    assert_eq!(decrypted.kid.as_deref(), Some(ENCRYPTION_KID));
-    assert_eq!(
-        decrypted.payload["vp_token"],
-        json!({ CREDENTIAL_QUERY_ID: [SYNTHETIC_PRESENTATION] })
-    );
+    {
+        let observations = lab.observations();
+        assert_eq!(observations.decrypt_attempts, 1);
+        let [decrypted] = observations.decrypted.as_slice() else {
+            panic!("exactly one decrypted JWE: {observations:?}");
+        };
+        assert_eq!(
+            decrypted.jwe, jwe,
+            "server decrypted the bytes sent over HTTP"
+        );
+        assert_eq!(decrypted.jwe.split('.').count(), JWE_COMPACT_SEGMENTS);
+        assert_eq!(decrypted.alg.as_deref(), Some(EXPECTED_JWE_ALG));
+        assert_eq!(decrypted.enc.as_deref(), Some(EXPECTED_JWE_ENC));
+        assert_eq!(decrypted.kid.as_deref(), Some(ENCRYPTION_KID));
+        assert_eq!(
+            decrypted.payload["vp_token"],
+            json!({ CREDENTIAL_QUERY_ID: [SYNTHETIC_PRESENTATION] })
+        );
+    }
+    lab.shutdown().await;
 }
 
 /// Observed upstream behaviour: the failed decryption still ends the session as
 /// `Complete(Failure)`, because `verify_response` stores whatever the validator returns.
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn tampered_jwe_ciphertext_is_not_accepted() {
     let lab = start_lab().await;
     let (id, request) = issue_request(&lab).await;
     let tampered = tamper_ciphertext(&encrypt_response(&request));
 
-    let response = AuthorizationResponse::Jwt(JwtAuthorizationResponse { response: tampered });
-    let err = lab
-        .wallet
-        .submit_response(request, response)
-        .await
-        .expect_err("tampered JWE must be refused");
-    assert!(
-        format!("{err:#}").contains(StatusCode::BAD_REQUEST.as_str()),
-        "{err:#}"
-    );
+    let got = post_raw(&lab, &request, FORM_CONTENT_TYPE, jwe_form_body(&tampered)).await;
+    assert_eq!(got, StatusCode::BAD_REQUEST);
 
-    let status = lab.status(id).await;
-    assert!(!matches!(status, Status::Complete(Outcome::Success { .. })));
-    assert!(matches!(status, Status::Complete(Outcome::Failure { .. })));
-    let observations = lab.observations();
-    assert_eq!(observations.decrypt_attempts, 1, "decryption was attempted");
-    assert!(observations.decrypted.is_empty(), "nothing decrypted");
+    // The header passed the policy; AES-GCM tag verification is what refused it.
+    let reason = failure_reason(&lab, id).await;
+    assert!(reason.starts_with(REASON_DECRYPT_FAILED), "{reason}");
+    assert_eq!(
+        lab.observations().decrypt_attempts,
+        1,
+        "decryption was attempted"
+    );
+    assert!(lab.observations().decrypted.is_empty(), "nothing decrypted");
+    lab.shutdown().await;
 }
 
-#[tokio::test]
+/// A well-formed JWE to the advertised key, but with `enc` = A256GCM, which the Verifier did not
+/// advertise (josekit would decrypt it; the header policy must not).
+#[tokio::test(flavor = "current_thread")]
+async fn jwe_with_unadvertised_enc_is_rejected() {
+    let lab = start_lab().await;
+    let (id, request) = issue_request(&lab).await;
+    let jwe = encrypt_with_header(&lab, UNADVERTISED_JWE_ENC, ENCRYPTION_KID, None);
+
+    assert_header_rejected(&lab, id, &request, jwe).await;
+    lab.shutdown().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn jwe_with_wrong_kid_is_rejected() {
+    let lab = start_lab().await;
+    let (id, request) = issue_request(&lab).await;
+    let jwe = encrypt_with_header(&lab, EXPECTED_JWE_ENC, UNKNOWN_KID, None);
+
+    assert_header_rejected(&lab, id, &request, jwe).await;
+    lab.shutdown().await;
+}
+
+/// Compression before encryption is a length side channel and was not negotiated.
+#[tokio::test(flavor = "current_thread")]
+async fn jwe_with_zip_header_is_rejected() {
+    let lab = start_lab().await;
+    let (id, request) = issue_request(&lab).await;
+    let jwe = encrypt_with_header(
+        &lab,
+        EXPECTED_JWE_ENC,
+        ENCRYPTION_KID,
+        Some(JWE_ZIP_DEFLATE),
+    );
+
+    assert_header_rejected(&lab, id, &request, jwe).await;
+    lab.shutdown().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn non_form_content_type_is_rejected_before_decryption() {
     let lab = start_lab().await;
     let (id, request) = issue_request(&lab).await;
@@ -617,13 +802,14 @@ async fn non_form_content_type_is_rejected_before_decryption() {
 
     let got = post_raw(&lab, &request, WRONG_CONTENT_TYPE, body).await;
     assert_rejected_before_decryption(&lab, id, got, StatusCode::UNSUPPORTED_MEDIA_TYPE).await;
+    lab.shutdown().await;
 }
 
 /// The body is a plaintext `direct_post` response (`vp_token=...`) sent to a `direct_post.jwt`
 /// session. Upstream's `AuthorizationResponse::from_x_www_form_urlencoded` happily parses it as
 /// `Unencoded`, and `verify_response` would pass it to the validator: upstream does not bind the
 /// response format to the request's `response_mode`, so the endpoint must.
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn missing_response_parameter_is_rejected_before_decryption() {
     let lab = start_lab().await;
     let (id, request) = issue_request(&lab).await;
@@ -637,11 +823,12 @@ async fn missing_response_parameter_is_rejected_before_decryption() {
 
     let got = post_raw(&lab, &request, FORM_CONTENT_TYPE, body).await;
     assert_rejected_before_decryption(&lab, id, got, StatusCode::BAD_REQUEST).await;
+    lab.shutdown().await;
 }
 
 /// Upstream's parser also refuses this body (serde `duplicate field`), so either way nothing
 /// reaches the decrypter; the endpoint's explicit count keeps that independent of upstream.
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn duplicated_response_parameter_is_rejected_before_decryption() {
     let lab = start_lab().await;
     let (id, request) = issue_request(&lab).await;
@@ -651,6 +838,7 @@ async fn duplicated_response_parameter_is_rejected_before_decryption() {
 
     let got = post_raw(&lab, &request, FORM_CONTENT_TYPE, body).await;
     assert_rejected_before_decryption(&lab, id, got, StatusCode::BAD_REQUEST).await;
+    lab.shutdown().await;
 }
 
 /// Characterizes upstream behaviour (openid4vp@c57a8958); it does not assert what a hardened
@@ -659,9 +847,10 @@ async fn duplicated_response_parameter_is_rejected_before_decryption() {
 /// Observed: replaying the byte-identical `response=<jwe>` POST after a successful submission
 /// is processed again. `Verifier::verify_response` is get_session -> validator -> update_status
 /// with no check of the current status and no atomic claim, so the second POST returns 200,
-/// the validator decrypts the same JWE a second time, and the session is overwritten with
-/// `Complete(Success)` again. Replay protection is left entirely to the integrator.
-#[tokio::test]
+/// the validator decrypts the same JWE a second time, and the stored outcome is overwritten:
+/// `Complete(Success)` now carries the replay's attempt number (2) instead of the original (1).
+/// Replay protection is left entirely to the integrator.
+#[tokio::test(flavor = "current_thread")]
 async fn characterize_upstream_verify_response_reprocesses_replayed_jwe() {
     let lab = start_lab().await;
     let (id, request) = issue_request(&lab).await;
@@ -676,21 +865,26 @@ async fn characterize_upstream_verify_response_reprocesses_replayed_jwe() {
         )
         .await
         .expect("first submission accepted");
-    assert!(matches!(
-        lab.status(id).await,
-        Status::Complete(Outcome::Success { .. })
-    ));
+    assert_eq!(
+        success_attempt(&lab, id).await,
+        1,
+        "original outcome stored"
+    );
 
     // Same bytes the wallet sent, replayed by anyone who captured the POST.
     let replay = post_raw(&lab, &request, FORM_CONTENT_TYPE, jwe_form_body(&jwe)).await;
 
     assert_eq!(replay, StatusCode::OK, "upstream accepts the replay");
-    assert!(matches!(
-        lab.status(id).await,
-        Status::Complete(Outcome::Success { .. })
-    ));
-    let observations = lab.observations();
-    assert_eq!(observations.decrypt_attempts, 2, "validator ran again");
-    assert_eq!(observations.decrypted.len(), 2);
-    assert!(observations.decrypted.iter().all(|d| d.jwe == jwe));
+    assert_eq!(
+        success_attempt(&lab, id).await,
+        2,
+        "session outcome overwritten by the replay"
+    );
+    {
+        let observations = lab.observations();
+        assert_eq!(observations.decrypt_attempts, 2, "validator ran again");
+        assert_eq!(observations.decrypted.len(), 2);
+        assert!(observations.decrypted.iter().all(|d| d.jwe == jwe));
+    }
+    lab.shutdown().await;
 }
