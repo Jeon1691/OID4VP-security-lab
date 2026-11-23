@@ -158,3 +158,23 @@ fn rfc9180_first_encryption_rejects_wrong_info_aad_or_ciphertext() {
         );
     }
 }
+
+/// The codec path is single-shot by design: draft-22 §3 defines Integrated Encryption as the
+/// RFC 9180 §6.1 single-shot API, which always uses sequence number 0. A later vector
+/// encryption therefore cannot open through `open_base` (its nonce is base_nonce XOR seq);
+/// sequences 1..=256 are covered through the `hpke` context in
+/// `rfc9180_base_p256_opens_all_vector_encryptions_in_sequence` (review L5).
+#[test]
+fn rfc9180_later_sequence_numbers_do_not_open_single_shot() {
+    let v = rfc9180_vector();
+    let sk = RecipientPrivateKey::derive_from_ikm(&hex_field(&v, "ikmR"));
+    let (enc, info) = (hex_field(&v, "enc"), hex_field(&v, "info"));
+    for seq in [1, 2, 255, 256] {
+        let e = &v["encryptions"][seq];
+        assert_eq!(
+            jose_hpke::open_base(&sk, &enc, &info, &hex_field(e, "aad"), &hex_field(e, "ct")),
+            Err(jose_hpke::Error::Decryption),
+            "sequence {seq}"
+        );
+    }
+}
