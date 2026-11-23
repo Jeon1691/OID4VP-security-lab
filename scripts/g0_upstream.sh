@@ -16,10 +16,14 @@ mkdir -p "$OUT"
 LOG="$OUT/upstream_ci_local.log"
 : >"$LOG"
 
+# Initialise in place rather than `git clone`: CI restores a build cache into
+# $SRC/target before this runs, and clone refuses a non-empty directory.
 if [[ ! -d "$SRC/.git" ]]; then
-  git clone --quiet "$SPRUCE_REPO" "$SRC"
+  mkdir -p "$SRC"
+  git -C "$SRC" init --quiet
+  git -C "$SRC" remote add origin "$SPRUCE_REPO"
 fi
-git -C "$SRC" fetch --quiet origin "$SPRUCE_SHA"
+git -C "$SRC" fetch --quiet --depth 1 origin "$SPRUCE_SHA"
 git -C "$SRC" checkout --quiet --detach "$SPRUCE_SHA"
 actual="$(git -C "$SRC" rev-parse HEAD)"
 [[ "$actual" == "$SPRUCE_SHA" ]] || { echo "pinned SHA mismatch: $actual" >&2; exit 1; }
