@@ -10,12 +10,17 @@ publish.workspace = true
 
 [dev-dependencies]
 anyhow = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
 base64 = { workspace = true }
+form_urlencoded = { workspace = true }
+josekit = { workspace = true }
 openid4vp = { workspace = true }
 p256-spruce = { workspace = true }
+reqwest = { workspace = true }
 serde_json = { workspace = true }
 ssi = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
 uuid = { workspace = true }
 
 [lints]

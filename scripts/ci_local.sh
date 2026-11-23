@@ -49,6 +49,12 @@ REQUIRED_TESTS=(
   non_ascii_values_are_rejected
   accepted_session_info_values_are_all_below_0x80
   unknown_response_mode_is_rejected
+  ecdh_es_direct_post_jwt_round_trip_completes_with_success
+  tampered_jwe_ciphertext_is_not_accepted
+  non_form_content_type_is_rejected_before_decryption
+  missing_response_parameter_is_rejected_before_decryption
+  duplicated_response_parameter_is_rejected_before_decryption
+  characterize_upstream_verify_response_reprocesses_replayed_jwe
 )
 
 stage_test() {

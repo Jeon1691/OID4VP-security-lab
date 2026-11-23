@@ -27,9 +27,19 @@ openid4vp = { git = "https://github.com/spruceid/openid4vp", rev = "c57a895884d0
 ssi = { version = "0.16", features = ["secp256r1"] }
 p256-spruce = { package = "p256", version = "0.13.2", features = ["jwk"] }
 uuid = { version = "1.29.3", features = ["v4"] }
+# Same git source/rev as openid4vp's own josekit, so the lab decrypts with the JWE code SpruceID
+# encrypts with (ECDH-ES only). Used by the G0-D verifier-side decryption.
+josekit = { git = "https://github.com/cobward/josekit-rs", rev = "635c8a7" }
+# Same 0.12 line openid4vp already pulls in (no new crates). Tests build their own client so
+# they can force `no_proxy` and keep every request on loopback.
+reqwest = { version = "0.12.28", default-features = false }
+# Required to implement openid4vp's `#[async_trait]` traits (Wallet, RequestVerifier, ...).
+async-trait = "0.1.92"
 
 anyhow = "1.0.105"
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
 base64 = "0.22"
+form_urlencoded = "1.2.3"
 serde_json = "1.0.154"
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 thiserror = "2.0.21"
@@ -41,7 +51,7 @@ thiserror = "2.0.21"
 #                  # HPKE-0 = DHKEM(P-256, HKDF-SHA256) + HKDF-SHA256 + AES-128-GCM. Defaults pull
 #                  # X25519/ML-KEM/ChaCha, which HPKE-0 does not need. Uses p256 0.14 (openid4vp: 0.13).
 #                  serde = { version = "1.0.229", features = ["derive"] }
-#   S2 lab-server: axum = "0.8.9", tower = "0.5", tracing = "0.1.44", url = "2.5.9"
+#   S2 lab-server: tower = "0.5", tracing = "0.1.44", url = "2.5.9"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
