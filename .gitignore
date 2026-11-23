@@ -5,3 +5,6 @@
 .omc/*
 !.omc/skills/
 .DS_Store
+# Local / CI evidence scratch output (committed evidence lives in evidence/g0).
+/ci-evidence/
+/evidence/local/

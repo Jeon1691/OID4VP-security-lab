@@ -15,7 +15,7 @@ exclude = ["upstream"]
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.100"
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 publish = false
 
 # Shared version pins. A crate opts in with `dep = { workspace = true }`; cargo warns on unused

@@ -1,0 +1,46 @@
+# Scheduled supply-chain scan (Notion 04 · CI §3 security.yml).
+# New RustSec advisories are published without any code change, so the PR gate alone would not
+# notice them; this re-runs the supply-chain stage against the current main daily.
+name: security
+
+on:
+  schedule:
+    # Daily, off the hour to avoid the top-of-hour scheduling backlog.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+  EVIDENCE_DIR: ci-evidence
+  # Scheduled scans keep a month of history for trend comparison.
+  EVIDENCE_RETENTION_DAYS: 30
+  CARGO_DENY: cargo-deny@0.20.2
+  CARGO_AUDIT: cargo-audit@0.23.0
+
+jobs:
+  advisories:
+    name: advisories
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install && rustc -Vv
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: ${{ env.CARGO_DENY }},${{ env.CARGO_AUDIT }}
+      - run: scripts/ci_local.sh "$EVIDENCE_DIR" supply-chain
+      - if: always()
+        run: scripts/evidence_manifest.sh "$EVIDENCE_DIR"
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: evidence-security-scan
+          path: ${{ env.EVIDENCE_DIR }}
+          retention-days: ${{ env.EVIDENCE_RETENTION_DAYS }}
+          if-no-files-found: error

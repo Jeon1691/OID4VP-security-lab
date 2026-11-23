@@ -15,7 +15,8 @@ evidence.
 | `crates/jose-hpke` | JOSE HPKE-0 integrated encryption + Session Info (IMP-004..006) |
 | `crates/session-core` | Session resolution strategies, atomic registry (IMP-007/011/012) |
 | `crates/lab-server` | axum server, SpruceID adapter, wallet simulator; G0-C API smoke test |
-| `scripts/` | Local CI gate, upstream reproduction, evidence manifest |
+| `scripts/` | Gate stages (shared by local and CI), upstream reproduction, evidence manifest |
+| `.github/workflows/` | `ci.yml` PR/main gate, `security.yml` daily advisory scan |
 | `evidence/g0/` | G0 run logs, upstream lockfile, advisory baseline, manifest |
 | `upstream/` | Pinned SpruceID checkout (git-ignored, recreated by `make g0-upstream`) |
 
@@ -31,13 +32,31 @@ evidence-report are split out after G0/G1.
 ## Usage
 
 ```bash
-make tools        # cargo-deny, cargo-audit, cargo-machete
+make tools        # cargo-deny, cargo-audit, cargo-machete (+ shellcheck, actionlint check)
 make test
-make gate         # fmt, clippy -D warnings, build, test, doctest, deny, audit, machete
+make gate         # all CI stages: quality, test, supply-chain
 make g0           # upstream reproduction + lab gate + manifest into evidence/g0
 ```
 
 The gate fails if zero tests ran. Logs are stripped of absolute paths before they are stored.
+
+## CI
+
+`ci.yml` runs on every PR and on pushes to `main`. Each job runs one stage of
+`scripts/ci_local.sh`, the same script `make gate` uses:
+
+| Job | Stage |
+| --- | --- |
+| `rust-quality` | fmt, clippy `-D warnings`, machete, shellcheck, actionlint |
+| `unit` | build, test, doctest, required G0 tests, non-zero test count |
+| `supply-chain` | cargo-deny, advisory baseline sync, core containment, cargo-audit |
+| `g0-upstream` | SpruceID CI reproduction at the pinned SHA (main / manual only) |
+| `ci-gate` | Single required check: fails unless every gate job's result is `success` |
+
+Each job uploads its logs and `manifest.json` as an `evidence-*` artifact (kept 14 days).
+`security.yml` re-runs the supply-chain stage daily, because new advisories are published
+without any code change. Actions are pinned to commit SHAs, the token is `contents: read`, and
+`pull_request_target` is not used.
 
 ## Supply-chain baseline
 
@@ -52,6 +71,14 @@ The gate step `core_containment` checks the resolved graph of `jose-hpke`, `sess
 `rsa`, or a crate in the baseline) shows up there, directly or transitively. `deny.toml [bans]`
 additionally rejects direct `openid4vp`/`ssi` dependencies outside `lab-server`. The HPKE-0 path
 (`hpke` 0.15 → `p256` 0.14 → `crypto-bigint` 0.7) has no advisories.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).
+
+`crates/lab-server/tests/fixtures/spruce_verifier.jwk` is a synthetic test key copied unchanged
+from [spruceid/openid4vp](https://github.com/spruceid/openid4vp) (MIT OR Apache-2.0). It is
+used here under Apache-2.0.
 
 ## Policy
 

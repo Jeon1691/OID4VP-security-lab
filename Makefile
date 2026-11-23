@@ -10,7 +10,7 @@ check:
 test:
 	cargo test --workspace --all-features --locked
 
-## Full local PR gate (fmt, clippy, build, test, doctest, deny, audit, machete)
+## Full PR gate, same stages as CI (quality, test, supply-chain)
 gate:
 	scripts/ci_local.sh $(EVIDENCE)
 
@@ -30,4 +30,6 @@ g0:
 ## One-time developer tool install (versions recorded in the manifest)
 tools:
 	rustup show active-toolchain
-	cargo install --locked cargo-deny cargo-audit cargo-machete
+	cargo install --locked cargo-deny@0.20.2 cargo-audit@0.23.0 cargo-machete@0.10.1
+	@command -v shellcheck >/dev/null || echo 'install shellcheck 0.11.0 (e.g. brew install shellcheck)'
+	@command -v actionlint >/dev/null || echo 'install actionlint 1.7.12 (e.g. brew install actionlint)'
