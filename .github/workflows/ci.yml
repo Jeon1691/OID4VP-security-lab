@@ -28,8 +28,11 @@ env:
   CARGO_DENY: cargo-deny@0.20.2
   CARGO_AUDIT: cargo-audit@0.23.0
   CARGO_MACHETE: cargo-machete@0.10.1
-  ACTIONLINT: actionlint@1.7.12
   SHELLCHECK: shellcheck@0.11.0
+  # actionlint is not packaged by install-action; fetch the official release and verify it
+  # against the SHA-256 published in actionlint_1.7.12_checksums.txt.
+  ACTIONLINT_VERSION: 1.7.12
+  ACTIONLINT_LINUX_AMD64_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
 
 jobs:
   quality:
@@ -45,7 +48,18 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:
-          tool: ${{ env.CARGO_MACHETE }},${{ env.ACTIONLINT }},${{ env.SHELLCHECK }}
+          tool: ${{ env.CARGO_MACHETE }},${{ env.SHELLCHECK }}
+      - name: Install actionlint (checksum-verified release)
+        run: |
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSLo "$RUNNER_TEMP/$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$archive"
+          echo "${ACTIONLINT_LINUX_AMD64_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 "$RUNNER_TEMP/actionlint" "$HOME/.local/bin/actionlint"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/actionlint" -version
       - run: scripts/ci_local.sh "$EVIDENCE_DIR" quality
       - if: always()
         run: scripts/evidence_manifest.sh "$EVIDENCE_DIR"
