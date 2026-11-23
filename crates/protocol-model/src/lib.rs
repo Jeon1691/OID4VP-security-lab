@@ -37,9 +37,9 @@
 use std::fmt;
 use std::str::FromStr;
 
-/// Wire string of [`ResponseMode::DirectPostJwt`] (OpenID4VP 1.1 §8.3.2).
+/// Wire string of [`EncryptedResponseMode::DirectPostJwt`] (OpenID4VP 1.1 §8.3.2).
 const DIRECT_POST_JWT: &str = "direct_post.jwt";
-/// Wire string of [`ResponseMode::DcApiJwt`] (OpenID4VP 1.1 §8.3).
+/// Wire string of [`EncryptedResponseMode::DcApiJwt`] (OpenID4VP 1.1 §8.3).
 const DC_API_JWT: &str = "dc_api.jwt";
 /// Prefix that §8.3.1 forbids on the `origin` used in `session_info`.
 const ORIGIN_AUDIENCE_PREFIX: &str = "origin:";
@@ -89,11 +89,16 @@ fn check_no_control(field: &'static str, s: &str, allow_space: bool) -> Result<(
 
 /// Validation for fields fed to `ASCII(...)` in §8.3.1: non-empty, ASCII, no controls/spaces.
 fn check_session_info_field(field: &'static str, s: &str) -> Result<(), ModelError> {
+    check_ascii_visible(field, s, false)
+}
+
+/// Non-empty, ASCII-only, no control characters, and spaces only when `allow_space`.
+fn check_ascii_visible(field: &'static str, s: &str, allow_space: bool) -> Result<(), ModelError> {
     check_non_empty(field, s)?;
     if !s.is_ascii() {
         return Err(ModelError::NotAscii { field });
     }
-    check_no_control(field, s, false)
+    check_no_control(field, s, allow_space)
 }
 
 /// Defines a wire-string newtype with `as_str`, `as_bytes`, `Display` and `AsRef<str>`.
@@ -139,15 +144,19 @@ macro_rules! wire_newtype {
 
 wire_newtype!(
     /// `client_id` exactly as passed in the Authorization Request, including any client
-    /// identifier prefix (§8.3.1). ASCII, no control characters or spaces.
+    /// identifier prefix (§8.3.1). Visible ASCII (`%x20-7E`, RFC 6749 App. A.1
+    /// `client-id = *VSCHAR`), so a space is allowed here but control characters are not.
+    ///
+    /// Non-ASCII client IDs (possible in principle, e.g. from a JWT `sub`) are rejected as a
+    /// deliberate deviation: §8.3.1 defines the encoding only as `ASCII(...)`.
     ClientIdWire
 );
 impl ClientIdWire {
     /// # Errors
-    /// Empty, non-ASCII, or containing control characters/spaces.
+    /// Empty, non-ASCII, or containing control characters.
     pub fn new(value: impl Into<String>) -> Result<Self, ModelError> {
         let value = value.into();
-        check_session_info_field("client_id", &value)?;
+        check_ascii_visible("client_id", &value, true)?;
         Ok(Self(value))
     }
 }
@@ -176,6 +185,9 @@ impl NonceWire {
 wire_newtype!(
     /// `response_uri` exactly as signed (no trailing-slash, case or percent-encoding changes).
     /// Not parsed as a URL; only the `ASCII(...)` constraints of §8.3.1 are enforced.
+    ///
+    /// §8.3.1 also allows the `redirect_uri` request parameter for other response modes; this
+    /// type is for the `response_uri` of `direct_post.jwt`.
     ResponseUriWire
 );
 impl ResponseUriWire {
@@ -207,33 +219,31 @@ impl OriginWire {
 }
 
 wire_newtype!(
-    /// Lab-internal session identifier. Not part of `session_info`, so only non-empty and free
-    /// of control characters.
+    /// Lab-internal session identifier. Not part of `session_info`; non-empty visible ASCII
+    /// (`%x21-7E`) so bidi or zero-width characters cannot spoof evidence logs.
     SessionId
 );
 impl SessionId {
     /// # Errors
-    /// Empty or containing control characters.
+    /// Empty, non-ASCII, or containing control characters/spaces.
     pub fn new(value: impl Into<String>) -> Result<Self, ModelError> {
         let value = value.into();
-        check_non_empty("session_id", &value)?;
-        check_no_control("session_id", &value, true)?;
+        check_ascii_visible("session_id", &value, false)?;
         Ok(Self(value))
     }
 }
 
 wire_newtype!(
-    /// Key identifier (`kid`). Not part of `session_info`, so only non-empty and free of
-    /// control characters.
+    /// Key identifier (`kid`). Not part of `session_info`; non-empty visible ASCII (`%x21-7E`)
+    /// so bidi or zero-width characters cannot spoof evidence logs.
     KeyId
 );
 impl KeyId {
     /// # Errors
-    /// Empty or containing control characters.
+    /// Empty, non-ASCII, or containing control characters/spaces.
     pub fn new(value: impl Into<String>) -> Result<Self, ModelError> {
         let value = value.into();
-        check_non_empty("key_id", &value)?;
-        check_no_control("key_id", &value, true)?;
+        check_ascii_visible("key_id", &value, false)?;
         Ok(Self(value))
     }
 }
@@ -247,16 +257,17 @@ pub enum ProtocolVersion {
     Vp11,
 }
 
-/// Response modes that use encrypted responses with HPKE `session_info`.
+/// The encrypted response modes that use HPKE `session_info` (§8.3.1). Plain `direct_post` and
+/// `dc_api` are valid OpenID4VP modes but intentionally not representable here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ResponseMode {
+pub enum EncryptedResponseMode {
     /// `direct_post.jwt`.
     DirectPostJwt,
     /// `dc_api.jwt`.
     DcApiJwt,
 }
 
-impl ResponseMode {
+impl EncryptedResponseMode {
     /// The wire string of this mode.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -267,7 +278,7 @@ impl ResponseMode {
     }
 }
 
-impl FromStr for ResponseMode {
+impl FromStr for EncryptedResponseMode {
     type Err = ModelError;
 
     /// Exact, case-sensitive match; anything else is an error.
@@ -280,7 +291,7 @@ impl FromStr for ResponseMode {
     }
 }
 
-impl fmt::Display for ResponseMode {
+impl fmt::Display for EncryptedResponseMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
@@ -288,18 +299,19 @@ impl fmt::Display for ResponseMode {
 
 /// The signed-request values that feed HPKE `session_info`, per response mode. Each variant
 /// holds exactly the fields its §8.3.1 formula uses, so a mode/field mismatch cannot be built.
+///
+/// `session_info` exists only in OpenID4VP 1.1, so this type is 1.1-only and carries no
+/// [`ProtocolVersion`]; that type is for reporting 1.0 (ECDH-ES) versus 1.1 (HPKE) elsewhere.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestBinding {
     /// `direct_post.jwt`: `client_id`, `nonce`, `response_uri`.
     DirectPostJwt {
-        version: ProtocolVersion,
         client_id: ClientIdWire,
         nonce: NonceWire,
         response_uri: ResponseUriWire,
     },
     /// `dc_api.jwt`: `origin`, `nonce`.
     DcApiJwt {
-        version: ProtocolVersion,
         origin: OriginWire,
         nonce: NonceWire,
     },
@@ -308,18 +320,10 @@ pub enum RequestBinding {
 impl RequestBinding {
     /// The response mode implied by the variant.
     #[must_use]
-    pub const fn mode(&self) -> ResponseMode {
+    pub const fn mode(&self) -> EncryptedResponseMode {
         match self {
-            Self::DirectPostJwt { .. } => ResponseMode::DirectPostJwt,
-            Self::DcApiJwt { .. } => ResponseMode::DcApiJwt,
-        }
-    }
-
-    /// The protocol version.
-    #[must_use]
-    pub const fn version(&self) -> ProtocolVersion {
-        match self {
-            Self::DirectPostJwt { version, .. } | Self::DcApiJwt { version, .. } => *version,
+            Self::DirectPostJwt { .. } => EncryptedResponseMode::DirectPostJwt,
+            Self::DcApiJwt { .. } => EncryptedResponseMode::DcApiJwt,
         }
     }
 

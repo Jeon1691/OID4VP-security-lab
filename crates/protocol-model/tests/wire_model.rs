@@ -55,12 +55,48 @@ fn delimiter_lookalikes_are_rejected() {
 }
 
 #[test]
-fn accepted_values_never_contain_the_delimiter_byte() {
-    let c = ClientIdWire::new("redirect_uri:https://v.example/cb").unwrap();
-    let n = NonceWire::new("n0nce").unwrap();
-    let r = ResponseUriWire::new("https://v.example/cb?x=%FF").unwrap();
-    for bytes in [c.as_bytes(), n.as_bytes(), r.as_bytes()] {
-        assert!(!bytes.contains(&0xFF));
+fn accepted_session_info_values_are_all_below_0x80() {
+    // Every ASCII char, plus samples across the rest of Unicode (incl. U+00FF, bidi, zero-width).
+    let beyond_ascii = (0x80u32..=0x10_FFFF)
+        .step_by(0x101)
+        .chain([0xFF, 0x200B, 0x202E]);
+    let chars = (0u32..0x80).chain(beyond_ascii).filter_map(char::from_u32);
+    for c in chars {
+        let v = format!("a{c}");
+        let accepted = [
+            ClientIdWire::new(v.clone()).map(|x| x.as_bytes().to_vec()),
+            NonceWire::new(v.clone()).map(|x| x.as_bytes().to_vec()),
+            ResponseUriWire::new(v.clone()).map(|x| x.as_bytes().to_vec()),
+            OriginWire::new(v.clone()).map(|x| x.as_bytes().to_vec()),
+            SessionId::new(v.clone()).map(|x| x.as_bytes().to_vec()),
+            KeyId::new(v).map(|x| x.as_bytes().to_vec()),
+        ];
+        for bytes in accepted.into_iter().flatten() {
+            assert!(
+                bytes.iter().all(|b| *b < 0x80),
+                "accepted U+{:04X}",
+                c as u32
+            );
+            assert!(!bytes.contains(&0xFF));
+        }
+    }
+}
+
+#[test]
+fn only_client_id_allows_space() {
+    assert!(ClientIdWire::new("a b").is_ok());
+    assert!(ResponseUriWire::new("https://v.example/a b").is_err());
+    assert!(OriginWire::new("https://v.example b").is_err());
+    assert!(NonceWire::new("a b").is_err());
+    assert!(SessionId::new("a b").is_err());
+    assert!(KeyId::new("a b").is_err());
+}
+
+#[test]
+fn bidi_and_zero_width_in_identifiers_are_rejected() {
+    for bad in ["a\u{202E}b", "a\u{200B}b"] {
+        assert!(SessionId::new(bad).is_err());
+        assert!(KeyId::new(bad).is_err());
     }
 }
 
@@ -95,7 +131,7 @@ fn empty_values_are_rejected() {
 
 #[test]
 fn control_characters_and_spaces_are_rejected() {
-    for bad in ["a\nb", "a\0b", "a\x7fb", "a b", "a\tb"] {
+    for bad in ["a\nb", "a\0b", "a\x7fb", "a\tb"] {
         assert!(matches!(
             ClientIdWire::new(bad),
             Err(ModelError::ControlCharacter { .. })
@@ -105,8 +141,6 @@ fn control_characters_and_spaces_are_rejected() {
     }
     assert!(SessionId::new("a\nb").is_err());
     assert!(KeyId::new("a\0b").is_err());
-    // Spaces are tolerated in lab identifiers that never reach session_info.
-    assert!(KeyId::new("my key").is_ok());
 }
 
 #[test]
@@ -122,7 +156,7 @@ fn origin_prefix_is_rejected() {
         OriginWire::new("origin:https://example.com"),
         Err(ModelError::OriginPrefix)
     );
-    assert!(OriginWire::new("https://example.com/origin:x").is_ok());
+    assert!(OriginWire::new("https://origin.example").is_ok());
 }
 
 #[test]
@@ -136,36 +170,38 @@ fn unknown_response_mode_is_rejected() {
         " dc_api.jwt",
     ] {
         assert_eq!(
-            bad.parse::<ResponseMode>(),
+            bad.parse::<EncryptedResponseMode>(),
             Err(ModelError::UnknownResponseMode),
             "{bad}"
         );
     }
-    assert_eq!("direct_post.jwt".parse(), Ok(ResponseMode::DirectPostJwt));
-    assert_eq!("dc_api.jwt".parse(), Ok(ResponseMode::DcApiJwt));
-    assert_eq!(ResponseMode::DirectPostJwt.as_str(), "direct_post.jwt");
-    assert_eq!(ResponseMode::DcApiJwt.to_string(), "dc_api.jwt");
+    assert_eq!(
+        "direct_post.jwt".parse(),
+        Ok(EncryptedResponseMode::DirectPostJwt)
+    );
+    assert_eq!("dc_api.jwt".parse(), Ok(EncryptedResponseMode::DcApiJwt));
+    assert_eq!(
+        EncryptedResponseMode::DirectPostJwt.as_str(),
+        "direct_post.jwt"
+    );
+    assert_eq!(EncryptedResponseMode::DcApiJwt.to_string(), "dc_api.jwt");
 }
 
 #[test]
-fn binding_mode_always_matches_variant() {
+fn binding_variants_report_their_mode_and_nonce() {
     let nonce = NonceWire::new("n1").unwrap();
     let dp = RequestBinding::DirectPostJwt {
-        version: ProtocolVersion::Vp11,
         client_id: ClientIdWire::new("redirect_uri:https://v.example/cb").unwrap(),
         nonce: nonce.clone(),
         response_uri: ResponseUriWire::new("https://v.example/cb/").unwrap(),
     };
-    assert_eq!(dp.mode(), ResponseMode::DirectPostJwt);
-    assert_eq!(dp.version(), ProtocolVersion::Vp11);
+    assert_eq!(dp.mode(), EncryptedResponseMode::DirectPostJwt);
     assert_eq!(dp.nonce(), &nonce);
 
     let dc = RequestBinding::DcApiJwt {
-        version: ProtocolVersion::Vp10,
-        origin: OriginWire::new("https://example.com").unwrap(),
+        origin: OriginWire::new("https://origin.example").unwrap(),
         nonce: nonce.clone(),
     };
-    assert_eq!(dc.mode(), ResponseMode::DcApiJwt);
-    assert_eq!(dc.version(), ProtocolVersion::Vp10);
+    assert_eq!(dc.mode(), EncryptedResponseMode::DcApiJwt);
     assert_eq!(dc.nonce(), &nonce);
 }
