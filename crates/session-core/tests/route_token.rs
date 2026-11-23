@@ -25,7 +25,12 @@ fn route_tokens_are_distinct_and_round_trip() {
         assert_eq!(RouteToken::parse(&segment), Ok(token.clone()));
         assert!(seen.insert(segment), "duplicate route token");
     }
-    assert!(ROUTE_TOKEN_BYTES * 8 >= 128);
+    const {
+        assert!(
+            ROUTE_TOKEN_BYTES * 8 >= 128,
+            "task floor: at least 128 bits"
+        )
+    };
 }
 
 #[test]
