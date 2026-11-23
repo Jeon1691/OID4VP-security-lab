@@ -80,6 +80,21 @@ REQUIRED_TESTS=(
   direct_post_bound_jwe_fails_with_any_single_field_changed
   dc_api_bound_jwe_fails_with_any_single_field_changed
   direct_post_and_dc_api_session_info_never_cross_open
+  # session-core (IMP-007/011/012): strategies, exactly-once claim, state machine.
+  unique_uri_yields_exactly_one_candidate_among_sessions_sharing_kid
+  unique_kid_yields_exactly_one_candidate_among_sessions_sharing_route
+  bounded_trial_returns_all_candidates_within_budget
+  bounded_trial_rejects_more_candidates_than_budget
+  expired_sessions_are_never_candidates
+  consumed_sessions_are_never_candidates
+  unknown_route_token_or_kid_yields_no_candidate
+  route_token_debug_does_not_reveal_the_token
+  concurrent_claims_of_one_session_commit_exactly_once
+  concurrent_async_claims_commit_exactly_once
+  sequential_replay_after_consume_is_rejected
+  claim_after_expiry_is_rejected
+  failed_attempt_leaves_session_pending_and_claimable
+  at_most_one_successful_commit_per_session
 )
 
 stage_test() {
