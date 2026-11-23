@@ -32,6 +32,7 @@ anyhow = "1.0.105"
 base64 = "0.22"
 serde_json = "1.0.154"
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+thiserror = "2.0.21"
 
 # Vetted for upcoming sprints (compile-probed on rustc 1.100.0, 2026-11-23); move into the table
 # above when a crate first uses them.
@@ -39,7 +40,7 @@ tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "sync", "
 #                          features = ["alloc", "nistp", "aes", "hkdfsha2"] }
 #                  # HPKE-0 = DHKEM(P-256, HKDF-SHA256) + HKDF-SHA256 + AES-128-GCM. Defaults pull
 #                  # X25519/ML-KEM/ChaCha, which HPKE-0 does not need. Uses p256 0.14 (openid4vp: 0.13).
-#                  thiserror = "2.0.21", serde = { version = "1.0.229", features = ["derive"] }
+#                  serde = { version = "1.0.229", features = ["derive"] }
 #   S2 lab-server: axum = "0.8.9", tower = "0.5", tracing = "0.1.44", url = "2.5.9"
 
 [workspace.lints.rust]
