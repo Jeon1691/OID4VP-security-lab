@@ -8,6 +8,9 @@ mod common;
 use common::{fresh_key, hex, rng};
 use jose_hpke::test_support::seal_compact;
 use jose_hpke::{Error, RecipientPrivateKey, SessionInfo, open_compact};
+use protocol_model::{
+    ClientIdWire, ModelError, NonceWire, OriginWire, RequestBinding, ResponseUriWire,
+};
 
 const EXAMPLE_CLIENT_ID: &str = "x509_san_dns:example.com";
 const EXAMPLE_NONCE: &str = "exc7gBkxjx1rdc9udRrveKvSsJIq80avlXeLHhGwqtA";
@@ -21,12 +24,38 @@ const DC_API_EXAMPLE_HEX: &str = "4f70656e494434565044434150492d7369ff6874747073
 
 const PLAINTEXT: &[u8] = br#"{"vp_token":{"cred":["synthetic"]}}"#;
 
+fn direct_post_binding(client_id: &str, nonce: &str, response_uri: &str) -> RequestBinding {
+    RequestBinding::DirectPostJwt {
+        client_id: ClientIdWire::new(client_id).expect("client_id"),
+        nonce: NonceWire::new(nonce).expect("nonce"),
+        response_uri: ResponseUriWire::new(response_uri).expect("response_uri"),
+    }
+}
+
+fn dc_api_binding(origin: &str, nonce: &str) -> RequestBinding {
+    RequestBinding::DcApiJwt {
+        origin: OriginWire::new(origin).expect("origin"),
+        nonce: NonceWire::new(nonce).expect("nonce"),
+    }
+}
+
 fn direct_post(client_id: &str, nonce: &str, response_uri: &str) -> SessionInfo {
-    SessionInfo::direct_post_jwt(client_id, nonce, response_uri).expect("direct_post.jwt info")
+    let RequestBinding::DirectPostJwt {
+        client_id,
+        nonce,
+        response_uri,
+    } = direct_post_binding(client_id, nonce, response_uri)
+    else {
+        unreachable!("direct_post_binding builds DirectPostJwt")
+    };
+    SessionInfo::direct_post_jwt(&client_id, &nonce, &response_uri)
 }
 
 fn dc_api(origin: &str, nonce: &str) -> SessionInfo {
-    SessionInfo::dc_api_jwt(origin, nonce).expect("dc_api.jwt info")
+    let RequestBinding::DcApiJwt { origin, nonce } = dc_api_binding(origin, nonce) else {
+        unreachable!("dc_api_binding builds DcApiJwt")
+    };
+    SessionInfo::dc_api_jwt(&origin, &nonce)
 }
 
 fn sealed_for(info: &SessionInfo) -> (RecipientPrivateKey, String) {
@@ -57,47 +86,74 @@ fn dc_api_session_info_matches_openid4vp_example() {
 }
 
 #[test]
-fn session_info_encodes_empty_fields_without_dropping_separators() {
+fn from_binding_matches_openid4vp_examples() {
+    let dp = direct_post_binding(EXAMPLE_CLIENT_ID, EXAMPLE_NONCE, EXAMPLE_RESPONSE_URI);
     assert_eq!(
-        direct_post("", "", "").as_bytes(),
-        b"OpenID4VP-si\xff\xff\xff"
+        SessionInfo::from_binding(&dp).as_bytes(),
+        hex(DIRECT_POST_EXAMPLE_HEX).as_slice()
     );
-    assert_eq!(dc_api("", "").as_bytes(), b"OpenID4VPDCAPI-si\xff\xff");
-}
-
-#[test]
-fn session_info_rejects_non_ascii_fields() {
-    let bad = "caf\u{00e9}";
+    let dc = dc_api_binding(EXAMPLE_ORIGIN, EXAMPLE_NONCE);
     assert_eq!(
-        SessionInfo::direct_post_jwt(bad, "n", "https://v"),
-        Err(Error::SessionInfoNotAscii { field: "client_id" })
-    );
-    assert_eq!(
-        SessionInfo::direct_post_jwt("c", bad, "https://v"),
-        Err(Error::SessionInfoNotAscii { field: "nonce" })
-    );
-    assert_eq!(
-        SessionInfo::direct_post_jwt("c", "n", "https://v/\u{2603}"),
-        Err(Error::SessionInfoNotAscii {
-            field: "response_uri"
-        })
-    );
-    assert_eq!(
-        SessionInfo::dc_api_jwt("https://b\u{00fc}cher.example", "n"),
-        Err(Error::SessionInfoNotAscii { field: "origin" })
-    );
-    assert_eq!(
-        SessionInfo::dc_api_jwt("o", bad),
-        Err(Error::SessionInfoNotAscii { field: "nonce" })
+        SessionInfo::from_binding(&dc).as_bytes(),
+        hex(DC_API_EXAMPLE_HEX).as_slice()
     );
 }
 
+/// Session Info takes only validated `protocol-model` wire types, so values that §8.3.1 /
+/// §5.2 do not allow (empty, non-ASCII, control characters, nonce outside `A-Za-z0-9-._~`,
+/// `origin:` prefix) cannot reach the encoder at all.
 #[test]
-fn dc_api_session_info_rejects_origin_prefix() {
+fn invalid_session_info_inputs_cannot_be_constructed() {
+    let empty = |field| ModelError::Empty { field };
+    assert_eq!(ClientIdWire::new("").err(), Some(empty("client_id")));
+    assert_eq!(NonceWire::new("").err(), Some(empty("nonce")));
+    assert_eq!(ResponseUriWire::new("").err(), Some(empty("response_uri")));
+    assert_eq!(OriginWire::new("").err(), Some(empty("origin")));
+
+    assert!(ClientIdWire::new("caf\u{00e9}").is_err());
+    assert!(ClientIdWire::new("x509_san_dns:example.com\u{0}").is_err());
+    assert!(ClientIdWire::new("a\u{202e}b").is_err());
+    for nonce in [
+        "caf\u{00e9}",
+        "a b",
+        "a\tb",
+        "a\u{0}b",
+        "a/b",
+        "a+b",
+        "a=b",
+        "a\u{ff}",
+    ] {
+        assert!(NonceWire::new(nonce).is_err(), "{nonce:?}");
+    }
+    assert!(ResponseUriWire::new("https://v/\u{2603}").is_err());
+    assert!(ResponseUriWire::new("https://v/ r").is_err());
+    assert!(ResponseUriWire::new("https://v/\r\nX: y").is_err());
+    assert!(OriginWire::new("https://b\u{00fc}cher.example").is_err());
     assert_eq!(
-        SessionInfo::dc_api_jwt("origin:https://example.com", EXAMPLE_NONCE),
-        Err(Error::OriginPrefixed)
+        OriginWire::new("origin:https://example.com"),
+        Err(ModelError::OriginPrefix)
     );
+}
+
+/// Every accepted field is ASCII, so the `0xFF` separators are the only bytes >= 0x80 and
+/// the field split is unambiguous.
+#[test]
+fn session_info_separators_are_the_only_high_bytes() {
+    for (si, fields) in [
+        (
+            direct_post(EXAMPLE_CLIENT_ID, EXAMPLE_NONCE, EXAMPLE_RESPONSE_URI),
+            3,
+        ),
+        (dc_api(EXAMPLE_ORIGIN, EXAMPLE_NONCE), 2),
+    ] {
+        let high: Vec<u8> = si
+            .as_bytes()
+            .iter()
+            .copied()
+            .filter(|&b| b >= 0x80)
+            .collect();
+        assert_eq!(high, vec![0xFF; fields]);
+    }
 }
 
 #[test]
@@ -137,7 +193,7 @@ fn direct_post_bound_jwe_fails_with_any_single_field_changed() {
             EXAMPLE_NONCE,
             EXAMPLE_RESPONSE_URI,
         ),
-        // nonce: another session's nonce, one char changed, truncated, empty
+        // nonce: another session's nonce, one char changed, truncated
         direct_post(
             EXAMPLE_CLIENT_ID,
             "fresh-nonce-of-another-session",
@@ -149,7 +205,6 @@ fn direct_post_bound_jwe_fails_with_any_single_field_changed() {
             EXAMPLE_RESPONSE_URI,
         ),
         direct_post(EXAMPLE_CLIENT_ID, &EXAMPLE_NONCE[1..], EXAMPLE_RESPONSE_URI),
-        direct_post(EXAMPLE_CLIENT_ID, "", EXAMPLE_RESPONSE_URI),
         // response_uri: per-session path, trailing slash, scheme, query
         direct_post(
             EXAMPLE_CLIENT_ID,
@@ -205,7 +260,6 @@ fn dc_api_bound_jwe_fails_with_any_single_field_changed() {
         dc_api("http://example.com", EXAMPLE_NONCE),
         dc_api(EXAMPLE_ORIGIN, "fresh-nonce-of-another-session"),
         dc_api(EXAMPLE_ORIGIN, &EXAMPLE_NONCE[1..]),
-        dc_api(EXAMPLE_ORIGIN, ""),
     ];
     for variant in &variants {
         assert_eq!(
@@ -230,7 +284,7 @@ fn direct_post_and_dc_api_session_info_never_cross_open() {
             direct_post(EXAMPLE_CLIENT_ID, EXAMPLE_NONCE, EXAMPLE_ORIGIN),
             dc_api(EXAMPLE_ORIGIN, EXAMPLE_NONCE),
         ),
-        (direct_post("", "", ""), dc_api("", "")),
+        (direct_post("o", "n", "o"), dc_api("o", "n")),
     ];
     for (dp, dc) in &pairs {
         assert_ne!(dp.as_bytes(), dc.as_bytes());

@@ -71,6 +71,8 @@ REQUIRED_TESTS=(
   rejects_non_canonical_trailing_bits
   direct_post_session_info_matches_openid4vp_example
   dc_api_session_info_matches_openid4vp_example
+  from_binding_matches_openid4vp_examples
+  invalid_session_info_inputs_cannot_be_constructed
   direct_post_bound_jwe_fails_with_any_single_field_changed
   dc_api_bound_jwe_fails_with_any_single_field_changed
   direct_post_and_dc_api_session_info_never_cross_open
