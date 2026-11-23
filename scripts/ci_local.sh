@@ -51,6 +51,9 @@ REQUIRED_TESTS=(
   unknown_response_mode_is_rejected
   ecdh_es_direct_post_jwt_round_trip_completes_with_success
   tampered_jwe_ciphertext_is_not_accepted
+  jwe_with_unadvertised_enc_is_rejected
+  jwe_with_wrong_kid_is_rejected
+  jwe_with_zip_header_is_rejected
   non_form_content_type_is_rejected_before_decryption
   missing_response_parameter_is_rejected_before_decryption
   duplicated_response_parameter_is_rejected_before_decryption
