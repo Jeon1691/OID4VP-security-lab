@@ -8,65 +8,63 @@ release: 1.100.0
 LLVM version: 23.1.5
 cargo 1.100.0 (3acc79c0c 2026-11-05)
 ## build: cargo build
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.36s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.66s
 build=pass
 ## test: cargo test --all-features
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.20s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.26s
      Running unittests src/lib.rs (target/debug/build/openid4vp/168a50772945ffd4/out/openid4vp-168a50772945ffd4)
 
 running 116 tests
-test core::authorization_request::parameters::tests::request_uri_method_default_is_get ... ok
 test core::authorization_request::parameters::tests::response_mode_default_is_direct_post ... ok
-test core::authorization_request::parameters::tests::response_mode_parsing ... ok
+test core::authorization_request::parameters::tests::request_uri_method_default_is_get ... ok
 test core::authorization_request::parameters::tests::client_id_no_prefix_is_preregistered ... ok
-test core::authorization_request::parameters::tests::client_id_prefix_verifier_attestation ... ok
-test core::authorization_request::parameters::tests::client_id_prefix_x509_hash ... ok
-test core::authorization_request::parameters::tests::client_id_prefix_openid_federation ... ok
-test core::authorization_request::parameters::tests::client_id_prefix_x509_san_dns ... ok
+test core::authorization_request::parameters::tests::response_mode_parsing ... ok
 test core::authorization_request::parameters::tests::client_id_prefix_origin_reserved ... ok
-test core::authorization_request::parameters::tests::client_id_prefix_redirect_uri ... ok
+test core::authorization_request::parameters::tests::client_id_prefix_x509_san_dns ... ok
 test core::authorization_request::parameters::tests::client_id_prefix_decentralized_identifier ... ok
+test core::authorization_request::parameters::tests::client_id_prefix_openid_federation ... ok
+test core::authorization_request::parameters::tests::client_id_prefix_verifier_attestation ... ok
+test core::authorization_request::parameters::tests::client_id_prefix_redirect_uri ... ok
+test core::authorization_request::parameters::tests::client_id_prefix_x509_hash ... ok
 test core::authorization_request::parameters::tests::request_uri_method_parsing ... ok
-test core::authorization_request::test::validate_request_object_typ_valid ... ok
+test core::authorization_request::test::validate_request_object_typ_missing ... ok
 test core::authorization_request::test::validate_request_object_typ_wrong_value ... ok
 test core::authorization_request::verification::x509::tests::empty_chain_is_rejected ... ok
-test core::authorization_request::test::validate_request_object_typ_missing ... ok
+test core::authorization_request::test::validate_request_object_typ_valid ... ok
 test core::authorization_request::test::validate_request_object_typ_missing_allowed_for_redirect_uri ... ok
 test core::authorization_request::test::validate_request_object_typ_wrong_allowed_for_redirect_uri ... ok
-test core::authorization_request::test::deserialize_authorization_request_object ... ok
 test core::authorization_request::test::deserialize_authorization_request_url ... ok
 test core::authorization_request::test::deserialize_authorization_request_object_jwt ... ok
 test core::authorization_request::test::deserialize_authorization_request_url_with_scheme ... ok
+test core::authorization_request::test::deserialize_authorization_request_object ... ok
 test core::authorization_request::verification::x509::tests::reject_not_authorized_to_sign ... ok
 test core::authorization_request::verification::x509::tests::reject_not_ca ... ok
-test core::authorization_request::verification::x509::tests::postdated_leaf ... ok
-test core::authorization_request::verification::x509::tests::header_missing_alg ... ok
-test core::authorization_request::verification::x509::tests::header_missing_x5c ... ok
-test core::authorization_request::verification::x509::tests::header_rejects_unsupported_alg ... ok
 test core::authorization_request::verification::x509::tests::reject_leaf_without_digital_signature_bit ... ok
+test core::authorization_request::verification::x509::tests::postdated_leaf ... ok
 test core::authorization_request::verification::x509::tests::header_rejects_empty_x5c ... ok
+test core::authorization_request::verification::x509::tests::header_missing_x5c ... ok
 test core::authorization_request::verification::x509::tests::decode_multi_cert_chain ... ok
-test core::authorization_request::verification::x509::tests::reject_dn_mismatch ... ok
+test core::authorization_request::verification::x509::tests::header_missing_alg ... ok
+test core::authorization_request::verification::x509::tests::header_rejects_unsupported_alg ... ok
 test core::authorization_request::verification::x509::tests::reject_exceed_pathlen ... ok
-test core::authorization_request::verification::x509::tests::expired_cert ... ok
+test core::authorization_request::verification::x509::tests::reject_dn_mismatch ... ok
 test core::authorization_request::verification::x509::tests::no_trusted_roots_success_es256 ... ok
-test core::authorization_request::verification::x509::tests::rejects_with_leaf_as_issuer ... ok
-test core::authorization_request::verification::x509::tests::reject_broken_signature ... ok
-test core::credential_format::tests::test_format_covers_both_credentials_and_presentations ... ok
 test core::credential_format::tests::test_credential_format_serialization ... ok
+test core::credential_format::tests::test_format_covers_both_credentials_and_presentations ... ok
 test core::dcql_query::tests::dcql_claims_path_extraction_mdoc ... ok
 test core::dcql_query::tests::dcql_claims_path_extraction_nested ... ok
 test core::dcql_query::tests::dcql_claims_path_extraction_single_element ... ok
 test core::dcql_query::tests::dcql_claims_path_extraction_with_array_index ... ok
 test core::dcql_query::tests::dcql_credential_query_defaults ... ok
-test core::authorization_request::verification::x509::tests::step_issuer_subject_success ... ok
 test core::dcql_query::tests::dcql_credential_set_query_defaults ... ok
 test core::dcql_query::tests::dcql_deserialize_with_empty_meta ... ok
 test core::dcql_query::tests::dcql_deserialize_without_meta_uses_default ... ok
+test core::authorization_request::verification::x509::tests::rejects_with_leaf_as_issuer ... ok
+test core::authorization_request::verification::x509::tests::expired_cert ... ok
 test core::iso_18013_7::tests::compute_ec_jwk_thumbprint ... ok
 test core::dcql_query::tests::dcql_with_trusted_authorities ... ok
-test core::iso_18013_7::tests::dc_api_handover_cbor_structure ... ok
 test core::dcql_query::tests::de_serialize_dcql_query ... ok
+test core::iso_18013_7::tests::dc_api_handover_cbor_structure ... ok
 test core::iso_18013_7::tests::dc_api_handover_cbor_roundtrip ... ok
 test core::iso_18013_7::tests::dc_api_handover_construction_with_thumbprint ... ok
 test core::iso_18013_7::tests::dc_api_handover_construction_without_thumbprint ... ok
@@ -79,52 +77,54 @@ test core::iso_18013_7::tests::handover_construction_without_thumbprint ... ok
 test core::iso_18013_7::tests::handover_deterministic ... ok
 test core::iso_18013_7::tests::handover_different_inputs_different_hashes ... ok
 test core::iso_18013_7::tests::jwk_thumbprint_ignores_extra_fields ... ok
-test core::iso_18013_7::tests::session_transcript_cbor_roundtrip ... ok
 test core::iso_18013_7::tests::session_transcript_structure ... ok
+test core::iso_18013_7::tests::session_transcript_cbor_roundtrip ... ok
 test core::iso_18013_7::tests::session_transcript_to_cbor ... ok
-test core::iso_18013_7::tests::spec_vector_dc_api_handover_cbor ... ok
 test core::iso_18013_7::tests::spec_vector_dc_api_handover_info_hash ... ok
+test core::iso_18013_7::tests::spec_vector_dc_api_handover_cbor ... ok
 test core::iso_18013_7::tests::spec_vector_redirect_handover_cbor ... ok
 test core::iso_18013_7::tests::spec_vector_redirect_handover_info_hash ... ok
-test core::iso_18013_7::tests::spec_vector_redirect_session_transcript_cbor ... ok
 test core::jwe::tests::find_encryption_jwk_missing_alg ... ok
+test core::iso_18013_7::tests::spec_vector_redirect_session_transcript_cbor ... ok
 test core::jwe::tests::find_encryption_jwk_no_enc_key ... ok
+test core::authorization_request::verification::x509::tests::step_issuer_subject_success ... ok
 test core::jwe::tests::jwe_builder_default_enc_is_a128gcm ... ok
+test core::authorization_request::verification::x509::tests::reject_broken_signature ... ok
 test core::jwe::tests::jwe_builder_missing_key ... ok
-test core::authorization_request::verification::x509_hash::tests::sha_256_hash_client_id_mismatch ... ok
-test core::authorization_request::verification::x509::tests::invalid_jwt_signature ... ok
+test core::authorization_request::verification::x509_hash::tests::no_client_id ... ok
 test core::metadata::parameters::verifier::test::encrypted_response_enc_values_supported ... ok
 test core::metadata::parameters::verifier::test::encrypted_response_enc_values_supported_default ... ok
-test core::metadata::parameters::verifier::test::vp_formats_supported ... ok
+test core::authorization_request::verification::x509_san::tests::reject_fqdn_client_id_mismatch ... ok
 test core::metadata::parameters::verifier::test::jwks ... ok
+test core::metadata::parameters::verifier::test::vp_formats_supported ... ok
+test core::authorization_request::verification::x509_hash::tests::sha_256_hash_client_id_mismatch ... ok
 test core::metadata::parameters::wallet::test::authorization_encryption_alg_values_supported ... ok
-test core::authorization_request::verification::x509_san::tests::dns_san_client_id_mismatch ... ok
 test core::metadata::parameters::wallet::test::authorization_encryption_enc_values_supported ... ok
+test core::authorization_request::verification::x509_san::tests::no_client_id ... ok
 test core::metadata::parameters::wallet::test::client_id_prefixes_supported ... ok
 test core::metadata::parameters::wallet::test::authorization_endpoint ... ok
 test core::metadata::parameters::wallet::test::issuer ... ok
 test core::metadata::parameters::wallet::test::request_object_signing_alg_values_supported ... ok
 test core::metadata::parameters::wallet::test::response_types_supported ... ok
+test core::authorization_request::verification::x509_san::tests::dns_san_client_id_mismatch ... ok
 test core::metadata::parameters::wallet::test::vp_formats_supported ... ok
 test core::response::test::jwt_authorization_response_to_form_urlencoded ... ok
+test core::authorization_request::verification::x509::tests::invalid_jwt_signature ... ok
+test core::response::test::unencoded_authorization_response_with_state ... ok
 test core::response::test::unencoded_authorization_response_to_form_urlencoded ... ok
 test core::metadata::test::openid4vp_scheme_static ... ok
-test core::response::test::unencoded_authorization_response_with_state ... ok
 test core::response::test::vp_token_dcql_format ... ok
-test core::authorization_request::verification::x509_san::tests::no_client_id ... ok
 test core::response::test::vp_token_multiple_credentials ... ok
-test core::authorization_request::verification::x509_san::tests::reject_fqdn_client_id_mismatch ... ok
-test core::response::test::vp_token_with_json_object_item ... ok
 test core::response::test::vp_token_round_trip_form_urlencoded ... ok
 test core::response::test::vp_token_round_trip_with_state ... ok
+test core::response::test::vp_token_with_json_object_item ... ok
 test core::util::test::debug ... ok
 test core::authorization_request::verification::x509::tests::rejects_with_untrusted_root ... ok
-test core::authorization_request::verification::x509_hash::tests::no_client_id ... ok
 test core::authorization_request::verification::x509_hash::tests::reject_untrusted_root_x509_hash ... ok
-test core::authorization_request::verification::x509_san::tests::reject_untrusted_root_x509_san ... ok
-test core::jwe::tests::jwe_builder_missing_payload ... ok
-test core::jwe::tests::jwe_builder_missing_alg ... ok
 test core::jwe::tests::find_encryption_jwk_success ... ok
+test core::jwe::tests::jwe_builder_missing_alg ... ok
+test core::jwe::tests::jwe_builder_missing_payload ... ok
+test core::authorization_request::verification::x509_san::tests::reject_untrusted_root_x509_san ... ok
 test core::authorization_request::verification::x509_hash::tests::validate_x509_hash_dns_prefix_success ... ok
 test core::authorization_request::verification::x509_san::tests::validate_x509_san_dns_prefix_success ... ok
 test core::jwe::tests::jwe_builder_custom_enc ... ok
@@ -139,7 +139,7 @@ test result: ok. 116 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fi
 running 1 test
 test w3c_vc_did_client_direct_post ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
 
      Running tests/jwt_vc.rs (target/debug/build/openid4vp/f15045039fb3233b/out/jwt_vc-f15045039fb3233b)
 
@@ -165,13 +165,13 @@ test src/core/authorization_request/mod.rs - core::authorization_request::Author
 test src/core/authorization_request/mod.rs - core::authorization_request::AuthorizationRequest::from_query_params (line 224) ... ok
 test src/core/authorization_request/mod.rs - core::authorization_request::AuthorizationRequest::from_url (line 183) ... ok
 
-test result: ok. 3 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 1.06s
+test result: ok. 3 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 1.09s
 
 test=pass
 ## fmt: cargo fmt -- --check
 fmt=pass
 ## clippy: cargo clippy
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.59s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.47s
 clippy=pass
 ## machete: cargo machete
 Analyzing dependencies of crates in this directory...

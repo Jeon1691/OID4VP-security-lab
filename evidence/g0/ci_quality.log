@@ -1,0 +1,15 @@
+## fmt: cargo fmt --all -- --check
+fmt=pass
+## clippy: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.48s
+clippy=pass
+## machete: cargo machete
+Analyzing dependencies of crates in this directory...
+cargo-machete didn't find any unused dependencies in this directory. Good job!
+Done!
+machete=pass
+## shellcheck: shellcheck scripts/ci_local.sh scripts/evidence_manifest.sh scripts/g0_upstream.sh
+shellcheck=pass
+## actionlint: actionlint
+actionlint=pass
+stage_quality=pass

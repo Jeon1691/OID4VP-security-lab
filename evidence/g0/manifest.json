@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-11-23T14:13:49+00:00",
-  "lab_git_sha": "2adaf4f0e9ca12a0a7185bf059a7bce5765d0144",
-  "lab_worktree_dirty": true,
+  "generated_at": "2026-11-23T14:32:11+00:00",
+  "lab_git_sha": "a61a5d6896ff62e9338b4e2f73e512cbb66a5cea",
+  "lab_source_dirty": false,
   "spruce_openid4vp_sha": "c57a895884d039a741cc4b472c1698fb147ba487",
   "cargo_lock_sha256": "c8f093ea095c6def3a1d00a8e99cfa4f4b74211d12b92ec216f704aa8d01f563",
   "upstream_cargo_lock_sha256": "e959bcfb62707c9c6b07c42184cce618fa873b55f68e44fdf9c01586ce776474",
@@ -18,13 +18,48 @@
   "tools": {
     "cargo-deny": "cargo-deny 0.20.2",
     "cargo-audit": "cargo-audit 0.23.0",
-    "cargo-machete": "0.10.1",
-    "cargo-nextest": "cargo-nextest 0.9.148\nrelease: 0.9.148\nhost: aarch64-apple-darwin",
-    "docker": "Docker version 29.8.2, build 7fc2dff"
+    "cargo-machete": "0.10.1"
   },
   "host": {
     "os": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
     "machine": "arm64",
     "cpu": "Apple M5 Pro"
+  },
+  "ci": null,
+  "steps": {
+    "ci_quality": {
+      "fmt": "pass",
+      "clippy": "pass",
+      "machete": "pass",
+      "shellcheck": "pass",
+      "actionlint": "pass",
+      "stage_quality": "pass"
+    },
+    "ci_supply_chain": {
+      "deny": "pass",
+      "advisory_baseline_sync": "pass",
+      "core_containment": "pass",
+      "audit": "pass",
+      "stage_supply_chain": "pass"
+    },
+    "ci_test": {
+      "build": "pass",
+      "test": "pass",
+      "doctest": "pass",
+      "required_tests": "pass",
+      "stage_test": "pass"
+    },
+    "upstream_ci_local": {
+      "build": "pass",
+      "test": "pass",
+      "fmt": "pass",
+      "clippy": "pass",
+      "machete": "pass",
+      "deny_licenses": "pass"
+    }
+  },
+  "tests_passed": {
+    "ci_test": 2,
+    "upstream_ci_local": 120
   }
 }
