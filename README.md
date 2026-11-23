@@ -14,7 +14,7 @@ evidence.
 | `crates/protocol-model` | Versioned wire model, exact `RequestBinding` bytes (IMP-003) |
 | `crates/jose-hpke` | JOSE HPKE-0 integrated encryption + Session Info (IMP-004..006) |
 | `crates/session-core` | Session resolution strategies, atomic registry (IMP-007/011/012) |
-| `crates/lab-server` | axum server, SpruceID adapter, wallet simulator; G0-C API smoke test |
+| `crates/lab-server` | axum server, SpruceID adapter, wallet simulator; G0-C API smoke test, G0-D ECDH-ES `direct_post.jwt` loopback e2e |
 | `scripts/` | Gate stages (shared by local and CI), upstream reproduction, evidence manifest |
 | `.github/workflows/` | `ci.yml` PR/main gate, `security.yml` daily advisory scan |
 | `evidence/g0/` | G0 run logs, upstream lockfile, advisory baseline, manifest |
