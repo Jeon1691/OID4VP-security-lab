@@ -38,10 +38,15 @@ impl CompactJwe {
         if input.trim_start().starts_with(JSON_OBJECT_START) {
             return Err(Error::JsonSerialization);
         }
-        let segments: Vec<&str> = input.split(SEGMENT_SEPARATOR).collect();
-        let [protected, encrypted_key, iv, ciphertext, tag]: [&str; COMPACT_SEGMENTS] = segments
-            .try_into()
-            .map_err(|s: Vec<&str>| Error::SegmentCount { found: s.len() })?;
+        // Count first so a separator flood never allocates per segment; then split into a
+        // fixed-size array.
+        let found = input.matches(SEGMENT_SEPARATOR).count() + 1;
+        if found != COMPACT_SEGMENTS {
+            return Err(Error::SegmentCount { found });
+        }
+        let mut segments = input.splitn(COMPACT_SEGMENTS, SEGMENT_SEPARATOR);
+        let [protected, encrypted_key, iv, ciphertext, tag]: [&str; COMPACT_SEGMENTS] =
+            std::array::from_fn(|_| segments.next().unwrap_or_default());
 
         let header = header::parse(&b64::decode(protected, Segment::ProtectedHeader)?)?;
         // draft-22 §5: IV and Tag MUST be the empty octet sequence, i.e. empty segments.
