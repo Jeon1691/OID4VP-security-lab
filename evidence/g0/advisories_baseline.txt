@@ -1,0 +1,18 @@
+# Unfiltered RustSec findings for the lab Cargo.lock (cargo-audit, repo ignore list NOT applied)
+# generated 2026-11-23T14:08:59Z | cargo-audit 0.23.0 | Cargo.lock sha256 c8f093ea095c6def3a1d00a8e99cfa4f4b74211d12b92ec216f704aa8d01f563
+# Dependency chains and rationale: deny.toml [advisories].ignore
+RUSTSEC-2021-0127	unmaintained	serde_cbor	0.11.2	serde_cbor is unmaintained
+RUSTSEC-2023-0071	vulnerability	rsa	0.6.1	Marvin Attack: potential key recovery through timing sidechannels
+RUSTSEC-2023-0071	vulnerability	rsa	0.9.10	Marvin Attack: potential key recovery through timing sidechannels
+RUSTSEC-2023-0126	unsound	im	15.1.0	Aliasing violation in `OrdSet` insertion
+RUSTSEC-2024-0370	unmaintained	proc-macro-error	1.0.4	proc-macro-error is unmaintained
+RUSTSEC-2024-0388	unmaintained	derivative	2.2.0	`derivative` is unmaintained; consider using an alternative
+RUSTSEC-2026-0215	unmaintained	smallstr	0.3.1	smallstr is unmaintained
+RUSTSEC-2026-0247	unmaintained	bitmaps	2.1.0	bitmaps is unmaintained
+RUSTSEC-2026-0248	unmaintained	im	15.1.0	im is unmaintained
+RUSTSEC-2026-0251	unmaintained	sized-chunks	0.6.5	sized-chunks is unmaintained
+RUSTSEC-2026-0255	unsound	sized-chunks	0.6.5	Panic-safety unsoundness in `Chunk`, `RingBuffer`, and `InlineArray` (use-after-free / double-free)
+RUSTSEC-2026-0283	unmaintained	clear_on_drop	0.2.5	clear_on_drop is unmaintained
+RUSTSEC-2026-0387	vulnerability	crypto-bigint	0.3.2	Multiple timing variability issues in operations intended to be constant-time
+RUSTSEC-2026-0387	vulnerability	crypto-bigint	0.5.5	Multiple timing variability issues in operations intended to be constant-time
+RUSTSEC-2026-0543	unmaintained	chrono	0.4.45	chrono is unmaintained

@@ -1,0 +1,7 @@
+/target/
+# Pinned upstream checkout used for G0 reproduction (recreated by scripts/g0_upstream.sh).
+/upstream/
+# OMC runtime state; project-scoped skills remain committable.
+.omc/*
+!.omc/skills/
+.DS_Store

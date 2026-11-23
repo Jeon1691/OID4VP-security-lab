@@ -1,0 +1,59 @@
+# OID4VP Security Lab
+
+Rust research harness for OpenID4VP 1.1 HPKE-0 response encryption, multi-session response
+routing (OIDF OpenID4VP #792), replay, concurrency and admission control. Synthetic data and
+loopback endpoints only.
+
+Design, WBS and gate definitions live in Notion (01–06). This repository holds code and run
+evidence.
+
+## Layout
+
+| Path | Purpose |
+| --- | --- |
+| `crates/protocol-model` | Versioned wire model, exact `RequestBinding` bytes (IMP-003) |
+| `crates/jose-hpke` | JOSE HPKE-0 integrated encryption + Session Info (IMP-004..006) |
+| `crates/session-core` | Session resolution strategies, atomic registry (IMP-007/011/012) |
+| `crates/lab-server` | axum server, SpruceID adapter, wallet simulator; G0-C API smoke test |
+| `scripts/` | Local CI gate, upstream reproduction, evidence manifest |
+| `evidence/g0/` | G0 run logs, upstream lockfile, advisory baseline, manifest |
+| `upstream/` | Pinned SpruceID checkout (git-ignored, recreated by `make g0-upstream`) |
+
+The MVP is limited to these four packages (Notion 06 §6). Redis, scenario-runner and
+evidence-report are split out after G0/G1.
+
+## Pins
+
+- Toolchain: `rust-toolchain.toml` → rustc 1.100.0
+- SpruceID `openid4vp`: `c57a895884d039a741cc4b472c1698fb147ba487` (ADR-001)
+- `Cargo.lock` is committed; every cargo command in the gate runs with `--locked`
+
+## Usage
+
+```bash
+make tools        # cargo-deny, cargo-audit, cargo-machete
+make test
+make gate         # fmt, clippy -D warnings, build, test, doctest, deny, audit, machete
+make g0           # upstream reproduction + lab gate + manifest into evidence/g0
+```
+
+The gate fails if zero tests ran. Logs are stripped of absolute paths before they are stored.
+
+## Supply-chain baseline
+
+The pinned SpruceID tree (`openid4vp` → `josekit`, `rsa`, `ssi`) carries 13 RustSec advisories.
+Upstream CI does not see them because it only runs `cargo deny check licenses`. They are
+listed with reasons in `deny.toml` (mirrored in `.cargo/audit.toml`; the gate checks that both
+lists match). Unfiltered evidence is in `evidence/g0/advisories_baseline.txt`. Any new
+advisory fails the gate.
+
+The gate step `core_containment` checks the resolved graph of `jose-hpke`, `session-core` and
+`protocol-model`, and fails if any crate from that tree (`openid4vp`, `josekit`, `ssi*`, `did-*`,
+`rsa`, or a crate in the baseline) shows up there, directly or transitively. `deny.toml [bans]`
+additionally rejects direct `openid4vp`/`ssi` dependencies outside `lab-server`. The HPKE-0 path
+(`hpke` 0.15 → `p256` 0.14 → `crypto-bigint` 0.7) has no advisories.
+
+## Policy
+
+No GitHub repository, fork, push, issue, comment or PR is created without prior approval.
+Research-mode (shared URI / bounded trial) routes bind to loopback only.

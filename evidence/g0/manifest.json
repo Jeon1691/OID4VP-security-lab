@@ -1,0 +1,30 @@
+{
+  "generated_at": "2026-11-23T14:13:49+00:00",
+  "lab_git_sha": "2adaf4f0e9ca12a0a7185bf059a7bce5765d0144",
+  "lab_worktree_dirty": true,
+  "spruce_openid4vp_sha": "c57a895884d039a741cc4b472c1698fb147ba487",
+  "cargo_lock_sha256": "c8f093ea095c6def3a1d00a8e99cfa4f4b74211d12b92ec216f704aa8d01f563",
+  "upstream_cargo_lock_sha256": "e959bcfb62707c9c6b07c42184cce618fa873b55f68e44fdf9c01586ce776474",
+  "rustc_vv": [
+    "rustc 1.100.0 (0ef1bc386 2026-11-09)",
+    "binary: rustc",
+    "commit-hash: 0ef1bc386059596dada8fb65b50425aab2ea637a",
+    "commit-date: 2026-11-09",
+    "host: aarch64-apple-darwin",
+    "release: 1.100.0",
+    "LLVM version: 23.1.5"
+  ],
+  "cargo": "cargo 1.100.0 (3acc79c0c 2026-11-05)",
+  "tools": {
+    "cargo-deny": "cargo-deny 0.20.2",
+    "cargo-audit": "cargo-audit 0.23.0",
+    "cargo-machete": "0.10.1",
+    "cargo-nextest": "cargo-nextest 0.9.148\nrelease: 0.9.148\nhost: aarch64-apple-darwin",
+    "docker": "Docker version 29.8.2, build 7fc2dff"
+  },
+  "host": {
+    "os": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
+    "machine": "arm64",
+    "cpu": "Apple M5 Pro"
+  }
+}

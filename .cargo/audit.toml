@@ -1,0 +1,18 @@
+# Mirror of the [advisories] baseline in deny.toml (single source of rationale lives there).
+# Keep both lists identical; scripts/ci_local.sh checks they match.
+[advisories]
+ignore = [
+    "RUSTSEC-2023-0071",
+    "RUSTSEC-2026-0387",
+    "RUSTSEC-2021-0127",
+    "RUSTSEC-2024-0370",
+    "RUSTSEC-2024-0388",
+    "RUSTSEC-2026-0215",
+    "RUSTSEC-2026-0247",
+    "RUSTSEC-2026-0248",
+    "RUSTSEC-2026-0251",
+    "RUSTSEC-2026-0283",
+    "RUSTSEC-2026-0543",
+    "RUSTSEC-2023-0126",
+    "RUSTSEC-2026-0255",
+]

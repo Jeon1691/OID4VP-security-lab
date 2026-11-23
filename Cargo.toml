@@ -1,0 +1,55 @@
+[workspace]
+resolver = "3"
+# MVP scope (06 · Design Review §6): four packages only. spruce-adapter, session-redis,
+# scenario-runner and evidence-report are split out only after the G0/G1 gates pass.
+members = [
+    "crates/protocol-model",
+    "crates/jose-hpke",
+    "crates/session-core",
+    "crates/lab-server",
+]
+# Pinned upstream checkout for G0 reproduction (scripts/g0_upstream.sh); built standalone.
+exclude = ["upstream"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.100"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Shared version pins. A crate opts in with `dep = { workspace = true }`; cargo warns on unused
+# workspace entries, so only dependencies already in use live in this table.
+[workspace.dependencies]
+# SpruceID OpenID4VP, pinned to the commit analysed in the 02/03 design docs (ADR-001).
+openid4vp = { git = "https://github.com/spruceid/openid4vp", rev = "c57a895884d039a741cc4b472c1698fb147ba487" }
+# Must match the versions openid4vp itself depends on, so key/DID types are interchangeable.
+ssi = { version = "0.16", features = ["secp256r1"] }
+p256-spruce = { package = "p256", version = "0.13.2", features = ["jwk"] }
+uuid = { version = "1.29.3", features = ["v4"] }
+
+anyhow = "1.0.105"
+base64 = "0.22"
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+# Vetted for upcoming sprints (compile-probed on rustc 1.100.0, 2026-11-23); move into the table
+# above when a crate first uses them.
+#   S1 jose-hpke : hpke = { version = "0.15.1", default-features = false,
+#                          features = ["alloc", "nistp", "aes", "hkdfsha2"] }
+#                  # HPKE-0 = DHKEM(P-256, HKDF-SHA256) + HKDF-SHA256 + AES-128-GCM. Defaults pull
+#                  # X25519/ML-KEM/ChaCha, which HPKE-0 does not need. Uses p256 0.14 (openid4vp: 0.13).
+#                  thiserror = "2.0.21", serde = { version = "1.0.229", features = ["derive"] }
+#   S2 lab-server: axum = "0.8.9", tower = "0.5", tracing = "0.1.44", url = "2.5.9"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# No placeholder implementations may slip through as "done" (04 · CI §1).
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+
+[profile.release]
+debug = "line-tables-only"

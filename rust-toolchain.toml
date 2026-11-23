@@ -1,0 +1,6 @@
+# Exact toolchain used for G0 local reproduction (rustc 1.100.0, 0ef1bc386 2026-11-09).
+# CI and developer machines must build with the same compiler (IMP-001).
+[toolchain]
+channel = "1.100.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

@@ -1,0 +1,77 @@
+# cargo-deny policy. License allow-list mirrors SpruceID openid4vp@c57a8958 deny.toml so the
+# pinned dependency tree is evaluated under the same rules as upstream CI.
+
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+# Default "workspace" only reports unsound crates that are direct deps; this is a security lab.
+unsound = "all"
+# Baseline: advisories inherited from the pinned SpruceID tree (openid4vp@c57a8958 -> josekit,
+# rsa, ssi). Upstream CI only runs `cargo deny check licenses`, so they are not visible there.
+# Observed 2026-11-23 (evidence/g0/advisories_baseline.txt). The HPKE-0 path (hpke 0.15 ->
+# p256 0.14 -> crypto-bigint 0.7) is clean, and [bans] below keeps openid4vp/ssi confined to
+# lab-server. Any advisory not listed here still fails the gate. Re-review when the pin moves.
+ignore = [
+    # Vulnerabilities: timing side channels. Reachable only via SpruceID request signing / DID
+    # resolution on synthetic test keys; the lab HPKE codec must not use these crates.
+    { id = "RUSTSEC-2023-0071", reason = "rsa 0.6/0.9 Marvin; via openid4vp + ssi-jwk, no RSA keys used in lab" },
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.3/0.5 timing; via rsa/josekit/p256 0.13 (SpruceID). HPKE path uses 0.7" },
+    # Unmaintained crates deep in ssi's DID / JSON-LD stack.
+    { id = "RUSTSEC-2021-0127", reason = "serde_cbor via ssi-data-integrity-suites" },
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error via linked-data-derive (ssi json-ld)" },
+    { id = "RUSTSEC-2024-0388", reason = "derivative via ssi-data-integrity-core" },
+    { id = "RUSTSEC-2026-0215", reason = "smallstr via json-syntax (ssi json-ld)" },
+    { id = "RUSTSEC-2026-0247", reason = "bitmaps via im (ssi json-ld)" },
+    { id = "RUSTSEC-2026-0248", reason = "im via linked-data (ssi json-ld)" },
+    { id = "RUSTSEC-2026-0251", reason = "sized-chunks via im (ssi json-ld)" },
+    { id = "RUSTSEC-2026-0283", reason = "clear_on_drop via ssi-jws" },
+    { id = "RUSTSEC-2026-0543", reason = "chrono via did-pkh (ssi dids)" },
+    # Unsound (memory-safety) advisories in the same ssi JSON-LD stack; no lab code calls them.
+    { id = "RUSTSEC-2023-0126", reason = "im OrdSet aliasing; via linked-data (ssi json-ld)" },
+    { id = "RUSTSEC-2026-0255", reason = "sized-chunks panic-safety; via im (ssi json-ld)" },
+]
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.8
+# The list mirrors upstream and will be needed as crates are added; don't warn while unused.
+unused-allowed-license = "allow"
+
+[licenses.private]
+# Workspace crates are `publish = false`; still check their declared license.
+ignore = false
+
+[bans]
+# p256 0.13 (openid4vp) and 0.14 (hpke) coexist by design; keep duplicates visible, not fatal.
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+# Containment: the advisory baseline above is only acceptable while the SpruceID tree stays
+# out of protocol-model / jose-hpke / session-core.
+deny = [
+    { crate = "openid4vp", wrappers = ["lab-server"] },
+    { crate = "ssi", wrappers = ["lab-server", "openid4vp"] },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = [
+    # Pinned SpruceID dependency (ADR-001).
+    "https://github.com/spruceid/openid4vp",
+    # Transitive git dependency of openid4vp (rev 635c8a7).
+    "https://github.com/cobward/josekit-rs",
+]
