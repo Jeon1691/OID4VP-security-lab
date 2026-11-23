@@ -19,7 +19,7 @@ const CONTENDERS: [usize; 3] = [2, 16, 128];
 const ROUNDS: usize = 16;
 
 /// One claim attempt's outcome, reduced to what the exactly-once check counts.
-fn tally<K, R>(outcomes: &[Result<session_core::SessionSnapshot<K, R>, ClaimError>]) -> usize {
+fn tally<R>(outcomes: &[Result<session_core::SessionSnapshot<R>, ClaimError>]) -> usize {
     let mut wins = 0;
     for outcome in outcomes {
         match outcome {
@@ -87,7 +87,7 @@ async fn claim_via_store<S>(
     digest: ResponseDigest,
     result: TestResult,
     barrier: Arc<tokio::sync::Barrier>,
-) -> Result<session_core::SessionSnapshot<TestKey, TestResult>, ClaimError>
+) -> Result<session_core::SessionSnapshot<TestResult>, ClaimError>
 where
     S: SessionStore<TestKey, TestResult>,
 {
