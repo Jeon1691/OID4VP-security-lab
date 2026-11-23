@@ -27,8 +27,8 @@ impl fmt::Display for Segment {
     }
 }
 
-/// Everything that can go wrong while parsing, opening or sealing an HPKE-0 compact JWE, or
-/// while encoding OpenID4VP Session Info.
+/// Everything that can go wrong while parsing, opening or sealing an HPKE-0 compact JWE.
+/// (Session Info encoding is infallible: its inputs are validated `protocol-model` types.)
 ///
 /// All authenticated-decryption failures (wrong key, wrong `info`, modified header, modified
 /// ciphertext, invalid encapsulated key on decap) collapse into [`Error::Decryption`], so the
@@ -94,13 +94,4 @@ pub enum Error {
     /// HPKE encapsulation or AEAD seal failed.
     #[error("encryption failed")]
     Encryption,
-    /// A Session Info field is not ASCII (OpenID4VP 1.1 §8.3.1 encodes each as `ASCII(...)`).
-    #[error("session_info field \"{field}\" is not ASCII")]
-    SessionInfoNotAscii {
-        /// Name of the offending field.
-        field: &'static str,
-    },
-    /// The dc_api.jwt origin carries the `origin:` prefix (OpenID4VP 1.1 §8.3.1).
-    #[error("session_info origin must not be prefixed with \"origin:\"")]
-    OriginPrefixed,
 }
