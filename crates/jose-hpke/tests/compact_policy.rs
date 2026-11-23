@@ -255,6 +255,25 @@ fn rejects_wrong_segment_count() {
     assert_eq!(CompactJwe::parse(""), Err(Error::SegmentCount { found: 1 }));
 }
 
+/// A maximum-length input made only of separators is rejected by counting, without splitting
+/// it into ~1 Mi segments (review L2).
+#[test]
+fn rejects_separator_flood_at_maximum_length() {
+    let flood = ".".repeat(MAX_COMPACT_JWE_LEN);
+    assert_eq!(
+        CompactJwe::parse(&flood),
+        Err(Error::SegmentCount {
+            found: MAX_COMPACT_JWE_LEN + 1
+        })
+    );
+    let [h, ek, iv, ct, tag] = split(jose_vector("HPKE-0")["compact"].as_str().expect("compact"));
+    let padded = format!("{h}.{ek}.{iv}.{ct}.{tag}{}", ".".repeat(1000));
+    assert_eq!(
+        CompactJwe::parse(&padded),
+        Err(Error::SegmentCount { found: 1005 })
+    );
+}
+
 #[test]
 fn rejects_json_serialization_with_multiple_recipients() {
     let general = r#"{"protected":"eyJhbGciOiJIUEtFLTAifQ","recipients":[{"encrypted_key":"AA"},{"encrypted_key":"AQ"}],"ciphertext":"AA"}"#;
