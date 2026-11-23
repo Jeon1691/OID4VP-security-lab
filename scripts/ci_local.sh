@@ -45,6 +45,9 @@ stage_quality() {
 REQUIRED_TESTS=(
   signed_request_binding_matches_stored_session
   each_session_gets_a_distinct_response_uri
+  wire_strings_round_trip_byte_exact
+  non_ascii_values_are_rejected
+  unknown_response_mode_is_rejected
 )
 
 stage_test() {
