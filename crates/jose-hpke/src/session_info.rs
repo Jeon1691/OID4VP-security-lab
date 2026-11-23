@@ -5,11 +5,13 @@
 //! Integrated Encryption as the Key Management Mode"). Wallet and Verifier compute them
 //! independently, so a response sealed for another session fails to decrypt.
 //!
-//! Inputs are the wire strings exactly as sent in the request; no normalisation is applied.
-//! `0xFF` cannot occur in ASCII (nor in UTF-8), so the encoding is unambiguous without length
-//! prefixes; non-ASCII input is rejected because the spec encodes each field as `ASCII(...)`.
+//! Inputs are `protocol-model` wire types, which hold the exact request strings and enforce the
+//! field rules (non-empty, ASCII, no control characters, §5.2 nonce alphabet, no `origin:`
+//! prefix) at construction. This module does no validation of its own, so there is a single
+//! source of truth. Because every field is ASCII, no field contains `0xFF` and the encoding is
+//! unambiguous without length prefixes.
 
-use crate::error::Error;
+use protocol_model::{ClientIdWire, NonceWire, OriginWire, RequestBinding, ResponseUriWire};
 
 /// §8.3.1 `ASCII("OpenID4VP-si")`: redirect-based response modes such as `direct_post.jwt`.
 const DIRECT_POST_LABEL: &str = "OpenID4VP-si";
@@ -17,8 +19,6 @@ const DIRECT_POST_LABEL: &str = "OpenID4VP-si";
 const DC_API_LABEL: &str = "OpenID4VPDCAPI-si";
 /// §8.3.1 `BYTE(255)` field separator.
 const SEPARATOR: u8 = 0xFF;
-/// §8.3.1: the origin "MUST NOT be prefixed with origin:" (the DC API client_id prefix).
-const ORIGIN_PREFIX: &str = "origin:";
 
 /// An encoded `session_info` value, to be passed as HPKE `info`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,32 +26,36 @@ pub struct SessionInfo(Vec<u8>);
 
 impl SessionInfo {
     /// `ASCII("OpenID4VP-si") || 0xFF || client_id || 0xFF || nonce || 0xFF || response_uri`.
-    ///
-    /// `client_id` is the request parameter including any Client Identifier Prefix;
-    /// `response_uri` is the `response_uri` (or `redirect_uri`, per Response Mode) parameter.
     pub fn direct_post_jwt(
-        client_id: &str,
-        nonce: &str,
-        response_uri: &str,
-    ) -> Result<Self, Error> {
+        client_id: &ClientIdWire,
+        nonce: &NonceWire,
+        response_uri: &ResponseUriWire,
+    ) -> Self {
         encode(
             DIRECT_POST_LABEL,
             &[
-                ("client_id", client_id),
-                ("nonce", nonce),
-                ("response_uri", response_uri),
+                client_id.as_bytes(),
+                nonce.as_bytes(),
+                response_uri.as_bytes(),
             ],
         )
     }
 
     /// `ASCII("OpenID4VPDCAPI-si") || 0xFF || origin || 0xFF || nonce`.
-    ///
-    /// `origin` is the platform-provided Origin (Appendix A.2), without the `origin:` prefix.
-    pub fn dc_api_jwt(origin: &str, nonce: &str) -> Result<Self, Error> {
-        if origin.starts_with(ORIGIN_PREFIX) {
-            return Err(Error::OriginPrefixed);
+    pub fn dc_api_jwt(origin: &OriginWire, nonce: &NonceWire) -> Self {
+        encode(DC_API_LABEL, &[origin.as_bytes(), nonce.as_bytes()])
+    }
+
+    /// The `session_info` for a stored request binding, using the formula of its mode.
+    pub fn from_binding(binding: &RequestBinding) -> Self {
+        match binding {
+            RequestBinding::DirectPostJwt {
+                client_id,
+                nonce,
+                response_uri,
+            } => Self::direct_post_jwt(client_id, nonce, response_uri),
+            RequestBinding::DcApiJwt { origin, nonce } => Self::dc_api_jwt(origin, nonce),
         }
-        encode(DC_API_LABEL, &[("origin", origin), ("nonce", nonce)])
     }
 
     /// The encoded bytes.
@@ -66,16 +70,13 @@ impl AsRef<[u8]> for SessionInfo {
     }
 }
 
-fn encode(label: &str, fields: &[(&'static str, &str)]) -> Result<SessionInfo, Error> {
-    let len = label.len() + fields.iter().map(|(_, v)| 1 + v.len()).sum::<usize>();
+fn encode(label: &str, fields: &[&[u8]]) -> SessionInfo {
+    let len = label.len() + fields.iter().map(|v| 1 + v.len()).sum::<usize>();
     let mut out = Vec::with_capacity(len);
     out.extend_from_slice(label.as_bytes());
-    for &(field, value) in fields {
-        if !value.is_ascii() {
-            return Err(Error::SessionInfoNotAscii { field });
-        }
+    for value in fields {
         out.push(SEPARATOR);
-        out.extend_from_slice(value.as_bytes());
+        out.extend_from_slice(value);
     }
-    Ok(SessionInfo(out))
+    SessionInfo(out)
 }

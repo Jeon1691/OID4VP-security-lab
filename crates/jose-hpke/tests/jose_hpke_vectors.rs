@@ -9,6 +9,7 @@ mod common;
 
 use common::{b64, b64e, fresh_key, join, jose_plaintext, jose_vector, jwk_private_key, split};
 use jose_hpke::{CompactJwe, Error, SessionInfo, open_compact};
+use protocol_model::{ClientIdWire, NonceWire, ResponseUriWire};
 
 #[test]
 fn draft22_hpke0_jwk_private_key_matches_public_coordinates() {
@@ -34,8 +35,11 @@ fn draft22_hpke0_compact_vector_decrypts_to_generator_plaintext() {
 fn draft22_hpke0_compact_vector_fails_with_session_info_as_info() {
     let v = jose_vector("HPKE-0");
     let sk = jwk_private_key(&v["jwk"]);
-    let si = SessionInfo::direct_post_jwt("x509_san_dns:example.com", "n", "https://example.com/r")
-        .expect("session info");
+    let si = SessionInfo::direct_post_jwt(
+        &ClientIdWire::new("x509_san_dns:example.com").expect("client_id"),
+        &NonceWire::new("n").expect("nonce"),
+        &ResponseUriWire::new("https://example.com/r").expect("response_uri"),
+    );
     assert_eq!(
         open_compact(v["compact"].as_str().expect("compact"), &sk, si.as_bytes()),
         Err(Error::Decryption)

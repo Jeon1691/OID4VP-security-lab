@@ -33,9 +33,10 @@
 //! | Any member other than `alg`, `kid`, `typ`, `cty` | Lab policy: deviates from RFC 7515 §4 / RFC 7516 §4, under which unknown non-critical parameters are ignored |
 //! | Input longer than [`MAX_COMPACT_JWE_LEN`] | Lab policy: no spec limit exists |
 //!
-//! Verifier flow:[`CompactJwe::parse`] (all key-independent checks), select the key by
-//! [`ProtectedHeader::kid`], compute [`SessionInfo`] from the stored request, then
-//! [`CompactJwe::open`]. Sender-side sealing lives in [`test_support`] only.
+//! Verifier flow: [`CompactJwe::parse`] (all key-independent checks), select the key by
+//! [`ProtectedHeader::kid`], compute [`SessionInfo::from_binding`] from the stored
+//! `protocol_model::RequestBinding`, then [`CompactJwe::open`]. Sender-side sealing lives in
+//! [`test_support`] only.
 
 mod b64;
 mod error;
