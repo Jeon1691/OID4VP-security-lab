@@ -7,7 +7,10 @@
 //! 3. `crit` absent.
 //! 4. `enc`, `ek`, `psk_id`, `zip` absent.
 //! 5. No other members than `alg`, `kid`, `typ`, `cty`.
-//! 6. `kid`, `typ`, `cty`, when present, are strings.
+//! 6. `kid`, `typ`, `cty`, when present, are strings; `kid` satisfies `protocol_model::KeyId`
+//!    and `typ`/`cty` are non-empty visible ASCII (`%x21-7E`).
+//!
+//! The decoded header is capped at [`crate::MAX_PROTECTED_HEADER_LEN`] before JSON parsing.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -15,8 +18,10 @@ use std::fmt;
 use serde::de::{Deserialize, Deserializer, Error as _, MapAccess, Visitor};
 use serde_json::Value;
 
-use crate::ALG_HPKE_0;
+use protocol_model::KeyId;
+
 use crate::error::Error;
+use crate::{ALG_HPKE_0, MAX_PROTECTED_HEADER_LEN};
 
 /// RFC 7516 §4.1.1.
 const ALG: &str = "alg";
@@ -37,7 +42,7 @@ const FORBIDDEN: [&str; 4] = ["enc", "ek", "psk_id", "zip"];
 /// The accepted HPKE-0 protected header. `alg` is always `HPKE-0` and therefore not stored.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ProtectedHeader {
-    kid: Option<String>,
+    kid: Option<KeyId>,
     typ: Option<String>,
     cty: Option<String>,
 }
@@ -45,9 +50,10 @@ pub struct ProtectedHeader {
 impl ProtectedHeader {
     /// `kid`: OpenID4VP 1.1 §8.3 requires it to equal the `kid` of the chosen Verifier JWK when
     /// that JWK has one; use it to select the decryption key, then still authenticate by
-    /// decrypting.
-    pub fn kid(&self) -> Option<&str> {
-        self.kid.as_deref()
+    /// decrypting. Validated as a `protocol_model::KeyId` (non-empty visible ASCII, so no
+    /// NUL, bidi or zero-width characters reach key lookup or evidence logs).
+    pub fn kid(&self) -> Option<&KeyId> {
+        self.kid.as_ref()
     }
 
     /// `typ` (informational only).
@@ -63,6 +69,11 @@ impl ProtectedHeader {
 
 /// Applies the policy above to the decoded protected header bytes.
 pub(crate) fn parse(bytes: &[u8]) -> Result<ProtectedHeader, Error> {
+    if bytes.len() > MAX_PROTECTED_HEADER_LEN {
+        return Err(Error::HeaderTooLong {
+            max: MAX_PROTECTED_HEADER_LEN,
+        });
+    }
     let text = std::str::from_utf8(bytes).map_err(|_| Error::HeaderJson)?;
     let UniqueMembers(members) = serde_json::from_str(text).map_err(|_| Error::HeaderJson)?;
     let get = |name: &str| members.iter().find(|(k, _)| k == name).map(|(_, v)| v);
@@ -85,13 +96,24 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<ProtectedHeader, Error> {
 
     let string = |name: &'static str| match get(name) {
         None => Ok(None),
-        Some(Value::String(s)) => Ok(Some(s.clone())),
+        Some(Value::String(s)) => Ok(Some(s.as_str())),
         Some(_) => Err(Error::HeaderParameterType(name)),
     };
+    let kid = string(KID)?
+        .map(|kid| KeyId::new(kid).map_err(|_| Error::HeaderParameterValue(KID)))
+        .transpose()?;
+    let token = |name: &'static str| -> Result<Option<String>, Error> {
+        match string(name)? {
+            Some(v) if v.is_empty() || !v.bytes().all(|b| b.is_ascii_graphic()) => {
+                Err(Error::HeaderParameterValue(name))
+            }
+            v => Ok(v.map(str::to_owned)),
+        }
+    };
     Ok(ProtectedHeader {
-        kid: string(KID)?,
-        typ: string(TYP)?,
-        cty: string(CTY)?,
+        kid,
+        typ: token(TYP)?,
+        cty: token(CTY)?,
     })
 }
 
