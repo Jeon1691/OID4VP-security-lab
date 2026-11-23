@@ -8,3 +8,5 @@
 # Local / CI evidence scratch output (committed evidence lives in evidence/g0).
 /ci-evidence/
 /evidence/local/
+# Agent worktrees (Claude Code isolation).
+/.claude/worktrees/
