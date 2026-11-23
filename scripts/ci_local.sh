@@ -95,6 +95,13 @@ REQUIRED_TESTS=(
   claim_after_expiry_is_rejected
   failed_attempt_leaves_session_pending_and_claimable
   at_most_one_successful_commit_per_session
+  unique_uri_checks_route_uniqueness_before_kid
+  dropped_claim_future_commits_nothing
+  stale_candidate_cannot_claim_a_reinserted_session
+  insert_beyond_pending_capacity_is_rejected
+  consumed_records_are_purged_after_retention
+  unique_route_policy_rejects_duplicate_route_token
+  route_token_parse_rejects_malformed_input
 )
 
 stage_test() {
