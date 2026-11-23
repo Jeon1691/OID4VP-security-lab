@@ -9,7 +9,7 @@
 //! insert(NewSession)            when the signed Authorization Request is issued
 //! resolve(IngressHint, strategy) before decryption, from untrusted hints only
 //!   -> caller trial-decrypts each Candidate with its key, validates the presentation
-//! claim(id, revision, digest, result)   only after full validation; atomic, at most once
+//! claim(&candidate, digest, result)   only after full validation; atomic, at most once
 //! ```
 //!
 //! * Hints (route token, JWE `kid`) are never authentication; they only limit which sessions
@@ -18,11 +18,26 @@
 //!   claim, and the session stays `Pending` and claimable.
 //! * Expired sessions are never returned as candidates, so no decryption is attempted for them.
 //!
+//! # Lab-server integration decisions
+//!
+//! * The strategy is fixed per route; [`ResolutionStrategy::BoundedTrial`] is served only on
+//!   the loopback research route.
+//! * Bounded trial: the lab-server tries **all** candidates within the budget. More than one
+//!   candidate that decrypts and validates is an integrity failure: reject, claim nothing,
+//!   record evidence.
+//! * Every [`ResolveError`] / [`ClaimError`] maps to one generic external error; the variants
+//!   go only into internal evidence, since they reveal session state.
+//! * Expiry: a periodic sweep task calls [`SessionStore::expire_due`] and
+//!   [`SessionStore::purge`]; `resolve`, `claim` and `insert` also check TTLs lazily.
+//! * Memory is bounded by [`RegistryConfig`]: a cap on pending sessions and a retention window
+//!   for consumed records.
+//!
 //! # State machine (MVP)
 //!
 //! ```text
-//! Pending --claim(rev) after validation--> Consumed(result, digest)   (terminal; later claims: Replay)
-//! Pending --TTL elapsed----------------->  Expired                    (terminal; purgeable)
+//! Pending --claim after validation--> Consumed(result, digest)  (terminal; later claims: Replay;
+//!                                                                purged after the retention window)
+//! Pending --TTL elapsed------------->  Expired                  (terminal; purged by the next purge)
 //! ```
 //!
 //! Every transition bumps the session's [`Revision`]. Reserved / lease / fencing states are out of
@@ -33,19 +48,24 @@
 //! [`SessionStore`] is async (`impl Future + Send` in the trait), because the Redis store will do
 //! network I/O and the lab-server awaits it in axum handlers. [`MemoryRegistry`] does no I/O, so
 //! its inherent methods are synchronous (a `std::sync::RwLock` that is never held across an
-//! `.await`) and its trait impl returns ready futures. Tests and the property test use the sync
+//! `.await`) and its trait impl wraps them in lazy `async` blocks, so an unpolled, dropped
+//! future does nothing. Tests and the property test use the sync
 //! methods directly; one concurrency test goes through the trait on a multi-thread runtime.
 //!
 //! Key material is the opaque type parameter `K` (the lab-server plugs in its jose-hpke private
 //! key handle), so this crate depends on neither jose-hpke nor HTTP.
 
 mod clock;
+mod config;
 mod memory;
 mod route;
 mod session;
 mod store;
 
 pub use clock::{Clock, ManualClock, SystemClock, Timestamp};
+pub use config::{
+    DEFAULT_CONSUMED_RETENTION, DEFAULT_MAX_PENDING_SESSIONS, RegistryConfig, RoutePolicy,
+};
 pub use memory::MemoryRegistry;
 pub use route::{
     BudgetError, CandidateBudget, IngressHint, MAX_CANDIDATE_BUDGET, ROUTE_TOKEN_BYTES,

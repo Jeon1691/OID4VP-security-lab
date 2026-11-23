@@ -156,10 +156,15 @@ impl<K> fmt::Debug for NewSession<K> {
 /// A pending session that an ingress hint matched: everything needed to trial-decrypt the
 /// response and then claim the session at the revision seen here.
 ///
-/// A copy taken under the registry lock; it never reflects or causes later changes. The key is
-/// shared read-only (`Arc`), and nothing here can modify the authoritative record.
+/// Only the store creates candidates (no public constructor), and `claim` takes one, so a
+/// caller can only commit a session that `resolve` actually returned. A copy taken under the
+/// registry lock; it never reflects or causes later changes. The key is shared read-only
+/// (`Arc`), and nothing here can modify the authoritative record.
 pub struct Candidate<K> {
     pub(crate) id: SessionId,
+    /// Which insertion of `id` this candidate names, so a candidate for a purged session cannot
+    /// commit a later session that reuses the id.
+    pub(crate) incarnation: u64,
     pub(crate) binding: RequestBinding,
     pub(crate) kid: Option<KeyId>,
     pub(crate) key: Arc<K>,
@@ -192,7 +197,7 @@ impl<K> Candidate<K> {
         &self.key
     }
 
-    /// Revision to pass to `claim`.
+    /// Revision seen at resolve time; `claim` compares it.
     #[must_use]
     pub const fn revision(&self) -> Revision {
         self.revision
@@ -209,6 +214,7 @@ impl<K> Clone for Candidate<K> {
     fn clone(&self) -> Self {
         Self {
             id: self.id.clone(),
+            incarnation: self.incarnation,
             binding: self.binding.clone(),
             kid: self.kid.clone(),
             key: Arc::clone(&self.key),
@@ -221,6 +227,7 @@ impl<K> Clone for Candidate<K> {
 impl<K: PartialEq> PartialEq for Candidate<K> {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
+            && self.incarnation == other.incarnation
             && self.binding == other.binding
             && self.kid == other.kid
             && self.key == other.key
@@ -341,12 +348,24 @@ pub enum InsertError {
     /// The TTL is zero at millisecond resolution, so the session would be born expired.
     #[error("session TTL must be at least one millisecond")]
     ZeroTtl,
+    /// [`RoutePolicy::UniquePerSession`](crate::RoutePolicy::UniquePerSession): a held session
+    /// already uses this route token.
+    #[error("route token already in use")]
+    DuplicateRoute,
+    /// The registry already holds its maximum number of pending sessions.
+    #[error("pending session limit {limit} reached")]
+    Capacity { limit: usize },
     /// See [`StoreUnavailable`].
     #[error(transparent)]
     Unavailable(#[from] StoreUnavailable),
 }
 
 /// Errors from resolving an ingress hint to candidates. All of them mean "do not decrypt".
+///
+/// **Internal evidence only.** The variants reveal session state (whether a route or `kid`
+/// exists, was consumed or expired, or is shared) to whoever sent the response. The lab-server
+/// must map every variant to one generic external error and record the variant only in its
+/// own evidence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ResolveError {
     /// No session matches the hint.
@@ -375,9 +394,14 @@ pub enum ResolveError {
 
 /// Errors from claiming a session. None of them change the session, except that a claim
 /// arriving after the TTL records the expiry it observed.
+///
+/// **Internal evidence only.** Like [`ResolveError`], the variants reveal session state
+/// (including whether a replay repeated the committed response); externally the lab-server
+/// answers every failure with the same generic error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ClaimError {
-    /// No such session (never inserted, or purged).
+    /// No such session: never inserted, purged, or the id now belongs to a later session than
+    /// the one the candidate named.
     #[error("unknown session")]
     UnknownSession,
     /// The session was already consumed. `same_response` tells an exact replay of the committed
@@ -387,7 +411,9 @@ pub enum ClaimError {
     /// The session expired before the claim.
     #[error("session expired")]
     SessionExpired,
-    /// The session is pending but at a different revision than the caller resolved.
+    /// The session is pending but at a different revision than the caller resolved. Not
+    /// reachable with [`MemoryRegistry`](crate::MemoryRegistry) in the MVP (a pending session
+    /// never changes revision); part of the contract for stores with intermediate states.
     #[error("revision mismatch: expected {expected:?}, actual {actual:?}")]
     RevisionMismatch {
         expected: Revision,

@@ -33,6 +33,10 @@ impl Timestamp {
 }
 
 /// Source of the current time for TTL decisions.
+///
+/// Read inside the registry's critical sections: it must be cheap and must not block. A panic
+/// here poisons the registry, which then fails closed. Time may step backwards (NTP, a manual
+/// clock); see [`MemoryRegistry`](crate::MemoryRegistry) for what that means for TTLs.
 pub trait Clock: Send + Sync {
     /// The current time.
     fn now(&self) -> Timestamp;
