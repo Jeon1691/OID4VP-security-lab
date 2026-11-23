@@ -10,7 +10,30 @@
 //!   (§7.1 step 15); HPKE `info` defaults to empty.
 //! * OpenID4VP 1.1 §8.3.1: for Integrated Encryption, HPKE `info` = `session_info`.
 //!
-//! Verifier flow: [`CompactJwe::parse`] (all key-independent checks), select the key by
+//! # Rejection rules
+//!
+//! *Spec* rows are required by the cited text. *Lab policy* rows are lab v1 choices (Notion 02
+//! §7.1) that are stricter than the specs; they fail closed and are not interoperability
+//! requirements.
+//!
+//! | Rejected input | Basis |
+//! | --- | --- |
+//! | `enc` present (any value, incl. `null`) | Spec: draft-22 §5 "MUST NOT be present", §7.2 step 18 |
+//! | `ek` present | Spec: draft-22 §5 "MUST NOT be present" |
+//! | JWE Initialization Vector or Authentication Tag not empty | Spec: draft-22 §5 "MUST be the empty octet sequence" |
+//! | JWE Encrypted Key not a valid encapsulated key | Spec: draft-22 §5 (encapsulated secret), RFC 9180 §7.1.1 |
+//! | Header not UTF-8 JSON object, or duplicate member names | Spec: draft-22 §7.2 steps 3-4 (RFC 7516 §5.2) |
+//! | `crit` present | Spec: no extension is understood, so any `crit` either lists an unknown extension (RFC 7516 §4.1.13 / RFC 7515 §4.1.11: MUST reject), is empty or lists a registered parameter (both invalid there) |
+//! | Padding, whitespace, line breaks, wrong alphabet | Spec: RFC 7515 §2 base64url, draft-22 §7.2 step 2 |
+//! | JWE JSON Serialization (incl. multi-recipient) | Spec: OpenID4VP 1.1 §8.3 requires an encrypted JWT, and JWTs use the Compact Serialization (RFC 7519 §1); draft-22 §5 "exactly one recipient" |
+//! | `alg` other than `HPKE-0` | Application choice allowed by draft-22 §7.2 (final paragraph) and OpenID4VP 1.1 §8.3 (`alg` equals the chosen JWK's `alg`); the lab Verifier advertises only HPKE-0 |
+//! | Non-zero trailing bits in the last base64url character | Lab policy: canonical encoding only, so the encoded header used as HPKE `aad` has one spelling |
+//! | `psk_id` present | Lab policy: draft-22 §4/§5 allow mode_psk ("MAY be present"); OpenID4VP defines no PSK |
+//! | `zip` present | Lab policy: RFC 7516 §4.1.3 allows it; no decompression of untrusted data |
+//! | Any member other than `alg`, `kid`, `typ`, `cty` | Lab policy: deviates from RFC 7515 §4 / RFC 7516 §4, under which unknown non-critical parameters are ignored |
+//! | Input longer than [`MAX_COMPACT_JWE_LEN`] | Lab policy: no spec limit exists |
+//!
+//! Verifier flow:[`CompactJwe::parse`] (all key-independent checks), select the key by
 //! [`ProtectedHeader::kid`], compute [`SessionInfo`] from the stored request, then
 //! [`CompactJwe::open`]. Sender-side sealing lives in [`test_support`] only.
 

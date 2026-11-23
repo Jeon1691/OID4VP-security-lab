@@ -1,15 +1,12 @@
 //! JWE Protected Header parsing and the HPKE-0 Integrated Encryption header policy.
 //!
-//! Policy (checked in this order, independent of member order in the JSON):
-//! 1. UTF-8, a single JSON object (RFC 8259), unique member names (draft-22 §7.2 steps 3-4).
-//! 2. `alg` present, a string, and exactly `HPKE-0` (draft-22 §5, §7.2 step 6, and the closing
-//!    note of §7.2 that the application decides which algorithms are acceptable).
-//! 3. `crit` absent: this implementation understands no extension (RFC 7516 §4.1.13).
-//! 4. `enc` absent (draft-22 §5, §7.2 step 18), `ek` absent (draft-22 §5), `psk_id` absent
-//!    (lab policy: OpenID4VP defines no PSK; draft-22 §5 would allow mode_psk), `zip` absent
-//!    (lab policy: no decompression of attacker-controlled data).
-//! 5. No other members than `alg`, `kid`, `typ`, `cty` (lab policy, fail closed; RFC 7516 §4
-//!    would let a recipient ignore unknown non-critical parameters).
+//! Checks run in this order, independent of member order in the JSON. Which of them the specs
+//! mandate and which are lab v1 policy is tabulated in the crate docs ("Rejection rules").
+//! 1. UTF-8, a single JSON object (RFC 8259), unique member names.
+//! 2. `alg` present, a string, and exactly `HPKE-0`.
+//! 3. `crit` absent.
+//! 4. `enc`, `ek`, `psk_id`, `zip` absent.
+//! 5. No other members than `alg`, `kid`, `typ`, `cty`.
 //! 6. `kid`, `typ`, `cty`, when present, are strings.
 
 use std::collections::BTreeSet;
