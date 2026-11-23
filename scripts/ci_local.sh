@@ -69,6 +69,10 @@ REQUIRED_TESTS=(
   rejects_enc_header_parameter
   rejects_duplicate_header_parameter
   rejects_non_canonical_trailing_bits
+  rejects_escaped_duplicate_header_parameter
+  rejects_separator_flood_at_maximum_length
+  rejects_kid_typ_cty_with_control_bidi_or_empty_values
+  rejects_protected_header_over_lab_limit
   direct_post_session_info_matches_openid4vp_example
   dc_api_session_info_matches_openid4vp_example
   from_binding_matches_openid4vp_examples

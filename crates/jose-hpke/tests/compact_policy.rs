@@ -138,6 +138,21 @@ fn rejects_duplicate_header_parameter() {
     }
 }
 
+/// Duplicates are detected on the decoded member name, so an escaped spelling of `alg` cannot
+/// smuggle a second value past a last-wins or raw-text comparison (review L5).
+#[test]
+fn rejects_escaped_duplicate_header_parameter() {
+    for header in [
+        r#"{"alg":"HPKE-0","alg":"HPKE-7"}"#,
+        r#"{"alg":"HPKE-0","\u0061lg":"HPKE-7"}"#,
+        r#"{"\u0061lg":"HPKE-7","alg":"HPKE-0"}"#,
+        r#"{"alg":"HPKE-0","\u0061\u006c\u0067":"HPKE-0"}"#,
+        r#"{"alg":"HPKE-0","kid":"a","\u006bid":"b"}"#,
+    ] {
+        assert_eq!(parse_err(header), Error::HeaderJson, "{header}");
+    }
+}
+
 #[test]
 fn rejects_missing_alg() {
     assert_eq!(parse_err(r#"{"kid":"k"}"#), Error::MissingAlg);
