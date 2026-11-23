@@ -182,15 +182,23 @@ impl CandidateBudget {
 ///
 /// Every strategy requires the session's route token to equal the hint's, and when the hint
 /// carries a `kid`, the session's `kid` to equal it (a session advertised without `kid` then does
-/// not match). Only `Pending`, unexpired sessions are ever candidates.
+/// not match). Only `Pending`, unexpired sessions are ever candidates. When none is live but a
+/// consumed or expired session matches, the error says so (`Replay` / `SessionExpired`).
+///
+/// The strategy is fixed per route by the deployment, never chosen per request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolutionStrategy {
     /// Hardened default: the route token is unique per request, so at most one session matches.
+    /// Uniqueness is checked on the route token alone, before the attacker-chosen `kid` filter,
+    /// so a `kid` cannot mask a duplicated route.
     UniqueUri,
     /// Shared `response_uri`, per-session key: the hint's `kid` selects at most one session.
+    /// Uniqueness is checked on the `kid` alone, before the (equally attacker-chosen) route.
     UniqueKid,
-    /// Research mode only (shared URI and shared `kid`): every live session on the route is a
-    /// candidate, up to the budget. More live sessions than the budget is an error, never a
-    /// silent truncation, because testing only the first K would drop the right session.
+    /// Research mode only (shared URI and shared `kid`, loopback research route): every live
+    /// session on the route is a candidate, up to the budget. More live sessions than the
+    /// budget is an error, never a silent truncation, because testing only the first K would
+    /// drop the right session. The caller tries every candidate; more than one that decrypts
+    /// and validates is an integrity failure (reject, claim nothing, record evidence).
     BoundedTrial(CandidateBudget),
 }

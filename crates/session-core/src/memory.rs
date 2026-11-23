@@ -1,14 +1,14 @@
 //! In-process authoritative registry (MVP; Redis follows after G1).
 
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::future::{Future, ready};
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::{Arc, RwLock};
 
 use protocol_model::{KeyId, RequestBinding, SessionId};
 
 use crate::clock::{Clock, Timestamp};
+use crate::config::{RegistryConfig, RoutePolicy};
 use crate::route::{IngressHint, ResolutionStrategy, RouteToken};
 use crate::session::{
     Candidate, ClaimError, InsertError, NewSession, ResolveError, ResponseDigest, Revision,
@@ -18,6 +18,7 @@ use crate::store::SessionStore;
 
 /// The authoritative record. Never leaves the registry; callers only get copies.
 struct SessionRecord<K, R> {
+    incarnation: u64,
     binding: RequestBinding,
     route_token: RouteToken,
     kid: Option<KeyId>,
@@ -43,6 +44,7 @@ impl<K, R> SessionRecord<K, R> {
     fn candidate(&self, id: &SessionId) -> Candidate<K> {
         Candidate {
             id: id.clone(),
+            incarnation: self.incarnation,
             binding: self.binding.clone(),
             kid: self.kid.clone(),
             key: Arc::clone(&self.key),
@@ -56,68 +58,333 @@ impl<K, R> SessionRecord<K, R> {
         now >= self.expires_at
     }
 
-    fn matches(&self, hint: &IngressHint) -> bool {
-        self.route_token == hint.route_token
-            && hint
-                .kid
-                .as_ref()
-                .is_none_or(|k| self.kid.as_ref() == Some(k))
+    /// A `kid` in the hint must equal the session's; no `kid` in the hint filters nothing.
+    fn kid_matches(&self, hint: &IngressHint) -> bool {
+        hint.kid
+            .as_ref()
+            .is_none_or(|k| self.kid.as_ref() == Some(k))
     }
+}
+
+/// Which terminal state a session reached.
+#[derive(Clone, Copy)]
+enum Terminal {
+    Consumed,
+    Expired,
+}
+
+/// Terminal sessions still held for a route (or route and `kid`). Lets a resolve that finds no
+/// live candidate report `Replay` / `SessionExpired` in O(1), without scanning history.
+#[derive(Default, Clone, Copy)]
+struct TerminalCounts {
+    consumed: usize,
+    expired: usize,
+}
+
+impl TerminalCounts {
+    fn slot(&mut self, t: Terminal) -> &mut usize {
+        match t {
+            Terminal::Consumed => &mut self.consumed,
+            Terminal::Expired => &mut self.expired,
+        }
+    }
+
+    fn is_empty(self) -> bool {
+        self.consumed == 0 && self.expired == 0
+    }
+}
+
+fn count_up<T: Eq + Hash>(map: &mut HashMap<T, TerminalCounts>, key: T, t: Terminal) {
+    *map.entry(key).or_default().slot(t) += 1;
+}
+
+fn count_down<T: Eq + Hash>(map: &mut HashMap<T, TerminalCounts>, key: T, t: Terminal) {
+    if let Entry::Occupied(mut e) = map.entry(key) {
+        let n = e.get_mut().slot(t);
+        *n = n.saturating_sub(1);
+        if e.get().is_empty() {
+            e.remove();
+        }
+    }
+}
+
+/// Removes `gone` from the id lists under `keys`, one `retain` per affected key.
+fn unindex<T: Eq + Hash>(
+    index: &mut HashMap<T, Vec<SessionId>>,
+    keys: HashSet<T>,
+    gone: &HashSet<SessionId>,
+) {
+    for key in keys {
+        if let Entry::Occupied(mut e) = index.entry(key) {
+            e.get_mut().retain(|id| !gone.contains(id));
+            if e.get().is_empty() {
+                e.remove();
+            }
+        }
+    }
+}
+
+/// A session leaving `Pending`: what the indexes need to forget it.
+struct Leaving {
+    id: SessionId,
+    route_token: RouteToken,
+    kid: Option<KeyId>,
 }
 
 struct Inner<K, R> {
     sessions: HashMap<SessionId, SessionRecord<K, R>>,
-    /// Session ids per route token / kid, in insertion order (bounded-trial order).
-    by_route: HashMap<RouteToken, Vec<SessionId>>,
-    by_kid: HashMap<KeyId, Vec<SessionId>>,
+    /// `Pending` sessions only (including ones past their TTL that no sweep has moved yet), in
+    /// insertion order (bounded-trial order). Bounded by `max_pending`, so resolve never scans
+    /// consumed or expired history.
+    pending_by_route: HashMap<RouteToken, Vec<SessionId>>,
+    pending_by_kid: HashMap<KeyId, Vec<SessionId>>,
+    pending: usize,
+    /// Held terminal sessions per route and per (route, kid).
+    terminal_by_route: HashMap<RouteToken, TerminalCounts>,
+    terminal_by_route_kid: HashMap<(RouteToken, KeyId), TerminalCounts>,
+    next_incarnation: u64,
 }
 
-fn unindex<T: Eq + Hash>(index: &mut HashMap<T, Vec<SessionId>>, key: &T, id: &SessionId) {
-    if let Some(ids) = index.get_mut(key) {
-        ids.retain(|x| x != id);
-        if ids.is_empty() {
-            index.remove(key);
+/// Live and past-TTL pending sessions under one index entry.
+type Split<'a, K, R> = (
+    Vec<(&'a SessionId, &'a SessionRecord<K, R>)>,
+    Vec<&'a SessionRecord<K, R>>,
+);
+
+impl<K, R> Inner<K, R> {
+    /// Moves the listed sessions out of the pending indexes and into the terminal counts.
+    fn leave_pending(&mut self, leaving: Vec<Leaving>, t: Terminal) {
+        let gone: HashSet<SessionId> = leaving.iter().map(|l| l.id.clone()).collect();
+        let routes: HashSet<RouteToken> = leaving.iter().map(|l| l.route_token.clone()).collect();
+        let kids: HashSet<KeyId> = leaving.iter().filter_map(|l| l.kid.clone()).collect();
+        unindex(&mut self.pending_by_route, routes, &gone);
+        unindex(&mut self.pending_by_kid, kids, &gone);
+        self.pending = self.pending.saturating_sub(leaving.len());
+        for l in leaving {
+            if let Some(k) = l.kid {
+                count_up(
+                    &mut self.terminal_by_route_kid,
+                    (l.route_token.clone(), k),
+                    t,
+                );
+            }
+            count_up(&mut self.terminal_by_route, l.route_token, t);
         }
     }
-}
 
-/// In-memory [`SessionStore`] behind one `RwLock`.
-///
-/// Every operation is a short critical section with no I/O and no `.await` inside, so the
-/// inherent methods are synchronous and the [`SessionStore`] impl wraps them in ready futures.
-/// Holding the write lock across the whole check-and-set of [`claim`](Self::claim) is what makes
-/// the commit atomic. A poisoned lock fails closed with [`StoreUnavailable`].
-pub struct MemoryRegistry<K, R> {
-    clock: Arc<dyn Clock>,
-    inner: RwLock<Inner<K, R>>,
-}
+    /// Moves every pending session past its TTL to `Expired`.
+    fn expire_due(&mut self, now: Timestamp) -> usize {
+        let due: Vec<SessionId> = self
+            .pending_by_route
+            .values()
+            .flatten()
+            .filter(|id| self.sessions.get(*id).is_some_and(|r| r.is_due(now)))
+            .cloned()
+            .collect();
+        let mut leaving = Vec::with_capacity(due.len());
+        for id in due {
+            if let Some(record) = self.sessions.get_mut(&id) {
+                record.state = SessionState::Expired;
+                record.revision = record.revision.next();
+                leaving.push(Leaving {
+                    route_token: record.route_token.clone(),
+                    kid: record.kid.clone(),
+                    id,
+                });
+            }
+        }
+        let moved = leaving.len();
+        self.leave_pending(leaving, Terminal::Expired);
+        moved
+    }
 
-impl<K, R> MemoryRegistry<K, R> {
-    /// An empty registry judging TTLs by `clock`.
-    #[must_use]
-    pub fn new(clock: Arc<dyn Clock>) -> Self {
-        Self {
-            clock,
-            inner: RwLock::new(Inner {
-                sessions: HashMap::new(),
-                by_route: HashMap::new(),
-                by_kid: HashMap::new(),
-            }),
+    fn pending_on<'a>(
+        &'a self,
+        ids: Option<&'a Vec<SessionId>>,
+        now: Timestamp,
+    ) -> Split<'a, K, R> {
+        let mut live = Vec::new();
+        let mut due = Vec::new();
+        for (id, record) in ids
+            .into_iter()
+            .flatten()
+            .filter_map(|id| self.sessions.get(id).map(|r| (id, r)))
+        {
+            if record.is_due(now) {
+                due.push(record);
+            } else {
+                live.push((id, record));
+            }
+        }
+        (live, due)
+    }
+
+    /// Error for a hint with no live candidate, from the terminal counts and past-TTL pending
+    /// sessions it matches.
+    fn no_live_candidate(
+        &self,
+        route: &RouteToken,
+        kid: Option<&KeyId>,
+        saw_due: bool,
+    ) -> ResolveError {
+        let counts = match kid {
+            None => self.terminal_by_route.get(route),
+            Some(k) => self.terminal_by_route_kid.get(&(route.clone(), k.clone())),
+        }
+        .copied()
+        .unwrap_or_default();
+        if counts.consumed > 0 {
+            ResolveError::Replay
+        } else if counts.expired > 0 || saw_due {
+            ResolveError::SessionExpired
+        } else {
+            ResolveError::NoCandidate
         }
     }
 
-    /// See [`SessionStore::insert`].
-    ///
-    /// # Errors
-    /// [`InsertError::DuplicateSession`], [`InsertError::ZeroTtl`], or
-    /// [`InsertError::Unavailable`].
-    pub fn insert(&self, session: NewSession<K>) -> Result<SessionSnapshot<R>, InsertError> {
-        let mut inner = self.inner.write().map_err(|_| StoreUnavailable)?;
-        let now = self.clock.now();
+    fn resolve(
+        &self,
+        hint: &IngressHint,
+        strategy: ResolutionStrategy,
+        now: Timestamp,
+    ) -> Result<Vec<Candidate<K>>, ResolveError> {
+        let route = &hint.route_token;
+        match strategy {
+            ResolutionStrategy::UniqueUri => {
+                // Uniqueness on the route alone, before the attacker-chosen kid is consulted.
+                let (live, due) = self.pending_on(self.pending_by_route.get(route), now);
+                match live.as_slice() {
+                    [] => Err(self.no_live_candidate(route, None, !due.is_empty())),
+                    [(id, r)] if r.kid_matches(hint) => Ok(vec![r.candidate(id)]),
+                    [_] => Err(ResolveError::NoCandidate),
+                    many => Err(ResolveError::NotUnique { found: many.len() }),
+                }
+            }
+            ResolutionStrategy::UniqueKid => {
+                let kid = hint.kid.as_ref().ok_or(ResolveError::MissingKid)?;
+                // Uniqueness on the kid alone, before the attacker-chosen route is consulted.
+                let (live, due) = self.pending_on(self.pending_by_kid.get(kid), now);
+                match live.as_slice() {
+                    [] => {
+                        let saw_due = due.iter().any(|r| r.route_token == *route);
+                        Err(self.no_live_candidate(route, Some(kid), saw_due))
+                    }
+                    [(id, r)] if r.route_token == *route => Ok(vec![r.candidate(id)]),
+                    [_] => Err(ResolveError::NoCandidate),
+                    many => Err(ResolveError::NotUnique { found: many.len() }),
+                }
+            }
+            ResolutionStrategy::BoundedTrial(budget) => {
+                let (mut live, due) = self.pending_on(self.pending_by_route.get(route), now);
+                live.retain(|(_, r)| r.kid_matches(hint));
+                if live.is_empty() {
+                    let saw_due = due.iter().any(|r| r.kid_matches(hint));
+                    return Err(self.no_live_candidate(route, hint.kid.as_ref(), saw_due));
+                }
+                if live.len() > budget.get() {
+                    return Err(ResolveError::CandidateBudgetExceeded {
+                        found: live.len(),
+                        budget: budget.get(),
+                    });
+                }
+                Ok(live.into_iter().map(|(id, r)| r.candidate(id)).collect())
+            }
+        }
+    }
+
+    /// Check and set. Returns the caller's `result` when it was not stored, so it can be dropped
+    /// after the lock is released.
+    fn claim(
+        &mut self,
+        candidate: &Candidate<K>,
+        digest: ResponseDigest,
+        result: R,
+        now: Timestamp,
+    ) -> (Result<SessionSnapshot<R>, ClaimError>, Option<R>) {
+        let id = &candidate.id;
+        let Some(record) = self
+            .sessions
+            .get_mut(id)
+            .filter(|r| r.incarnation == candidate.incarnation)
+        else {
+            return (Err(ClaimError::UnknownSession), Some(result));
+        };
+        let (terminal, unused) = match &record.state {
+            SessionState::Consumed {
+                digest: committed, ..
+            } => {
+                let same_response = *committed == digest;
+                return (Err(ClaimError::Replay { same_response }), Some(result));
+            }
+            SessionState::Expired => return (Err(ClaimError::SessionExpired), Some(result)),
+            SessionState::Pending if record.is_due(now) => {
+                record.state = SessionState::Expired;
+                (Terminal::Expired, Some(result))
+            }
+            SessionState::Pending if record.revision != candidate.revision => {
+                let actual = record.revision;
+                let err = ClaimError::RevisionMismatch {
+                    expected: candidate.revision,
+                    actual,
+                };
+                return (Err(err), Some(result));
+            }
+            SessionState::Pending => {
+                record.state = SessionState::Consumed {
+                    result: Arc::new(result),
+                    digest,
+                };
+                (Terminal::Consumed, None)
+            }
+        };
+        record.revision = record.revision.next();
+        let snapshot = record.snapshot(id);
+        let leaving = Leaving {
+            id: id.clone(),
+            route_token: record.route_token.clone(),
+            kid: record.kid.clone(),
+        };
+        self.leave_pending(vec![leaving], terminal);
+        let outcome = match terminal {
+            Terminal::Consumed => Ok(snapshot),
+            Terminal::Expired => Err(ClaimError::SessionExpired),
+        };
+        (outcome, unused)
+    }
+
+    /// Admission checks for `insert`; returns the new session's `expires_at`. Takes the session
+    /// by reference so a rejected one is dropped by the caller, outside the lock.
+    fn admit(
+        &mut self,
+        session: &NewSession<K>,
+        now: Timestamp,
+        config: &RegistryConfig,
+    ) -> Result<Timestamp, InsertError> {
         let expires_at = now.saturating_add(session.ttl);
         if expires_at <= now {
             return Err(InsertError::ZeroTtl);
         }
+        if self.sessions.contains_key(&session.id) {
+            return Err(InsertError::DuplicateSession);
+        }
+        let route_held = self.pending_by_route.contains_key(&session.route_token)
+            || self.terminal_by_route.contains_key(&session.route_token);
+        if config.route_policy == RoutePolicy::UniquePerSession && route_held {
+            return Err(InsertError::DuplicateRoute);
+        }
+        if self.pending >= config.max_pending {
+            // Lazy check: sessions past their TTL should not hold slots until the next sweep.
+            self.expire_due(now);
+            if self.pending >= config.max_pending {
+                let limit = config.max_pending;
+                return Err(InsertError::Capacity { limit });
+            }
+        }
+        Ok(expires_at)
+    }
+
+    /// Stores an admitted session.
+    fn insert(&mut self, session: NewSession<K>, expires_at: Timestamp) -> SessionSnapshot<R> {
         let NewSession {
             id,
             binding,
@@ -126,22 +393,21 @@ impl<K, R> MemoryRegistry<K, R> {
             key,
             ttl: _,
         } = session;
-        let Inner {
-            sessions,
-            by_route,
-            by_kid,
-        } = &mut *inner;
-        let Entry::Vacant(slot) = sessions.entry(id.clone()) else {
-            return Err(InsertError::DuplicateSession);
-        };
-        by_route
+        self.pending_by_route
             .entry(route_token.clone())
             .or_default()
             .push(id.clone());
         if let Some(k) = &kid {
-            by_kid.entry(k.clone()).or_default().push(id.clone());
+            self.pending_by_kid
+                .entry(k.clone())
+                .or_default()
+                .push(id.clone());
         }
-        let record = slot.insert(SessionRecord {
+        self.pending += 1;
+        let incarnation = self.next_incarnation;
+        self.next_incarnation = self.next_incarnation.saturating_add(1);
+        let record = SessionRecord {
+            incarnation,
             binding,
             route_token,
             kid,
@@ -149,8 +415,110 @@ impl<K, R> MemoryRegistry<K, R> {
             revision: Revision::INITIAL,
             expires_at,
             state: SessionState::Pending,
-        });
-        Ok(record.snapshot(&id))
+        };
+        let snapshot = record.snapshot(&id);
+        self.sessions.insert(id, record);
+        snapshot
+    }
+
+    /// Removes expired records and consumed ones past retention; returns them for dropping
+    /// after the lock is released.
+    fn purge(&mut self, now: Timestamp, config: &RegistryConfig) -> Vec<SessionRecord<K, R>> {
+        let doomed: Vec<(SessionId, Terminal)> = self
+            .sessions
+            .iter()
+            .filter_map(|(id, r)| {
+                let t = match r.state {
+                    SessionState::Pending => return None,
+                    SessionState::Expired => Terminal::Expired,
+                    SessionState::Consumed { .. } => {
+                        let until = r.expires_at.saturating_add(config.consumed_retention);
+                        if now < until {
+                            return None;
+                        }
+                        Terminal::Consumed
+                    }
+                };
+                Some((id.clone(), t))
+            })
+            .collect();
+        let mut removed = Vec::with_capacity(doomed.len());
+        for (id, t) in doomed {
+            if let Some(record) = self.sessions.remove(&id) {
+                if let Some(k) = &record.kid {
+                    let key = (record.route_token.clone(), k.clone());
+                    count_down(&mut self.terminal_by_route_kid, key, t);
+                }
+                count_down(&mut self.terminal_by_route, record.route_token.clone(), t);
+                removed.push(record);
+            }
+        }
+        removed
+    }
+}
+
+/// In-memory [`SessionStore`] behind one `RwLock`.
+///
+/// Every operation is a short critical section with no I/O and no `.await` inside, so the
+/// inherent methods are synchronous; the [`SessionStore`] impl runs them when its future is
+/// polled. Holding the write lock across the whole check-and-set of [`claim`](Self::claim) is
+/// what makes the commit atomic. Caller values the registry does not keep (a losing claim's
+/// result, a rejected insert, purged records) are dropped after the lock is released, so their
+/// destructors cannot run inside, or re-enter, a critical section.
+///
+/// # Failure behaviour
+///
+/// * A poisoned lock fails closed: every later call returns [`StoreUnavailable`]. The clock is
+///   read inside the critical sections, so a panicking [`Clock`] poisons the store this way.
+/// * If the clock steps back, sessions are judged by the earlier time: pending sessions past
+///   their TTL may become live again until a sweep or claim moves them to `Expired`, which is
+///   terminal, so swept sessions never come back. Consumed records are kept longer.
+pub struct MemoryRegistry<K, R> {
+    clock: Arc<dyn Clock>,
+    config: RegistryConfig,
+    inner: RwLock<Inner<K, R>>,
+}
+
+impl<K, R> MemoryRegistry<K, R> {
+    /// An empty registry with [`RegistryConfig::default`] (unique route tokens).
+    #[must_use]
+    pub fn new(clock: Arc<dyn Clock>) -> Self {
+        Self::with_config(clock, RegistryConfig::default())
+    }
+
+    /// An empty registry judging TTLs by `clock`.
+    #[must_use]
+    pub fn with_config(clock: Arc<dyn Clock>, config: RegistryConfig) -> Self {
+        Self {
+            clock,
+            config,
+            inner: RwLock::new(Inner {
+                sessions: HashMap::new(),
+                pending_by_route: HashMap::new(),
+                pending_by_kid: HashMap::new(),
+                pending: 0,
+                terminal_by_route: HashMap::new(),
+                terminal_by_route_kid: HashMap::new(),
+                next_incarnation: 0,
+            }),
+        }
+    }
+
+    /// See [`SessionStore::insert`].
+    ///
+    /// # Errors
+    /// See [`InsertError`].
+    pub fn insert(&self, session: NewSession<K>) -> Result<SessionSnapshot<R>, InsertError> {
+        let mut inner = self.inner.write().map_err(|_| StoreUnavailable)?;
+        let now = self.clock.now();
+        match inner.admit(&session, now, &self.config) {
+            Ok(expires_at) => Ok(inner.insert(session, expires_at)),
+            Err(err) => {
+                drop(inner);
+                drop(session);
+                Err(err)
+            }
+        }
     }
 
     /// See [`SessionStore::resolve`]. Read-only: it never changes a session, even one it finds
@@ -165,103 +533,31 @@ impl<K, R> MemoryRegistry<K, R> {
     ) -> Result<Vec<Candidate<K>>, ResolveError> {
         let inner = self.inner.read().map_err(|_| StoreUnavailable)?;
         let now = self.clock.now();
-        let indexed = match strategy {
-            ResolutionStrategy::UniqueKid => {
-                let kid = hint.kid.as_ref().ok_or(ResolveError::MissingKid)?;
-                inner.by_kid.get(kid)
-            }
-            ResolutionStrategy::UniqueUri | ResolutionStrategy::BoundedTrial(_) => {
-                inner.by_route.get(&hint.route_token)
-            }
-        };
-
-        let mut live = Vec::new();
-        let (mut consumed, mut expired) = (false, false);
-        let matching = indexed
-            .into_iter()
-            .flatten()
-            .filter_map(|id| inner.sessions.get(id).map(|r| (id, r)))
-            .filter(|(_, r)| r.matches(hint));
-        for (id, record) in matching {
-            match record.state {
-                SessionState::Pending if !record.is_due(now) => live.push((id, record)),
-                SessionState::Pending | SessionState::Expired => expired = true,
-                SessionState::Consumed { .. } => consumed = true,
-            }
-        }
-
-        match strategy {
-            ResolutionStrategy::UniqueUri | ResolutionStrategy::UniqueKid => match live.len() {
-                1 => {}
-                0 if consumed => return Err(ResolveError::Replay),
-                0 if expired => return Err(ResolveError::SessionExpired),
-                0 => return Err(ResolveError::NoCandidate),
-                found => return Err(ResolveError::NotUnique { found }),
-            },
-            ResolutionStrategy::BoundedTrial(budget) => {
-                if live.is_empty() {
-                    return Err(ResolveError::NoCandidate);
-                }
-                if live.len() > budget.get() {
-                    return Err(ResolveError::CandidateBudgetExceeded {
-                        found: live.len(),
-                        budget: budget.get(),
-                    });
-                }
-            }
-        }
-        Ok(live.into_iter().map(|(id, r)| r.candidate(id)).collect())
+        inner.resolve(hint, strategy, now)
     }
 
     /// See [`SessionStore::claim`]. Check and set happen under one write lock.
     ///
-    /// Precedence: a consumed session reports [`ClaimError::Replay`] whatever the revision, so
-    /// the losers of a race see `Replay`; a pending session past its TTL is moved to `Expired`
-    /// and reports [`ClaimError::SessionExpired`]; only then is the revision compared.
+    /// Precedence: a candidate for a purged or re-inserted id reports
+    /// [`ClaimError::UnknownSession`]; a consumed session reports [`ClaimError::Replay`], so the
+    /// losers of a race see `Replay`; a pending session past its TTL is moved to `Expired` and
+    /// reports [`ClaimError::SessionExpired`]; only then is the revision compared.
     ///
     /// # Errors
     /// See [`ClaimError`].
     pub fn claim(
         &self,
-        id: &SessionId,
-        expected: Revision,
+        candidate: &Candidate<K>,
         digest: ResponseDigest,
         result: R,
     ) -> Result<SessionSnapshot<R>, ClaimError> {
         let mut inner = self.inner.write().map_err(|_| StoreUnavailable)?;
         // Read under the lock, so time spent waiting for it counts against the TTL.
         let now = self.clock.now();
-        let record = inner
-            .sessions
-            .get_mut(id)
-            .ok_or(ClaimError::UnknownSession)?;
-        match &record.state {
-            SessionState::Consumed {
-                digest: committed, ..
-            } => Err(ClaimError::Replay {
-                same_response: *committed == digest,
-            }),
-            SessionState::Expired => Err(ClaimError::SessionExpired),
-            SessionState::Pending if record.is_due(now) => {
-                record.state = SessionState::Expired;
-                record.revision = record.revision.next();
-                Err(ClaimError::SessionExpired)
-            }
-            SessionState::Pending if record.revision != expected => {
-                Err(ClaimError::RevisionMismatch {
-                    expected,
-                    actual: record.revision,
-                })
-            }
-            SessionState::Pending => {
-                record.state = SessionState::Consumed {
-                    result: Arc::new(result),
-                    digest,
-                };
-                record.revision = record.revision.next();
-                Ok(record.snapshot(id))
-            }
-        }
+        let (outcome, unused) = inner.claim(candidate, digest, result, now);
+        drop(inner);
+        drop(unused);
+        outcome
     }
 
     /// See [`SessionStore::snapshot`].
@@ -280,82 +576,60 @@ impl<K, R> MemoryRegistry<K, R> {
     pub fn expire_due(&self) -> Result<usize, StoreUnavailable> {
         let mut inner = self.inner.write().map_err(|_| StoreUnavailable)?;
         let now = self.clock.now();
-        let mut moved = 0;
-        for record in inner.sessions.values_mut() {
-            if record.state.is_pending() && record.is_due(now) {
-                record.state = SessionState::Expired;
-                record.revision = record.revision.next();
-                moved += 1;
-            }
-        }
-        Ok(moved)
+        Ok(inner.expire_due(now))
     }
 
-    /// See [`SessionStore::purge_expired`].
+    /// See [`SessionStore::purge`].
     ///
     /// # Errors
     /// [`StoreUnavailable`].
-    pub fn purge_expired(&self) -> Result<usize, StoreUnavailable> {
+    pub fn purge(&self) -> Result<usize, StoreUnavailable> {
         let mut inner = self.inner.write().map_err(|_| StoreUnavailable)?;
-        let Inner {
-            sessions,
-            by_route,
-            by_kid,
-        } = &mut *inner;
-        let mut removed = 0;
-        sessions.retain(|id, record| {
-            if !record.state.is_expired() {
-                return true;
-            }
-            unindex(by_route, &record.route_token, id);
-            if let Some(k) = &record.kid {
-                unindex(by_kid, k, id);
-            }
-            removed += 1;
-            false
-        });
-        Ok(removed)
+        let now = self.clock.now();
+        let removed = inner.purge(now, &self.config);
+        drop(inner);
+        let count = removed.len();
+        drop(removed);
+        Ok(count)
     }
 }
 
+// `async fn` bodies run only when the future is polled, so an unpolled, dropped future does
+// nothing (a cancelled handler cannot half-commit). The compiler checks the futures are `Send`.
 impl<K: Send + Sync, R: Send + Sync> SessionStore<K, R> for MemoryRegistry<K, R> {
-    fn insert(
-        &self,
-        session: NewSession<K>,
-    ) -> impl Future<Output = Result<SessionSnapshot<R>, InsertError>> + Send {
-        ready(Self::insert(self, session))
+    async fn insert(&self, session: NewSession<K>) -> Result<SessionSnapshot<R>, InsertError> {
+        Self::insert(self, session)
     }
 
-    fn resolve(
+    async fn resolve(
         &self,
         hint: &IngressHint,
         strategy: ResolutionStrategy,
-    ) -> impl Future<Output = Result<Vec<Candidate<K>>, ResolveError>> + Send {
-        ready(Self::resolve(self, hint, strategy))
+    ) -> Result<Vec<Candidate<K>>, ResolveError> {
+        Self::resolve(self, hint, strategy)
     }
 
-    fn claim(
+    async fn claim(
         &self,
-        id: &SessionId,
-        expected: Revision,
+        candidate: &Candidate<K>,
         digest: ResponseDigest,
         result: R,
-    ) -> impl Future<Output = Result<SessionSnapshot<R>, ClaimError>> + Send {
-        ready(Self::claim(self, id, expected, digest, result))
+    ) -> Result<SessionSnapshot<R>, ClaimError> {
+        Self::claim(self, candidate, digest, result)
     }
 
-    fn snapshot(
+    async fn snapshot(
         &self,
         id: &SessionId,
-    ) -> impl Future<Output = Result<Option<SessionSnapshot<R>>, StoreUnavailable>> + Send {
-        ready(Self::snapshot(self, id))
+    ) -> Result<Option<SessionSnapshot<R>>, StoreUnavailable> {
+        Self::snapshot(self, id)
     }
 
-    fn expire_due(&self) -> impl Future<Output = Result<usize, StoreUnavailable>> + Send {
-        ready(Self::expire_due(self))
+    async fn expire_due(&self) -> Result<usize, StoreUnavailable> {
+        Self::expire_due(self)
     }
 
-    fn purge_expired(&self) -> impl Future<Output = Result<usize, StoreUnavailable>> + Send {
-        ready(Self::purge_expired(self))
+    async fn purge(&self) -> Result<usize, StoreUnavailable> {
+        Self::purge(self)
     }
 }
