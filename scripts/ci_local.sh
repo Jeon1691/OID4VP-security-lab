@@ -58,6 +58,22 @@ REQUIRED_TESTS=(
   missing_response_parameter_is_rejected_before_decryption
   duplicated_response_parameter_is_rejected_before_decryption
   characterize_upstream_verify_response_reprocesses_replayed_jwe
+  # jose-hpke (IMP-004..006): official vectors and the key fail-closed checks.
+  rfc9180_derive_key_pair_matches_vector
+  rfc9180_base_p256_opens_all_vector_encryptions_in_sequence
+  rfc9180_base_p256_exporter_values_match
+  rfc9180_first_encryption_opens_via_codec_open_base
+  draft22_hpke0_compact_vector_decrypts_to_generator_plaintext
+  draft22_hpke0_protected_header_is_bound_as_aad
+  draft22_hpke0_ke_compact_vector_is_rejected
+  rejects_enc_header_parameter
+  rejects_duplicate_header_parameter
+  rejects_non_canonical_trailing_bits
+  direct_post_session_info_matches_openid4vp_example
+  dc_api_session_info_matches_openid4vp_example
+  direct_post_bound_jwe_fails_with_any_single_field_changed
+  dc_api_bound_jwe_fails_with_any_single_field_changed
+  direct_post_and_dc_api_session_info_never_cross_open
 )
 
 stage_test() {

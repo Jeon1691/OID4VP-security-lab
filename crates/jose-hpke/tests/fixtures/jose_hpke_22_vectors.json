@@ -1,0 +1,72 @@
+{
+  "source": {
+    "jose_vectors": "https://raw.githubusercontent.com/ietf-wg-jose/draft-ietf-jose-hpke-encrypt/2fa0c6b2b6d82013aa87a6d83c121de6f2fec3f0/examples/jose-vectors.json",
+    "plaintext": "https://raw.githubusercontent.com/ietf-wg-jose/draft-ietf-jose-hpke-encrypt/2fa0c6b2b6d82013aa87a6d83c121de6f2fec3f0/scripts/jwe.js",
+    "hpke_info": "empty octet string (jwe.js passes no info; draft-22 \u00a75 default)"
+  },
+  "plaintext": "You can trust us to stick with you through thick and thin-to the bitter end. And you can trust us to keep any secret of yours-closer than you keep it yourself. But you cannot trust us to let you face trouble alone, and go off without a word. We are your friends, Frodo.",
+  "vectors": [
+    {
+      "alg": "HPKE-0",
+      "jwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "qy-BxXhaelX9Fqe8muRTu8HhseHYgMMGxyfAnIy0MC0",
+        "y": "ctfHN7Y4pkj7vZI-sgJ6BqsYwG-PDnB8j7TsfzHHJOI",
+        "d": "aAKxBMAkNm2AZDGv7LN5yodDwahJ5rKbrgiiz3dUIH4",
+        "alg": "HPKE-0",
+        "use": "enc",
+        "kid": "KfvD-eYaynUKba0ow-v9uoEV-twV6mYDyiAOWO6LoPM"
+      },
+      "flattened": {
+        "protected": "eyJhbGciOiJIUEtFLTAiLCJraWQiOiJLZnZELWVZYXluVUtiYTBvdy12OXVvRVYtdHdWNm1ZRHlpQU9XTzZMb1BNIn0",
+        "aad": "VGhlIEZlbGxvd3NoaXAgb2YgdGhlIFJpbmc",
+        "encrypted_key": "BNC1LPfAH7I5Fxi7X7lrQLFkdpZcSGoXpBw4FYvCY1wZqAX53caa-lyNLPHkzwQMAMFHoOoN_TRGSzb2Gw4aDlA",
+        "ciphertext": "I0sH6mQa6r-mgLHqI23-wzBmsTULQoNtANiHF_incW5y5BIB7qo0XN3NoOqf1IvH1UEfE1_Tu9Baf6M3z_E9eJK1oDV1Q8A6VnZUnhj0cf2UNQhufoVJOlpbPolLiecxwitIqYKPKfzJmG1uZ7lA0xUAiNPkUR9OSHpLYr9HWAa1DWDbczWOMtFnxCJwd-PfyjX5-5-X6kAcdj5z-Kx4losmN2k7r2T1BUnHNnZlSgcz5nSZBxvKqkXX3xl0Tw9ys--37IJD7UcIFfST6b0PXHzuKSw-attSD_67SRcpcxUTm3nyvtroYF8sg0ztQLuNkC-gwe7-uxPNO2iBDIypgImhvlTaAEcuHJDtFgU5geIXFMAlMDAg7cSk4ssR"
+      },
+      "compact": "eyJhbGciOiJIUEtFLTAiLCJraWQiOiJLZnZELWVZYXluVUtiYTBvdy12OXVvRVYtdHdWNm1ZRHlpQU9XTzZMb1BNIn0.BKqUaiyoPbH1jnjApcpjGqswg7npGSSXFcFv1nGaL6YYs3S27c8Yi5V5rsds91bV_UjdqzLlj2zuuAPWetLMab8..fO8VQt1DsdgtijGci90sO8sNvws6im8Yko4NnMWXVAM5GaHbHYRSGnjs6M7GnkcaTrEjy8cxDDLZFKTwMdYGOjYBsbTVVAoIImVd8tXZNjQswaPU8t8OP1jCwo6iw8t4-Hm6hCE61uzhEd_r9XkN4blHjrcAoCICcwqn_5lgJCTPQezJtiTAhrtHpC1quPA3aO2Pyhui5CzOtk967IC8v28jq6K7C3mbu-m10bo0aWqdybibCiiS5A89PXFWurW83HNnJFdoiqZRTtF4d_OAQ2Jq9FCrahrh43Xqp1z3HYjf73_rOHYWXzv8jGorDAKjsPgxYN_9TgGUstjiRIMLj9dJXxqrPkRLQ4VSAzVWCNe5MabAR1sFFB5tx_gA."
+    },
+    {
+      "alg": "HPKE-0-KE",
+      "jwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "erH26InyPQifTIwmyKs63u4SUzglAHXNm2ZWT2LQ-rM",
+        "y": "GTGOC0_TnYc_Cm4dsgY8qdixil7AObs5-Xtk0QJeoH8",
+        "d": "MzJOwOcw1LDGZ-Ia6Zz5ay9zWUZKIhXkBcfq0dPA5Do",
+        "alg": "HPKE-0-KE",
+        "use": "enc",
+        "kid": "23i_7tQXiLxih47kQtE2yHy7d8q253Kp9R9i6aDyHng"
+      },
+      "flattened": {
+        "protected": "eyJhbGciOiJIUEtFLTAtS0UiLCJraWQiOiIyM2lfN3RRWGlMeGloNDdrUXRFMnlIeTdkOHEyNTNLcDlSOWk2YUR5SG5nIiwiZW5jIjoiQTEyOEdDTSIsImVrIjoiQkNlSmd0RGZGeVdtTDlJek0yT1Vnd1owWm9tWHVhb3BEcW5fR0JYX2V4N0pENlRyWWpLOUI5R2ZRYWhIamRuTGlsQ2V6WlNSX2NvaUtnVC1IQVhnSlFNIn0",
+        "aad": "VGhlIEZlbGxvd3NoaXAgb2YgdGhlIFJpbmc",
+        "iv": "hsc8LLwbgwf33MdT",
+        "ciphertext": "vwkACubXsG6xfuEbeZW24DJWq-ZlRExN1uaTyfwaNoCwDaURkrC0Vkc5w9B_KntgOMYvOgAVfSkqkztcRFX-AKIaOKGKYvPAY9ujuQtyA7SFMvaOjmao2XD96LtoeexaYrganCxHvJhjgyRH8xpb_QYVUGdmpjj9r_uNqZVTAuuUlrE87LbGkNaQuHpRCpYG7JbYHp8Sovnbepy84ORGXkhg7KamMfQQQ_ob5C5aY0g2BBqRgyuNErzDCq3RVVo91ddpGbSys25jlvAbqziBW1YOLIoLoGJDdqbykKzjravg1R1g7QCOpdN0ozcE_oEEHFEyRTilYRkxH_CqV2hxhakqDpGj3Q9qHGigJEk",
+        "tag": "Afab-bCOAfBSYJgIsaxxZQ",
+        "encrypted_key": "-mXiAU7aot-kdZ8KhWDoM_jXHk6_B5g0vH77u6r49os"
+      },
+      "compact": "eyJhbGciOiJIUEtFLTAtS0UiLCJraWQiOiIyM2lfN3RRWGlMeGloNDdrUXRFMnlIeTdkOHEyNTNLcDlSOWk2YUR5SG5nIiwiZW5jIjoiQTEyOEdDTSIsImVrIjoiQk4xRWI1bVFCZTgyLVRpWTJYc0xjWEhmb3ZjNWFxajRIRW5Ick10aFFoMDhqUDl5Vjd2U3VBZjZuYjNLQ3pSUWJmbHlGV2k3bDlrR3BtTm1xaTNYaW1RIn0.lnz6tY7OMgEqr2dUBFLhbRV5SV5NnnE75YoGf8fdCdQ.B01l-CsTkWGSh-8o.n33IRmokhNrqtaG5AL9COw-bVmYiPqCLBgludwQF3hyMYuagt4xxbKA2YdLHzgYk4ZCZQRdK5UJJcIKUsBsWNyDYhS0oZVcxq3wXOeG6jkEqUCzTU3PS0JeLW8uihm9gSjlW42dKUiYjqXL8kIJuWbCxqYs-Dslm5hfx4u_a06hvIRvJjVVQ4eWZMtUo5nIumyyid9qKwFFo_BLXaSxRZ7sa4TSRpu1Qywl8t3HcnnKThFfCSc6jIcJ3O9GIFXMDKqzBiciaxjim3xfv6A3qMHmIkF_rTT0dj9qmlolOfZeElX7sseq0EpOe9MPwcpFR3mZVUCe74FGUJNj4szJTb8pVgaZ9Yo5rXFKKn9s.MCd0fKMDwsgD6MW2XKzWWg"
+    },
+    {
+      "alg": "HPKE-7",
+      "jwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "z860carZ9CSxTjXo7MK65h_TaZX7ipi2iUh_Bh-VP54",
+        "y": "i9X0v8PwcNgbsoMhAz-_W2OPaFU--BQAgWVzJVOfedo",
+        "d": "nklFxo0VoD3POieIKD2I_6O4pyuoX1755y_r8My3kL4",
+        "alg": "HPKE-7",
+        "use": "enc",
+        "kid": "YGdLPiZno0vV3kJKu4kEMQEjK3_upFF2D_lFDf1FFwk"
+      },
+      "flattened": {
+        "protected": "eyJhbGciOiJIUEtFLTciLCJraWQiOiJZR2RMUGlabm8wdlYza0pLdTRrRU1RRWpLM191cEZGMkRfbEZEZjFGRndrIn0",
+        "aad": "VGhlIEZlbGxvd3NoaXAgb2YgdGhlIFJpbmc",
+        "encrypted_key": "BJsgimlSAygpn6mErqMkZcmzVLsX6V9aYArVYAjg2LEi2shWQopeMMr5n4VNH_kCeuqXRd2LtFjQd2eWsXTAcs8",
+        "ciphertext": "ny4HVMntsCPyijVFtO41pSpN_jusNGtAaYjD_glEgkQlnMlJuDyiTbL9_IgWjcmaQv-ahcToh6pussscT37Oki95DB56UEK1sgwv23m54UgDFDS3Q2UI48pRzgsONMJdc46-UjqCXvDgbGZfA7Afn-mCGJZo90Tr2QyDMpevwYv4-Zd6ldw2QrF7pUXXOLUP8yh2Y8qZB7JkyUvN5gH8QIgIcC11a-2-YWWSO3JgpJ4R51YESAOJ6MbaW2otZU7JY9GW7dKpwd3mym6IxJ4onwSvABkmVaFSqxOEBlStSLirlR0sf1q9HK_gn8HHNjlaNNja2yE3C42ESTWAoH1uapvfMaQJE1ZWG7ru77nMBQJPRxAb-dXTUJa3jeVF"
+      },
+      "compact": "eyJhbGciOiJIUEtFLTciLCJraWQiOiJZR2RMUGlabm8wdlYza0pLdTRrRU1RRWpLM191cEZGMkRfbEZEZjFGRndrIn0.BL2AEDUZhRslwuzyKdVKVaGwBpFly_SgLlxy2wTg42Vyfob2tCdv0SgN6OMR16kilUZ17jafK0Gzw0plYKGm08Y..0-DVK3WNJxSSX4hn0KgFlV4vRS4iJLiNCmjl9J4QKCYiOzmdHmWXvB4MS56wOmpVhDbboVIC0wOBxsUlWIXIg6N9DSlu-iwlgiqrVj2v61LrX-qjB7MAg0X5DQJSOWg-saAkhf2lEJ4z0meZIdAlY93_vgAUHKoHsSp_EciL28JtLrBU18WHv34eHONzWsVYdj-ycaBqLUAkcfYrlNZrVpCR6OdNXkuOmkhqrIZjFEl67VZVY5NfbvyFRAkkqgd42wvATdGk2gw_jDZe1fvzGNuV-e5UCrHQ-5Es2rmsLe-nfeB_9iUe-2nZswWS2qndvz6ZANF9Kj2QMJXCLN7RRSLLjP58sxoyDZC8nRBdJxsJKXc8G5eYFLJ1Bc4w."
+    }
+  ]
+}
