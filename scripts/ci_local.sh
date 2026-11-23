@@ -47,6 +47,7 @@ REQUIRED_TESTS=(
   each_session_gets_a_distinct_response_uri
   wire_strings_round_trip_byte_exact
   non_ascii_values_are_rejected
+  accepted_session_info_values_are_all_below_0x80
   unknown_response_mode_is_rejected
 )
 
