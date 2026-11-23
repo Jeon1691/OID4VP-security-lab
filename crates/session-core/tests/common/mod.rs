@@ -8,7 +8,8 @@ use std::time::Duration;
 
 use protocol_model::{ClientIdWire, KeyId, NonceWire, RequestBinding, ResponseUriWire, SessionId};
 use session_core::{
-    ManualClock, MemoryRegistry, NewSession, ResponseDigest, RouteToken, Timestamp,
+    Candidate, IngressHint, ManualClock, MemoryRegistry, NewSession, RESPONSE_DIGEST_BYTES,
+    RegistryConfig, ResolutionStrategy, ResponseDigest, RoutePolicy, RouteToken, Timestamp,
 };
 
 /// Stand-in for the jose-hpke private key handle the lab-server will plug in. The registry
@@ -34,9 +35,22 @@ pub const SCALES: [usize; 6] = [1, 2, 8, 32, 64, 128];
 const CLIENT_ID: &str = "x509_san_dns:verifier.lab.example";
 const RESPONSE_URI_BASE: &str = "https://verifier.lab.example/post";
 
+/// Registry with the default (hardened) configuration: one route token per session.
 pub fn registry() -> (Arc<ManualClock>, Registry) {
+    registry_with(RegistryConfig::default())
+}
+
+/// Registry for shared-URI deployments (unique-kid, bounded-trial).
+pub fn shared_registry() -> (Arc<ManualClock>, Registry) {
+    registry_with(RegistryConfig {
+        route_policy: RoutePolicy::Shared,
+        ..RegistryConfig::default()
+    })
+}
+
+pub fn registry_with(config: RegistryConfig) -> (Arc<ManualClock>, Registry) {
     let clock = Arc::new(ManualClock::new(T0));
-    let registry = Registry::new(clock.clone());
+    let registry = Registry::with_config(clock.clone(), config);
     (clock, registry)
 }
 
@@ -52,8 +66,12 @@ pub fn route() -> RouteToken {
     RouteToken::generate().expect("OS CSPRNG available")
 }
 
-pub fn digest(tag: u8) -> ResponseDigest {
-    ResponseDigest::new([tag; 32])
+/// A digest distinct for every `n` (its little-endian bytes, zero-padded).
+pub fn digest(n: usize) -> ResponseDigest {
+    let mut bytes = [0u8; RESPONSE_DIGEST_BYTES];
+    let le = n.to_le_bytes();
+    bytes[..le.len()].copy_from_slice(&le);
+    ResponseDigest::new(bytes)
 }
 
 pub fn binding(i: usize, route: &RouteToken) -> RequestBinding {
@@ -77,4 +95,24 @@ pub fn new_session(i: usize, route: &RouteToken, kid: Option<KeyId>) -> NewSessi
         key: TestKey(i),
         ttl: TTL,
     }
+}
+
+/// The single unique-uri candidate for `route`.
+pub fn candidate(reg: &Registry, route: &RouteToken) -> Candidate<TestKey> {
+    let mut found = reg
+        .resolve(
+            &IngressHint::new(route.clone(), None),
+            ResolutionStrategy::UniqueUri,
+        )
+        .expect("unique-uri resolves");
+    assert_eq!(found.len(), 1);
+    found.remove(0)
+}
+
+/// Inserts session `i` on a fresh route and returns its route and candidate.
+pub fn pending(reg: &Registry, i: usize) -> (RouteToken, Candidate<TestKey>) {
+    let r = route();
+    reg.insert(new_session(i, &r, None)).expect("insert");
+    let c = candidate(reg, &r);
+    (r, c)
 }

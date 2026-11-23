@@ -33,6 +33,34 @@ fn route_tokens_are_distinct_and_round_trip() {
     };
 }
 
+/// RFC 4648 §5 base64url alphabet, in value order.
+const BASE64URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+/// 128 bits in 22 six-bit characters leave the low 4 bits of the last character unused; a
+/// canonical encoding has them zero.
+const UNUSED_TRAILING_BITS: u8 = 0b1111;
+
+fn same_length_with(valid: &str, at: usize, c: char) -> String {
+    let mut s = valid.to_owned();
+    s.replace_range(at..=at, c.encode_utf8(&mut [0; 4]));
+    s
+}
+
+fn with_trailing_bits(valid: &str) -> String {
+    let last = valid.as_bytes()[ENCODED_LEN - 1];
+    let value = BASE64URL
+        .iter()
+        .position(|&b| b == last)
+        .expect("alphabet char");
+    let value = u8::try_from(value).expect("six bits");
+    assert_eq!(
+        value & UNUSED_TRAILING_BITS,
+        0,
+        "generated token is canonical"
+    );
+    let tampered = char::from(BASE64URL[usize::from(value | 1)]);
+    same_length_with(valid, ENCODED_LEN - 1, tampered)
+}
+
 #[test]
 fn route_token_parse_rejects_malformed_input() {
     let valid = RouteToken::generate().expect("rng").to_url_segment();
@@ -45,6 +73,12 @@ fn route_token_parse_rejects_malformed_input() {
         valid.replacen(|c: char| c.is_ascii_alphanumeric(), "/", 1),
         valid.replacen(|c: char| c.is_ascii_alphanumeric(), "é", 1),
         format!(" {}", &valid[1..]),
+        // Same length, one character outside the base64url alphabet.
+        same_length_with(&valid, ENCODED_LEN / 2, '.'),
+        same_length_with(&valid, ENCODED_LEN / 2, '='),
+        same_length_with(&valid, ENCODED_LEN / 2, '*'),
+        // Same length, valid alphabet, but the unused low bits of the last character set.
+        with_trailing_bits(&valid),
     ];
     for case in cases {
         assert_eq!(
