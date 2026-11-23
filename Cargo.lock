@@ -2234,6 +2234,7 @@ dependencies = [
  "base64 0.22.1",
  "getrandom 0.4.3",
  "hpke",
+ "jose-hpke",
  "protocol-model",
  "serde",
  "serde_json",

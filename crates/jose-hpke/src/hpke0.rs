@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use hpke::{Deserializable as _, Kem as _, OpModeR, OpModeS, Serializable as _};
+use hpke::{Deserializable as _, Kem as _, OpModeR, Serializable as _};
 
 use crate::error::Error;
 use crate::rand_core::CryptoRng;
@@ -46,7 +46,8 @@ impl RecipientPrivateKey {
     }
 
     /// RFC 9180 §7.1.3 `DeriveKeyPair(ikm)`. `ikm` SHOULD have at least 32 bytes of entropy;
-    /// intended for known-answer tests and deterministic lab fixtures.
+    /// intended for known-answer tests and deterministic lab fixtures (`test-support` feature).
+    #[cfg(feature = "test-support")]
     pub fn derive_from_ikm(ikm: &[u8]) -> Self {
         Self(Kem::derive_keypair(ikm).0)
     }
@@ -121,6 +122,8 @@ impl EncapsulatedKey {
 /// This is the primitive behind [`crate::CompactJwe::open`]; it is public so the RFC 9180
 /// known-answer tests exercise the same code path. `ciphertext` is the AEAD output including
 /// its 16-byte tag. Every failure after `enc` validation is [`Error::Decryption`].
+/// Available with the `test-support` feature only.
+#[cfg(feature = "test-support")]
 pub fn open_base(
     sk: &RecipientPrivateKey,
     encapsulated_key: &[u8],
@@ -132,6 +135,7 @@ pub fn open_base(
 }
 
 /// RFC 9180 §6.1 single-shot `SealBase(pkR, info, aad, pt)`; returns `(enc, ct)`.
+#[cfg(feature = "test-support")]
 pub(crate) fn seal_base(
     pk: &RecipientPublicKey,
     info: &[u8],
@@ -140,7 +144,7 @@ pub(crate) fn seal_base(
     rng: &mut impl CryptoRng,
 ) -> Result<(Vec<u8>, Vec<u8>), Error> {
     let (enc, ct) = hpke::single_shot_seal_with_rng::<Aead, Kdf, Kem>(
-        &OpModeS::Base,
+        &hpke::OpModeS::Base,
         &pk.0,
         info,
         plaintext,
