@@ -9,7 +9,8 @@ mod common;
 use common::{b64e, fresh_key, join, jose_vector, rng, split};
 use jose_hpke::test_support::{seal_compact, seal_compact_with_protected_header};
 use jose_hpke::{
-    CompactJwe, Error, MAX_COMPACT_JWE_LEN, RecipientPrivateKey, Segment, open_compact,
+    CompactJwe, Error, MAX_COMPACT_JWE_LEN, MAX_PROTECTED_HEADER_LEN, RecipientPrivateKey, Segment,
+    open_compact,
 };
 
 const PLAINTEXT: &[u8] = br#"{"vp_token":{"cred":["synthetic"]}}"#;
@@ -44,7 +45,7 @@ fn seal_then_open_round_trip_with_and_without_kid() {
     for kid in [None, Some("verifier-key-1")] {
         let compact = seal_compact(&pk, kid, INFO, PLAINTEXT, &mut rng()).expect("seal");
         let jwe = CompactJwe::parse(&compact).expect("parse");
-        assert_eq!(jwe.header().kid(), kid);
+        assert_eq!(jwe.header().kid().map(|k| k.as_str()), kid);
         assert_eq!(jwe.open(&sk, INFO).expect("open"), PLAINTEXT);
         let [_, _, iv, _, tag] = split(&compact);
         assert!(iv.is_empty() && tag.is_empty());
@@ -501,4 +502,73 @@ fn errors_do_not_echo_plaintext_or_header_values() {
     let err = parse_err(&header);
     let rendered = format!("{err} {err:?}");
     assert!(!rendered.contains(marker), "{rendered}");
+}
+
+/// `kid` must satisfy `protocol_model::KeyId` and `typ`/`cty` must be visible ASCII, so NUL,
+/// bidi overrides, zero-width or control characters never reach key lookup or logs (review L3).
+#[test]
+fn rejects_kid_typ_cty_with_control_bidi_or_empty_values() {
+    for kid in [
+        r"a\u0000b",
+        r"a\u202eb",
+        r"a\u200bb",
+        r"a\nb",
+        "a b",
+        "",
+        "caf\u{e9}",
+    ] {
+        let header = format!(r#"{{"alg":"HPKE-0","kid":"{kid}"}}"#);
+        assert_eq!(
+            parse_err(&header),
+            Error::HeaderParameterValue("kid"),
+            "{header}"
+        );
+    }
+    assert_eq!(
+        parse_err(r#"{"alg":"HPKE-0","typ":"JWT\u0007"}"#),
+        Error::HeaderParameterValue("typ")
+    );
+    assert_eq!(
+        parse_err(r#"{"alg":"HPKE-0","typ":""}"#),
+        Error::HeaderParameterValue("typ")
+    );
+    assert_eq!(
+        parse_err(r#"{"alg":"HPKE-0","cty":"json\u202e"}"#),
+        Error::HeaderParameterValue("cty")
+    );
+}
+
+#[test]
+fn rejects_protected_header_over_lab_limit() {
+    // {"alg":"HPKE-0","kid":"<k>"} is 25 bytes of framing plus the kid.
+    let framing = r#"{"alg":"HPKE-0","kid":""}"#.len();
+    let at_limit = format!(
+        r#"{{"alg":"HPKE-0","kid":"{}"}}"#,
+        "k".repeat(MAX_PROTECTED_HEADER_LEN - framing)
+    );
+    assert_eq!(at_limit.len(), MAX_PROTECTED_HEADER_LEN);
+    let (sk, compact) = sealed_with_header(&at_limit);
+    assert_eq!(
+        open_compact(&compact, &sk, INFO).expect("open at limit"),
+        PLAINTEXT
+    );
+
+    let over = format!(
+        r#"{{"alg":"HPKE-0","kid":"{}"}}"#,
+        "k".repeat(MAX_PROTECTED_HEADER_LEN - framing + 1)
+    );
+    assert_eq!(
+        parse_err(&over),
+        Error::HeaderTooLong {
+            max: MAX_PROTECTED_HEADER_LEN
+        }
+    );
+    // Far over the limit: rejected on the encoded length, before decoding.
+    let huge = b64e("x".repeat(MAX_COMPACT_JWE_LEN / 2).as_bytes());
+    assert_eq!(
+        CompactJwe::parse(&with_raw_header_segment(&huge)),
+        Err(Error::HeaderTooLong {
+            max: MAX_PROTECTED_HEADER_LEN
+        })
+    );
 }

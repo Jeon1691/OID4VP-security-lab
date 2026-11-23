@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::error::{Error, Segment};
 use crate::hpke0::{EncapsulatedKey, RecipientPrivateKey};
-use crate::{MAX_COMPACT_JWE_LEN, b64, header, header::ProtectedHeader};
+use crate::{MAX_COMPACT_JWE_LEN, MAX_PROTECTED_HEADER_LEN, b64, header, header::ProtectedHeader};
 
 /// RFC 7516 §7.1 / draft-22 §7.2 step 1: five segments, separated by exactly four periods.
 const COMPACT_SEGMENTS: usize = 5;
@@ -48,6 +48,13 @@ impl CompactJwe {
         let [protected, encrypted_key, iv, ciphertext, tag]: [&str; COMPACT_SEGMENTS] =
             std::array::from_fn(|_| segments.next().unwrap_or_default());
 
+        // Cheap pre-check on the encoded length (unpadded base64url needs at most 4 chars per
+        // 3 bytes); header::parse applies the exact decoded bound.
+        if protected.len() > MAX_PROTECTED_HEADER_LEN.div_ceil(3) * 4 {
+            return Err(Error::HeaderTooLong {
+                max: MAX_PROTECTED_HEADER_LEN,
+            });
+        }
         let header = header::parse(&b64::decode(protected, Segment::ProtectedHeader)?)?;
         // draft-22 §5: IV and Tag MUST be the empty octet sequence, i.e. empty segments.
         if !iv.is_empty() {
