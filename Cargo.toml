@@ -36,6 +36,10 @@ reqwest = { version = "0.12.28", default-features = false }
 # Required to implement openid4vp's `#[async_trait]` traits (Wallet, RequestVerifier, ...).
 async-trait = "0.1.92"
 
+# Property tests for the session state machine. Defaults pull rusty-fork/tempfile (fork and
+# timeout runners), which in-process tests do not need.
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+
 anyhow = "1.0.105"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
 base64 = "0.22"
@@ -52,7 +56,8 @@ protocol-model = { path = "crates/protocol-model" }
 hpke = { version = "0.15.1", default-features = false, features = ["alloc", "nistp", "aes", "hkdfsha2"] }
 # Only the Deserialize/Visitor traits are used (duplicate-member check); no derive needed.
 serde = "1.0.229"
-# Test-only OS RNG for jose-hpke seal round trips; implements the rand_core 0.10 traits hpke takes.
+# OS RNG. jose-hpke: test-only seal round trips (`sys_rng` implements the rand_core 0.10 traits
+# hpke takes). session-core: route tokens via `getrandom::fill`. One entry, one version.
 getrandom = { version = "0.4.3", default-features = false, features = ["sys_rng"] }
 
 # Vetted for upcoming sprints (compile-probed on rustc 1.100.0, 2026-11-23); move into the table
