@@ -46,6 +46,11 @@ allow = [
     "Unicode-3.0",
 ]
 confidence-threshold = 0.8
+# Same exception as upstream spruceid/openid4vp deny.toml; reached via serde_json preserve_order
+# feature unification (ssi). Crate-scoped; Zlib is not allowed globally.
+exceptions = [
+    { allow = ["Zlib"], crate = "foldhash" },
+]
 # The list mirrors upstream and will be needed as crates are added; don't warn while unused.
 unused-allowed-license = "allow"
 
