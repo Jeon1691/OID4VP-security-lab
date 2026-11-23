@@ -26,7 +26,10 @@ fn draft22_hpke0_compact_vector_decrypts_to_generator_plaintext() {
     let v = jose_vector("HPKE-0");
     let sk = jwk_private_key(&v["jwk"]);
     let jwe = CompactJwe::parse(v["compact"].as_str().expect("compact")).expect("parse");
-    assert_eq!(jwe.header().kid(), v["jwk"]["kid"].as_str());
+    assert_eq!(
+        jwe.header().kid().map(|k| k.as_str()),
+        v["jwk"]["kid"].as_str()
+    );
     let pt = jwe.open(&sk, b"").expect("open");
     assert_eq!(String::from_utf8(pt).expect("utf-8"), jose_plaintext());
 }

@@ -32,6 +32,9 @@
 //! | `zip` present | Lab policy: RFC 7516 §4.1.3 allows it; no decompression of untrusted data |
 //! | Any member other than `alg`, `kid`, `typ`, `cty` | Lab policy: deviates from RFC 7515 §4 / RFC 7516 §4, under which unknown non-critical parameters are ignored |
 //! | Input longer than [`MAX_COMPACT_JWE_LEN`] | Lab policy: no spec limit exists |
+//! | Decoded protected header longer than [`MAX_PROTECTED_HEADER_LEN`] | Lab policy: no spec limit exists |
+//! | `kid` not a `protocol_model::KeyId` (empty, non-ASCII, control, space) | Lab policy: RFC 7516 §4.1.6 allows any string |
+//! | `typ` / `cty` not non-empty visible ASCII | Lab policy: RFC 7516 §4.1.11-12 allow any string |
 //!
 //! Verifier flow: [`CompactJwe::parse`] (all key-independent checks), select the key by
 //! [`ProtectedHeader::kid`], compute [`SessionInfo::from_binding`] from the stored
@@ -74,3 +77,10 @@ pub const ALG_HPKE_0: &str = "HPKE-0";
 /// around 100 KiB with an embedded portrait. The HTTP layer should enforce its own body limit
 /// of at least this size.
 pub const MAX_COMPACT_JWE_LEN: usize = 1 << 20;
+
+/// Maximum decoded JWE Protected Header length in bytes (lab policy; no spec sets one).
+///
+/// An HPKE-0 header carries at most `alg`, `kid`, `typ` and `cty`, typically well under
+/// 200 bytes; 4 KiB leaves room for long key identifiers (e.g. a JWK thumbprint URI) while
+/// bounding the JSON parser's work and the size of any accepted `kid`.
+pub const MAX_PROTECTED_HEADER_LEN: usize = 4096;

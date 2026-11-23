@@ -58,6 +58,12 @@ pub enum Error {
     /// (draft-22 §7.2 steps 3-4).
     #[error("protected header is not a UTF-8 JSON object with unique member names")]
     HeaderJson,
+    /// The decoded protected header exceeds [`crate::MAX_PROTECTED_HEADER_LEN`] (lab policy).
+    #[error("protected header exceeds the maximum length of {max} bytes")]
+    HeaderTooLong {
+        /// The enforced limit.
+        max: usize,
+    },
     /// The protected header has no `alg` member.
     #[error("protected header has no \"alg\" member")]
     MissingAlg,
@@ -76,6 +82,10 @@ pub enum Error {
     /// A known header parameter has the wrong JSON type.
     #[error("header parameter \"{0}\" must be a JSON string")]
     HeaderParameterType(&'static str),
+    /// A string header parameter has a value outside the accepted set (`kid`: not a
+    /// `protocol_model::KeyId`; `typ`/`cty`: not non-empty visible ASCII). Lab policy.
+    #[error("header parameter \"{0}\" has an invalid value")]
+    HeaderParameterValue(&'static str),
     /// JWE Initialization Vector must be empty for Integrated Encryption (draft-22 §5).
     #[error("JWE Initialization Vector must be empty")]
     NonEmptyIv,
