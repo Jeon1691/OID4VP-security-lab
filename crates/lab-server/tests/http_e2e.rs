@@ -1075,3 +1075,178 @@ async fn request_limit_sheds_load_and_times_out_stalled_bodies() {
         .expect("accepted after the stalled request timed out");
     lab.shutdown().await;
 }
+
+/// Drain deadline for the shutdown tests: long enough to release a parked POST inside it.
+const SHORT_DRAIN: Duration = Duration::from_millis(400);
+/// Time to let the drain start before releasing the parked POST (well inside `SHORT_DRAIN`).
+const DRAIN_HEAD_START: Duration = Duration::from_millis(50);
+/// How long a request must stay unserved to show the connection cap holds it back.
+const CAPPED_WAIT: Duration = Duration::from_millis(300);
+
+/// Waits until `n` POSTs are parked on the decryption semaphore.
+async fn wait_parked(server: &LabServer, n: usize) {
+    let deadline = Instant::now() + SATURATION_DEADLINE;
+    while server.parked_trials() < n {
+        assert!(Instant::now() < deadline, "POST never parked");
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+}
+
+/// Review H1: in research mode a session created with a reused nonce on the shared route has
+/// the same session_info as an already consumed one, so a previously accepted JWE decrypts and
+/// validates for it. The verifier-wide replay guard refuses it (evidence CrossSessionReplay)
+/// and the new session stays pending.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cross_session_replay_on_shared_route_is_rejected() {
+    const REUSED_NONCE: &str = "lab-reused-nonce";
+    let lab = Lab::start(trial(TRIAL_SIZES[0])).await;
+    let create = || {
+        lab.wallet
+            .create_session(&lab.base(), RouteKind::Shared, Some(REUSED_NONCE))
+    };
+    let a = create().await.expect("session a");
+    let (jwe, status, _) = lab.respond(&a, &SealOptions::default()).await;
+    assert_success(status);
+    assert_committed(&lab.record(), &a);
+
+    let b = create().await.expect("session b with the same nonce");
+    let reply = lab
+        .wallet
+        .post_response(&b.response_uri, &jwe)
+        .await
+        .expect("post");
+    assert_generic(reply.status, &reply.body);
+    let record = lab.record();
+    assert_eq!(record.hpke_attempts, 1, "only b is live");
+    assert_eq!(
+        record.validation_result,
+        ValidationResult::Passed { validated: 1 }
+    );
+    assert_eq!(record.rejection, Some(Rejection::CrossSessionReplay));
+    assert_eq!(record.commit_result, CommitResult::NotRun);
+    lab.assert_pending(&b).await;
+    lab.shutdown().await;
+}
+
+/// Review M2: a caller-chosen research nonce is capped so that, with the longest allowed
+/// client_id (all characters needing JSON escapes), a matching presentation still fits under
+/// MAX_COMMITTED_VP_TOKEN_BYTES and commits; longer nonces and client ids are refused up front.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn research_nonce_length_is_capped_so_the_presentation_always_fits() {
+    let mut config = LabConfig::new(trial(TRIAL_SIZES[0]));
+    config.client_id =
+        protocol_model::ClientIdWire::new("\"".repeat(lab_server::MAX_CLIENT_ID_LEN))
+            .expect("client_id");
+    let lab = Lab::start_with(config).await;
+    let longest = "n".repeat(lab_server::MAX_RESEARCH_NONCE_LEN);
+    let session = lab
+        .wallet
+        .create_session(&lab.base(), RouteKind::Shared, Some(&longest))
+        .await
+        .expect("nonce at the cap is accepted");
+    let (_, status, _) = lab.respond(&session, &SealOptions::default()).await;
+    assert_success(status);
+    assert_committed(&lab.record(), &session);
+
+    let too_long = "n".repeat(lab_server::MAX_RESEARCH_NONCE_LEN + 1);
+    match lab
+        .wallet
+        .create_session(&lab.base(), RouteKind::Shared, Some(&too_long))
+        .await
+    {
+        Err(lab_server::wallet_sim::WalletError::Status(BAD_REQUEST)) => {}
+        other => panic!("over-long nonce accepted: {other:?}"),
+    }
+    lab.shutdown().await;
+
+    let mut config = LabConfig::new(Mode::Hardened);
+    config.client_id =
+        protocol_model::ClientIdWire::new("c".repeat(lab_server::MAX_CLIENT_ID_LEN + 1))
+            .expect("client_id");
+    assert!(matches!(
+        LabServer::start(config).await,
+        Err(StartError::ClientIdTooLong)
+    ));
+}
+
+/// Review M3: shutdown drains gracefully. A POST parked on the decryption semaphore and
+/// released during the drain commits before shutdown returns; one still parked at the drain
+/// deadline can never commit afterwards.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn shutdown_drains_in_flight_requests_and_commits_nothing_afterwards() {
+    for release_during_drain in [true, false] {
+        let mut config = LabConfig::new(Mode::Hardened);
+        config.shutdown_drain = SHORT_DRAIN;
+        let lab = Lab::start_with(config).await;
+        let session = lab.session(RouteKind::Unique).await;
+        let request = lab
+            .wallet
+            .fetch_request(&session.request_uri)
+            .await
+            .expect("request");
+        let jwe = lab
+            .wallet
+            .seal(&request, &SealOptions::default())
+            .expect("seal");
+
+        let pause = lab.server.pause_decryptions().await;
+        let wallet = lab.wallet.clone();
+        let uri = request.response_uri.clone();
+        let post = tokio::spawn(async move { wallet.post_response(&uri, &jwe).await });
+        wait_parked(&lab.server, 1).await;
+
+        let evidence = lab.server.evidence().clone();
+        let Lab { server, .. } = lab;
+        let shutdown = tokio::spawn(server.shutdown());
+        if release_during_drain {
+            tokio::time::sleep(DRAIN_HEAD_START).await;
+            drop(pause);
+            shutdown.await.expect("shutdown");
+            let records = evidence.take();
+            assert_eq!(records.len(), 1, "committed before shutdown returned");
+            assert_eq!(records[0].commit_result, CommitResult::Committed);
+            let reply = post
+                .await
+                .expect("task")
+                .expect("answered during the drain");
+            assert_success(reply.status);
+        } else {
+            shutdown.await.expect("shutdown");
+            drop(pause);
+            // The connection task still finishes the request, but can never commit it.
+            let reply = post.await.expect("task").expect("answered after shutdown");
+            assert_generic(reply.status, &reply.body);
+            let records = evidence.take();
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].rejection, Some(Rejection::ShuttingDown));
+            assert_eq!(records[0].commit_result, CommitResult::NotRun);
+        }
+    }
+}
+
+/// Review L4: a connection that never sends headers holds a connection slot, so the cap on
+/// accepted connections (not only the in-flight request limit) bounds such stalls; the slot
+/// frees when that connection closes. `/health` is used because it bypasses the request limit.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn connection_cap_holds_connections_stalled_before_headers() {
+    let mut config = LabConfig::new(Mode::Hardened);
+    config.max_connections = SINGLE_IN_FLIGHT;
+    let lab = Lab::start_with(config).await;
+    let health = format!("{}/health", lab.base());
+
+    let stalled = std::net::TcpStream::connect(lab.server.local_addr()).expect("connect");
+    let waited = tokio::time::timeout(CAPPED_WAIT, lab.wallet.get(&health)).await;
+    assert!(
+        waited.is_err(),
+        "served while the only slot was held: {waited:?}"
+    );
+
+    drop(stalled);
+    let reply = lab
+        .wallet
+        .get(&health)
+        .await
+        .expect("served after the slot freed");
+    assert_eq!(reply.status, OK);
+    lab.shutdown().await;
+}
