@@ -438,8 +438,12 @@ async fn wallet_refuses_request_signed_with_wrong_key() {
     let session = lab.session(RouteKind::Unique).await;
     let jwt = lab.raw_request(&session).await;
     let payload = decode_json(segments(&jwt)[JWS_PAYLOAD]);
-    let forged =
-        spruce_signed_with(&spruce_signer_for(&wrong_key_jwk()), &jar_header(), &payload).await;
+    let forged = spruce_signed_with(
+        &spruce_signer_for(&wrong_key_jwk()),
+        &jar_header(),
+        &payload,
+    )
+    .await;
     assert_rejected(
         lab.wallet.verify_request(&forged, &session.client_id).await,
         RequestRejection::Signature,
@@ -684,9 +688,16 @@ async fn request_object_carries_iat_and_exp_of_the_session_ttl() {
     let payload = decode_json(segments(&lab.raw_request(&session).await)[JWS_PAYLOAD]);
     let iat = payload["iat"].as_u64().expect("iat is a NumericDate");
     let exp = payload["exp"].as_u64().expect("exp is a NumericDate");
-    assert!((before..=after).contains(&iat), "iat {iat} in [{before}, {after}]");
+    assert!(
+        (before..=after).contains(&iat),
+        "iat {iat} in [{before}, {after}]"
+    );
     let ttl = DEFAULT_SESSION_TTL.as_secs();
-    assert!((ttl..=ttl + 1).contains(&(exp - iat)), "exp - iat = {}", exp - iat);
+    assert!(
+        (ttl..=ttl + 1).contains(&(exp - iat)),
+        "exp - iat = {}",
+        exp - iat
+    );
     lab.server.shutdown().await;
 }
 
@@ -702,21 +713,27 @@ async fn wallet_refuses_expired_or_exp_less_request() {
     expired["exp"] = (now_secs() - EXPIRED_BY_SECS).into();
     let expired = spruce_signed(&jar_header(), &expired).await;
     assert_rejected(
-        lab.wallet.verify_request(&expired, &session.client_id).await,
+        lab.wallet
+            .verify_request(&expired, &session.client_id)
+            .await,
         RequestRejection::Expired,
     );
     let mut missing = payload.clone();
     missing.as_object_mut().expect("object").remove("exp");
     let missing = spruce_signed(&jar_header(), &missing).await;
     assert_rejected(
-        lab.wallet.verify_request(&missing, &session.client_id).await,
+        lab.wallet
+            .verify_request(&missing, &session.client_id)
+            .await,
         RequestRejection::Expired,
     );
     let mut textual = payload.clone();
     textual["exp"] = "tomorrow".into();
     let textual = spruce_signed(&jar_header(), &textual).await;
     assert_rejected(
-        lab.wallet.verify_request(&textual, &session.client_id).await,
+        lab.wallet
+            .verify_request(&textual, &session.client_id)
+            .await,
         RequestRejection::Expired,
     );
     let fresh = spruce_signed(&jar_header(), &payload).await;

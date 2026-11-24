@@ -61,10 +61,12 @@ test targets unify the test-only `wallet-sim` feature (sealing) into the library
 Endpoints, modes, the per-POST pipeline and the evidence records are documented in
 `crates/lab-server/src/lib.rs`. Request objects are signed JWTs (JAR, RFC 9101; OpenID4VP 1.1
 §5): `GET request_uri` answers `application/oauth-authz-req+jwt` with an ES256 JWS (`typ`
-`oauth-authz-req+jwt`, did:key `kid`, `aud` `https://self-issued.me/v2`). It is signed once over
+`oauth-authz-req+jwt`, did:key `kid`, `aud` `https://self-issued.me/v2`, `iat`/`exp` = session
+expiry). The server refuses to start if a did:key `client_id` is not its key's. It is signed once over
 the stored `client_id` / `nonce` / `response_uri` (the HPKE `session_info` inputs), which tests
 pin byte-equal on every route. The wallet simulator verifies the signature against the did:key
-of the `client_id` (ssi resolver) and uses only the verified payload. Presentation validation is synthetic (Evidence level 2):
+of the `client_id` (ssi resolver), refuses expired objects, and uses only the verified payload.
+Presentation validation is synthetic (Evidence level 2):
 `nonce` and `aud` must match the session, HPKE decryption alone is never holder
 authentication, and KB-JWT holder binding is out of scope for this wave.
 

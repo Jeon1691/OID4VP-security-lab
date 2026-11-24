@@ -198,7 +198,8 @@ core_containment() {
 }
 
 # The Verifier build (lab-server default features, which the binary uses) must not contain
-# sender-side sealing (jose-hpke `test-support`, the wallet simulator's HTTP client) or the
+# sender-side sealing (jose-hpke `test-support`, the wallet simulator's HTTP client), the
+# SpruceID tree (`openid4vp`, `ssi*`: the wallet simulator's Request Object verification) or the
 # decryption pause lever. Both are only reachable through the `wallet-sim` /
 # `lab-instrumentation` features that tests enable via the self dev-dependency.
 verifier_without_sealing() {
@@ -208,7 +209,7 @@ verifier_without_sealing() {
   normal="$(cargo tree --locked -p lab-server -e normal --prefix none)" || return 1
   if grep -F 'feature "test-support"' <<<"$features" \
     || grep -E 'lab-server feature "(wallet-sim|lab-instrumentation)"' <<<"$own" \
-    || grep -E '^reqwest ' <<<"$normal"; then
+    || grep -E '^(reqwest|openid4vp|ssi|ssi-[a-z0-9-]+) ' <<<"$normal"; then
     echo "test-only feature reachable from the default lab-server build"
     return 1
   fi

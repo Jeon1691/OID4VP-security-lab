@@ -10,7 +10,7 @@
 //! refused.
 
 use std::net::IpAddr;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -97,6 +97,8 @@ pub enum RequestRejection {
     ClientId,
     /// `aud` is not the Static Discovery value (§5.8).
     Audience,
+    /// `exp` missing, not a NumericDate, or not after now (RFC 7519 §4.1.4).
+    Expired,
 }
 
 /// Which key the wallet accepts Request Object signatures from.
@@ -313,7 +315,8 @@ impl WalletSim {
     /// objects, no `crit`; `typ` = `oauth-authz-req+jwt` (§5); `alg` = ES256 exactly (so never
     /// `none`); the signature with the trusted key (did:key resolved from `kid`, or the pinned
     /// key); payload `client_id` = `client_id` (§5.10.1) and, with did:key trust, = the signing
-    /// DID (§5.9.3); `aud` = `https://self-issued.me/v2` (§5.8). `iss` is ignored (§5).
+    /// DID (§5.9.3); `aud` = `https://self-issued.me/v2` (§5.8); `exp` after now (RFC 7519
+    /// §4.1.4). `iss` is ignored (§5).
     ///
     /// # Errors
     /// [`WalletError::Rejected`], or a malformed (but verified) payload.
@@ -386,6 +389,17 @@ impl WalletSim {
         }
         if object.get("aud").and_then(Value::as_str) != Some(REQUEST_OBJECT_AUD) {
             return Err(reject(RequestRejection::Audience));
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| reject(RequestRejection::Expired))?
+            .as_secs();
+        if !object
+            .get("exp")
+            .and_then(Value::as_u64)
+            .is_some_and(|exp| now < exp)
+        {
+            return Err(reject(RequestRejection::Expired));
         }
         request_object(&Value::Object(object))
     }

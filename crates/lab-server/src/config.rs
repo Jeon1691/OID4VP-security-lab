@@ -7,7 +7,7 @@ use jose_hpke::MAX_COMPACT_JWE_LEN;
 use protocol_model::ClientIdWire;
 use session_core::{CandidateBudget, ResolutionStrategy};
 
-use crate::jar::RequestSigningKey;
+use crate::jar::{self, RequestSigningKey};
 use crate::validate::MAX_CLIENT_ID_LEN;
 
 /// Default request lifetime: five minutes, the typical request TTL session-core's consumed
@@ -82,8 +82,8 @@ pub const MAX_RESPONSE_BODY_BYTES: usize = MAX_COMPACT_JWE_LEN + FORM_OVERHEAD_B
 ///
 /// The did:key of the SpruceID fixture key G0-C/G0-D already sign Request Objects with
 /// (`tests/fixtures/spruce_verifier.jwk`). A server using this `client_id` must be given that
-/// key as [`LabConfig::request_signing_key`], or wallets resolving the did:key refuse its
-/// request objects; the key itself is never compiled in.
+/// key as [`LabConfig::request_signing_key`], or it refuses to start
+/// ([`StartError::ClientIdKeyMismatch`]); the key itself is never compiled in.
 pub const DEFAULT_CLIENT_ID: &str =
     "decentralized_identifier:did:key:zDnaeaDj3YpPR4JXos2kCCNPS86hdELeN5PZh97KGkoFzUtGn";
 
@@ -131,7 +131,8 @@ pub enum Mode {
 }
 
 /// Lab server configuration.
-#[derive(Debug, Clone)]
+/// Not `Clone`: it owns the Request Object signing key.
+#[derive(Debug)]
 pub struct LabConfig {
     /// Server mode.
     pub mode: Mode,
@@ -142,7 +143,8 @@ pub struct LabConfig {
     /// `client_id` of every request object.
     pub client_id: ClientIdWire,
     /// Signs every request object (JAR). For a `decentralized_identifier:did:key:` client id it
-    /// must be the key of that did:key; the server cannot check this, wallets do.
+    /// must be the key of that did:key: the server derives the did:key from it and refuses to
+    /// start otherwise.
     pub request_signing_key: RequestSigningKey,
     /// Lifetime of each session from creation.
     pub session_ttl: Duration,
@@ -207,10 +209,20 @@ pub enum StartError {
     /// The OS random number generator failed while creating server keys.
     #[error("OS random number generator unavailable")]
     Rng,
+    /// A `decentralized_identifier:did:key:` client id that is not the did:key of
+    /// [`LabConfig::request_signing_key`] (OpenID4VP 1.1 §5.9.3).
+    #[error("client_id did:key is not the did:key of the request signing key")]
+    ClientIdKeyMismatch,
+    /// A Client Identifier Prefix the lab cannot sign Request Objects for correctly
+    /// (`redirect_uri`, DID methods other than did:key, x509, attestation, federation,
+    /// `origin`; OpenID4VP 1.1 §5.9.3).
+    #[error("the lab cannot sign request objects for this client_id prefix")]
+    UnsupportedClientIdPrefix,
 }
 
-/// Checks `config` before anything is bound.
-pub(crate) fn check(config: &LabConfig) -> Result<(), StartError> {
+/// Checks `config` before anything is bound; returns the Request Object `kid` for its
+/// `client_id` ([`jar::request_kid`]).
+pub(crate) fn check(config: &LabConfig) -> Result<Option<String>, StartError> {
     if !config.bind.ip().is_loopback() {
         return Err(StartError::LoopbackOnly);
     }
@@ -226,5 +238,5 @@ pub(crate) fn check(config: &LabConfig) -> Result<(), StartError> {
     {
         return Err(StartError::ZeroLimit);
     }
-    Ok(())
+    jar::request_kid(config.client_id.as_str(), &config.request_signing_key)
 }
