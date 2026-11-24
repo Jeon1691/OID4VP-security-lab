@@ -1,39 +1,585 @@
 ## build: cargo build --workspace --all-targets --locked
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.38s
+   Compiling typenum v1.20.1
+   Compiling subtle v2.6.1
+   Compiling serde_core v1.0.229
+   Compiling rand_core v0.10.1
+   Compiling block-buffer v0.10.4
+   Compiling cmov v0.5.4
+   Compiling httpdate v1.0.3
+   Compiling tower v0.5.3
+   Compiling const-oid v0.10.3
+   Compiling cpubits v0.1.1
+   Compiling protocol-model v0.0.0 (./crates/protocol-model)
+   Compiling ff v0.13.1
+   Compiling rustls v0.23.46
+   Compiling base16ct v1.0.0
+   Compiling cpufeatures v0.3.1
+   Compiling getrandom v0.4.3
+   Compiling ff v0.14.0
+   Compiling digest v0.10.7
+   Compiling chacha20 v0.10.2
+   Compiling rand_xorshift v0.5.0
+   Compiling core_detect v1.0.0
+   Compiling unarray v0.1.4
+   Compiling group v0.13.0
+   Compiling ctutils v0.4.8
+   Compiling group v0.14.0
+   Compiling der v0.8.3
+   Compiling rand v0.10.4
+   Compiling axum-core v0.5.6
+   Compiling matchit v0.8.4
+   Compiling session-core v0.0.0 (./crates/session-core)
+   Compiling sha2 v0.10.9
+   Compiling parking v2.2.1
+   Compiling fastrand v2.5.0
+   Compiling arc-swap v1.9.5
+   Compiling combine v4.6.9
+   Compiling sha1_smol v1.0.1
+   Compiling event-listener v5.4.2
+   Compiling backon v1.6.0
+   Compiling xxhash-rust v0.8.21
+   Compiling arcstr v1.2.0
+   Compiling event-listener-strategy v0.5.4
+   Compiling async-lock v3.5.0
+   Compiling proptest v1.12.0
+   Compiling generic-array v0.14.7
+   Compiling bitmaps v2.1.0
+   Compiling hybrid-array v0.4.15
+   Compiling crypto-common v0.1.7
+   Compiling crypto-bigint v0.5.5
+   Compiling digest v0.9.0
+   Compiling block-buffer v0.9.0
+   Compiling crypto-bigint v0.3.2
+   Compiling inout v0.1.4
+   Compiling sized-chunks v0.6.5
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling crypto-bigint v0.7.11
+   Compiling sec1 v0.8.1
+   Compiling inout v0.2.6
+   Compiling sha2 v0.9.9
+   Compiling ripemd160 v0.9.1
+   Compiling cipher v0.4.4
+   Compiling universal-hash v0.5.1
+   Compiling aead v0.5.2
+   Compiling im v15.1.0
+   Compiling polyval v0.6.2
+   Compiling hmac v0.12.1
+   Compiling signature v2.2.0
+   Compiling curve25519-dalek v4.1.3
+   Compiling bs58 v0.4.0
+   Compiling blake2 v0.10.6
+   Compiling sha3 v0.10.9
+   Compiling hkdf v0.12.4
+   Compiling rfc6979 v0.4.0
+   Compiling ed25519 v2.2.3
+   Compiling der v0.5.1
+   Compiling sshkeys v0.3.4
+   Compiling ghash v0.5.1
+   Compiling aes v0.8.4
+   Compiling ctr v0.9.2
+   Compiling rsa v0.9.10
+   Compiling digest v0.11.3
+   Compiling universal-hash v0.6.1
+   Compiling cipher v0.5.2
+   Compiling serde v1.0.229
+   Compiling indexmap v2.14.2
+   Compiling csv v1.4.0
+   Compiling uuid v1.29.3
+   Compiling ed25519-dalek v2.2.0
+   Compiling hmac v0.13.0
+   Compiling signature v3.0.0
+   Compiling polyval v0.7.3
+   Compiling hkdf v0.13.0
+   Compiling aes v0.9.4
+   Compiling ctr v0.10.1
+   Compiling spki v0.5.4
+   Compiling ghash v0.6.0
+   Compiling sha2 v0.11.1
+   Compiling aead v0.6.1
+   Compiling serde_bytes v0.11.19
+   Compiling aes-gcm v0.10.3
+   Compiling ciborium v0.2.2
+   Compiling btree-range-map v0.7.2
+   Compiling locspan v0.8.2
+   Compiling smallstr v0.3.1
+   Compiling chrono v0.4.45
+   Compiling serdect v0.2.0
+   Compiling ssi-core v0.3.0
+   Compiling ssi-multicodec v0.2.0
+   Compiling pkcs8 v0.8.0
+   Compiling url v2.5.9
+   Compiling serde_urlencoded v0.7.1
+   Compiling serde_with v2.3.3
+   Compiling sec1 v0.7.3
+   Compiling ordered-float v4.6.0
+   Compiling serde_json v1.0.154
+   Compiling h2 v0.4.20
+   Compiling pkcs1 v0.3.3
+   Compiling serde_cbor v0.11.2
+   Compiling aes-gcm v0.11.1
+   Compiling multihash v0.19.5
+   Compiling serde_with v1.14.0
+   Compiling rsa v0.6.1
+   Compiling coset v0.3.8
+   Compiling cid v0.11.3
+   Compiling static-regular-grammar v2.0.2
+   Compiling ipld-core v0.4.3
+   Compiling tower-http v0.6.11
+   Compiling simple_asn1 v0.5.4
+   Compiling primefield v0.14.0
+   Compiling elliptic-curve v0.14.3
+   Compiling rfc6979 v0.6.0
+   Compiling wnaf v0.14.1
+   Compiling json-number v0.4.10
+   Compiling elliptic-curve v0.13.8
+   Compiling serde_jcs v0.1.0
+   Compiling treediff v3.0.2
+   Compiling serde_ipld_dagjson v0.2.2
+   Compiling serde_json_path_core v0.2.2
+   Compiling primeorder v0.14.0
+   Compiling ecdsa v0.17.0
+   Compiling tokio-rustls v0.26.6
+   Compiling rustls-platform-verifier v0.7.1
+   Compiling openid4vp-frontend v0.1.0 (https://github.com/spruceid/openid4vp?rev=c57a895884d039a741cc4b472c1698fb147ba487#c57a8958)
+   Compiling json-syntax v0.12.5
+   Compiling json-patch v0.2.7
+   Compiling ecdsa v0.16.9
+   Compiling primeorder v0.13.6
+   Compiling p384 v0.14.0
+   Compiling p521 v0.14.0
+   Compiling redis v1.8.3
+   Compiling serde_json_path_macros v0.1.6
+   Compiling p256 v0.14.0
+   Compiling serde_json_path v0.7.2
+   Compiling p256 v0.13.2
+   Compiling k256 v0.13.4
+   Compiling p384 v0.13.1
+   Compiling josekit v0.8.3 (https://github.com/cobward/josekit-rs?rev=635c8a7#635c8a76)
+   Compiling hyper v1.12.0
+   Compiling iref-core v3.2.2
+   Compiling langtag v0.4.0
+   Compiling hyper-util v0.1.21
+   Compiling iref v3.2.2
+   Compiling static-iref v3.0.0
+   Compiling hyper-rustls v0.27.10
+   Compiling axum v0.8.9
+   Compiling rdf-types v0.22.5
+   Compiling linked-data-derive v0.1.0
+   Compiling xsd-types v0.9.6
+   Compiling ssi-crypto v0.2.1
+   Compiling reqwest v0.13.5
+   Compiling reqwest v0.12.28
+   Compiling hpke v0.15.1
+   Compiling jose-hpke v0.0.0 (./crates/jose-hpke)
+   Compiling session-redis v0.0.0 (./crates/session-redis)
+   Compiling json-ld-syntax v0.21.4
+   Compiling linked-data v0.1.2
+   Compiling json-ld-core v0.21.4
+   Compiling ssi-rdf v0.1.1
+   Compiling ssi-eip712 v0.1.1
+   Compiling ssi-security v0.1.0
+   Compiling json-ld-context-processing v0.21.4
+   Compiling json-ld-serialization v0.21.4
+   Compiling json-ld-expansion v0.21.4
+   Compiling json-ld-compaction v0.21.4
+   Compiling json-ld v0.21.4
+   Compiling ssi-json-ld v0.3.3
+   Compiling ssi-claims-core v0.2.0
+   Compiling ssi-di-sd-primitives v0.3.0
+   Compiling ssi-jwk v0.4.0
+   Compiling ssi-cose v0.2.0
+   Compiling ssi-jws v0.5.0
+   Compiling ssi-caips v0.3.0
+   Compiling ssi-ssh v0.3.0
+   Compiling ssi-verification-methods-core v0.3.0
+   Compiling ssi-jwt v0.6.0
+   Compiling ssi-sd-jwt v0.6.0
+   Compiling ssi-dids-core v0.3.1
+   Compiling ssi-verification-methods v0.3.0
+   Compiling did-pkh v0.5.0
+   Compiling did-method-key v0.5.0
+   Compiling did-tz v0.5.1
+   Compiling did-ethr v0.5.0
+   Compiling did-web v0.5.1
+   Compiling ssi-data-integrity-core v0.5.0
+   Compiling did-ion v0.6.1
+   Compiling did-jwk v0.4.0
+   Compiling ssi-ucan v0.5.0
+   Compiling ssi-dids v0.5.0
+   Compiling ssi-data-integrity-suites v0.4.0
+   Compiling ssi-data-integrity v0.4.0
+   Compiling ssi-vc v0.9.2
+   Compiling ssi-vc-jose-cose v0.7.0
+   Compiling ssi-claims v0.7.0
+   Compiling ssi-status v0.8.1
+   Compiling ssi-zcap-ld v0.8.0
+   Compiling ssi v0.16.0
+   Compiling lab-server v0.0.0 (./crates/lab-server)
+   Compiling openid4vp v0.1.0 (https://github.com/spruceid/openid4vp?rev=c57a895884d039a741cc4b472c1698fb147ba487#c57a8958)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 16.31s
 build=pass
 ## test: cargo test --workspace --all-features --locked
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s
-     Running unittests src/lib.rs (target/debug/build/jose-hpke/15ad959c9e055d47/out/jose_hpke-15ad959c9e055d47)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.18s
+     Running unittests src/lib.rs (target/debug/build/jose-hpke/e9401b707b48dd96/out/jose_hpke-e9401b707b48dd96)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running unittests src/lib.rs (target/debug/build/lab-server/6d5673705281dc6b/out/lab_server-6d5673705281dc6b)
+     Running tests/compact_policy.rs (target/debug/build/jose-hpke/58d608be16e0a06e/out/compact_policy-58d608be16e0a06e)
+
+running 29 tests
+test rejects_json_serialization_with_multiple_recipients ... ok
+test private_key_debug_does_not_print_key_bytes ... ok
+test rejects_header_with_invalid_utf8 ... ok
+test rejects_oversize_input ... ok
+test rejects_invalid_encapsulated_key ... ok
+test rejects_ek_header_parameter ... ok
+test rejects_non_empty_iv_or_tag ... ok
+test rejects_padded_base64url ... ok
+test rejects_psk_id_header_parameter ... ok
+test rejects_non_canonical_trailing_bits ... ok
+test rejects_wrong_segment_count ... ok
+test accepts_typ_and_cty_header_parameters ... ok
+test rejects_missing_alg ... ok
+test rejects_standard_alphabet_whitespace_and_line_breaks ... ok
+test rejects_zip_header_parameter ... ok
+test errors_do_not_echo_plaintext_or_header_values ... ok
+test rejects_protected_header_over_lab_limit ... ok
+test rejects_enc_header_parameter ... ok
+test decryption_errors_are_indistinguishable ... ok
+test rejects_separator_flood_at_maximum_length ... ok
+test rejects_duplicate_header_parameter ... ok
+test rejects_crit_header_parameter ... ok
+test seal_then_open_round_trip_with_and_without_kid ... ok
+test rejects_escaped_duplicate_header_parameter ... ok
+test rejects_unknown_header_parameter ... ok
+test rejects_non_string_alg_or_kid ... ok
+test rejects_kid_typ_cty_with_control_bidi_or_empty_values ... ok
+test rejects_header_that_is_not_a_json_object ... ok
+test rejects_unsupported_alg ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+     Running tests/jose_hpke_vectors.rs (target/debug/build/jose-hpke/df42e49bbbf6aced/out/jose_hpke_vectors-df42e49bbbf6aced)
+
+running 9 tests
+test draft22_hpke7_compact_vector_is_rejected_as_unsupported_alg ... ok
+test draft22_hpke0_ke_compact_vector_is_rejected ... ok
+test draft22_hpke0_flattened_json_serialization_is_rejected ... ok
+test draft22_hpke0_jwk_private_key_matches_public_coordinates ... ok
+test draft22_hpke0_compact_vector_decrypts_to_generator_plaintext ... ok
+test draft22_hpke0_compact_vector_fails_with_session_info_as_info ... ok
+test draft22_hpke0_compact_vector_fails_with_wrong_key ... ok
+test draft22_hpke0_tampered_ciphertext_or_encapsulated_key_is_rejected ... ok
+test draft22_hpke0_protected_header_is_bound_as_aad ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/rfc9180_vectors.rs (target/debug/build/jose-hpke/de125209bf09445b/out/rfc9180_vectors-de125209bf09445b)
+
+running 8 tests
+test rfc9180_vector_suite_ids_match_hpke0_types ... ok
+test rfc9180_vector_nonces_follow_base_nonce_xor_sequence ... ok
+test rfc9180_base_p256_exporter_values_match ... ok
+test rfc9180_first_encryption_opens_via_codec_open_base ... ok
+test rfc9180_base_p256_opens_all_vector_encryptions_in_sequence ... ok
+test rfc9180_derive_key_pair_matches_vector ... ok
+test rfc9180_later_sequence_numbers_do_not_open_single_shot ... ok
+test rfc9180_first_encryption_rejects_wrong_info_aad_or_ciphertext ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/session_info.rs (target/debug/build/jose-hpke/e383a98975784304/out/session_info-e383a98975784304)
+
+running 9 tests
+test invalid_session_info_inputs_cannot_be_constructed ... ok
+test dc_api_session_info_matches_openid4vp_example ... ok
+test direct_post_session_info_matches_openid4vp_example ... ok
+test session_info_separators_are_the_only_high_bytes ... ok
+test from_binding_matches_openid4vp_examples ... ok
+test direct_post_bound_jwe_opens_only_with_identical_session ... ok
+test dc_api_bound_jwe_fails_with_any_single_field_changed ... ok
+test direct_post_bound_jwe_fails_with_any_single_field_changed ... ok
+test direct_post_and_dc_api_session_info_never_cross_open ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running unittests src/lib.rs (target/debug/build/lab-server/00ae7d67a66a8c40/out/lab_server-00ae7d67a66a8c40)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/spruce_api_smoke.rs (target/debug/build/lab-server/6b0260ac62025719/out/spruce_api_smoke-6b0260ac62025719)
+     Running unittests src/main.rs (target/debug/build/lab-server/dafbff0d1cf5e20e/out/lab_server-dafbff0d1cf5e20e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/ecdh_es_direct_post_jwt_e2e.rs (target/debug/build/lab-server/557e3538c2f4bbd8/out/ecdh_es_direct_post_jwt_e2e-557e3538c2f4bbd8)
+
+running 9 tests
+test missing_response_parameter_is_rejected_before_decryption ... ok
+test duplicated_response_parameter_is_rejected_before_decryption ... ok
+test non_form_content_type_is_rejected_before_decryption ... ok
+test jwe_with_wrong_kid_is_rejected ... ok
+test jwe_with_unadvertised_enc_is_rejected ... ok
+test jwe_with_zip_header_is_rejected ... ok
+test ecdh_es_direct_post_jwt_round_trip_completes_with_success ... ok
+test tampered_jwe_ciphertext_is_not_accepted ... ok
+test characterize_upstream_verify_response_reprocesses_replayed_jwe ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/http_e2e.rs (target/debug/build/lab-server/7bf53eb3099631ae/out/http_e2e-7bf53eb3099631ae)
+
+running 27 tests
+test hardened_mode_has_no_shared_route ... ok
+test request_object_carries_exact_wire_values ... ok
+test research_nonce_length_is_capped_so_the_presentation_always_fits ... ok
+test results_are_served_only_by_result_token ... ok
+test bounded_trial_with_two_validating_sessions_is_an_integrity_failure ... ok
+test cross_session_replay_on_shared_route_is_rejected ... ok
+test admission_failures_are_rejected_before_decryption ... ok
+test every_mode_binds_loopback_only ... ok
+test sequential_replay_is_rejected ... ok
+test generic_rejection_bodies_are_byte_identical ... ok
+test presentation_with_extra_or_oversized_members_is_rejected_and_does_not_consume ... ok
+test jwe_without_kid_is_rejected_on_every_route ... ok
+test invalid_jwe_does_not_consume_the_session ... ok
+test unique_uri_form_post_succeeds_with_one_hpke_attempt ... ok
+test jwe_bound_to_another_sessions_values_fails ... ok
+test new_connections_are_refused_while_shutdown_drains ... ok
+test unique_kid_on_shared_route_yields_one_candidate_and_one_attempt ... ok
+test unique_uri_among_many_sessions_consumes_only_the_addressed_one ... ok
+test concurrent_identical_posts_consume_exactly_once ... ok
+test bounded_trial_over_budget_is_rejected_without_decryption ... ok
+test connection_cap_holds_connections_stalled_before_headers ... ok
+test sweep_expires_and_purges_stale_sessions ... ok
+test request_limit_sheds_load_and_times_out_stalled_bodies ... ok
+test stalled_header_connection_is_closed_at_the_header_timeout_and_frees_its_slot ... ok
+test timed_out_parked_post_is_no_longer_counted_as_parked ... ok
+test shutdown_drains_in_flight_requests_and_commits_nothing_afterwards ... ok
+test bounded_trial_succeeds_with_right_session_last_within_budget ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.67s
+
+     Running tests/signed_request_object_e2e.rs (target/debug/build/lab-server/18d1231d2e2cf517/out/signed_request_object_e2e-18d1231d2e2cf517)
+
+running 20 tests
+test start_refuses_did_key_client_id_that_is_not_the_signing_keys ... ok
+test request_signing_key_is_loaded_from_config_and_never_printed ... ok
+test request_object_carries_iat_and_exp_of_the_session_ttl ... ok
+test request_uri_serves_signed_jar_with_spec_header_and_claims ... ok
+test lab_request_signature_is_byte_identical_to_spruce_p256_signer ... ok
+test wallet_refuses_request_served_with_wrong_content_type ... ok
+test wallet_refuses_unsigned_alg_none_request ... ok
+test start_accepts_the_did_key_of_any_signing_key ... ok
+test wallet_refuses_request_with_crit_header_or_extra_segment ... ok
+test wallet_refuses_tampered_request_payload ... ok
+test wallet_refuses_request_with_missing_or_unresolvable_kid ... ok
+test wallet_refuses_attacker_did_key_claiming_the_lab_client_id ... ok
+test start_refuses_client_id_prefixes_the_lab_cannot_sign_for ... ok
+test wallet_refuses_request_signed_with_wrong_key ... ok
+test wallet_refuses_request_with_wrong_typ ... ok
+test served_request_object_is_signed_once_and_never_changes ... ok
+test wallet_refuses_request_with_foreign_client_id_or_aud ... ok
+test wallet_refuses_expired_or_exp_less_request ... ok
+test signed_request_object_binding_bytes_match_stored_session_and_session_info ... ok
+test request_object_exp_never_precedes_the_stored_session_expiry ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.17s
+
+     Running tests/spruce_api_smoke.rs (target/debug/build/lab-server/26131a902aa2b309/out/spruce_api_smoke-26131a902aa2b309)
 
 running 2 tests
 test signed_request_binding_matches_stored_session ... ok
 test each_session_gets_a_distinct_response_uri ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
-     Running unittests src/lib.rs (target/debug/build/protocol-model/e53b5bb0bc1f8c15/out/protocol_model-e53b5bb0bc1f8c15)
+     Running unittests src/lib.rs (target/debug/build/protocol-model/47b2aaf730a92243/out/protocol_model-47b2aaf730a92243)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/wire_model.rs (target/debug/build/protocol-model/c3e41c4f638efcca/out/wire_model-c3e41c4f638efcca)
+
+running 12 tests
+test bidi_and_zero_width_in_identifiers_are_rejected ... ok
+test delimiter_lookalikes_are_rejected ... ok
+test empty_values_are_rejected ... ok
+test non_ascii_values_are_rejected ... ok
+test nonce_outside_url_safe_set_is_rejected ... ok
+test only_client_id_allows_space ... ok
+test origin_prefix_is_rejected ... ok
+test unknown_response_mode_is_rejected ... ok
+test wire_strings_round_trip_byte_exact ... ok
+test control_characters_and_spaces_are_rejected ... ok
+test binding_variants_report_their_mode_and_nonce ... ok
+test accepted_session_info_values_are_all_below_0x80 ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/build/session-core/208cc2e64435b937/out/session_core-208cc2e64435b937)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running unittests src/lib.rs (target/debug/build/session-core/4b148b5c07de4e32/out/session_core-4b148b5c07de4e32)
+     Running tests/claim.rs (target/debug/build/session-core/a30eec7482eb6f8c/out/claim-a30eec7482eb6f8c)
+
+running 14 tests
+test claim_of_unknown_session_is_rejected ... ok
+test claim_just_before_expiry_succeeds ... ok
+test insert_rejects_duplicate_id_and_zero_ttl ... ok
+test claim_after_expiry_is_rejected ... ok
+test stale_candidate_cannot_claim_a_reinserted_session ... ok
+test failed_attempt_leaves_session_pending_and_claimable ... ok
+test sequential_replay_after_consume_is_rejected ... ok
+test consumed_records_are_purged_after_retention ... ok
+test expire_and_purge_touch_only_due_sessions ... ok
+test unique_route_policy_rejects_duplicate_route_token ... ok
+test dropped_claim_future_commits_nothing ... ok
+test insert_beyond_pending_capacity_is_rejected ... ok
+test concurrent_async_claims_commit_exactly_once ... ok
+test concurrent_claims_of_one_session_commit_exactly_once ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/resolution.rs (target/debug/build/session-core/1e0077a859fa255a/out/resolution-1e0077a859fa255a)
+
+running 13 tests
+test candidate_budget_rejects_zero_and_values_above_maximum ... ok
+test unique_strategy_refuses_an_ambiguous_hint ... ok
+test unique_kid_checks_kid_uniqueness_before_route ... ok
+test unique_uri_checks_route_uniqueness_before_kid ... ok
+test snapshots_are_point_in_time_copies ... ok
+test unknown_route_token_or_kid_yields_no_candidate ... ok
+test consumed_sessions_are_never_candidates ... ok
+test expired_sessions_are_never_candidates ... ok
+test bounded_trial_budget_counts_only_live_sessions ... ok
+test bounded_trial_rejects_more_candidates_than_budget ... ok
+test bounded_trial_returns_all_candidates_within_budget ... ok
+test unique_kid_yields_exactly_one_candidate_among_sessions_sharing_route ... ok
+test unique_uri_yields_exactly_one_candidate_among_sessions_sharing_kid ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/route_token.rs (target/debug/build/session-core/4b922a35c3aad624/out/route_token-4b922a35c3aad624)
+
+running 3 tests
+test route_token_debug_does_not_reveal_the_token ... ok
+test route_token_parse_rejects_malformed_input ... ok
+test route_tokens_are_distinct_and_round_trip ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/state_machine.rs (target/debug/build/session-core/7b59c8fd022fc446/out/state_machine-7b59c8fd022fc446)
+
+running 1 test
+test at_most_one_successful_commit_per_session ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running unittests src/lib.rs (target/debug/build/session-redis/6801c004221b3e48/out/session_redis-6801c004221b3e48)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/contract.rs (target/debug/build/session-redis/224559545dc19502/out/contract-224559545dc19502)
+
+running 54 tests
+test memory::failed_attempt_leaves_session_pending_and_claimable ... ok
+test memory::claim_of_unknown_session_is_rejected ... ok
+test memory::sequential_replay_after_consume_is_rejected ... ok
+test memory::snapshot_round_trips_every_field ... ok
+test memory::expire_and_purge_touch_only_due_sessions ... ok
+test memory::claim_just_before_expiry_succeeds ... ok
+test memory::expired_sessions_are_never_candidates ... ok
+test memory::consumed_records_are_purged_after_retention ... ok
+test memory::consumed_sessions_are_never_candidates ... ok
+test memory::claim_after_expiry_is_rejected ... ok
+test memory::insert_rejects_duplicate_id_and_zero_ttl ... ok
+test memory::insert_beyond_pending_capacity_is_rejected ... ok
+test memory::bounded_trial_budget_counts_only_live_sessions ... ok
+test memory::dropped_claim_future_commits_nothing ... ok
+test memory::candidate_from_another_registry_cannot_claim_its_session ... ok
+test redis::bounded_trial_budget_counts_only_live_sessions ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::bounded_trial_rejects_more_candidates_than_budget ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test memory::snapshots_are_point_in_time_copies ... ok
+test memory::stale_candidate_cannot_claim_a_reinserted_session ... ok
+test redis::bounded_trial_returns_all_candidates_within_budget ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::candidate_from_another_registry_cannot_claim_its_session ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::claim_after_expiry_is_rejected ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::claim_just_before_expiry_succeeds ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::claim_of_unknown_session_is_rejected ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::concurrent_async_claims_commit_exactly_once ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::consumed_records_are_purged_after_retention ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::consumed_sessions_are_never_candidates ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::dropped_claim_future_commits_nothing ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::expire_and_purge_touch_only_due_sessions ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::expired_sessions_are_never_candidates ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::failed_attempt_leaves_session_pending_and_claimable ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::insert_beyond_pending_capacity_is_rejected ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::insert_rejects_duplicate_id_and_zero_ttl ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::sequential_replay_after_consume_is_rejected ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::snapshot_round_trips_every_field ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::snapshots_are_point_in_time_copies ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::stale_candidate_cannot_claim_a_reinserted_session ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::unique_kid_checks_kid_uniqueness_before_route ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::unique_kid_yields_exactly_one_candidate_among_sessions_sharing_route ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::unique_route_policy_rejects_duplicate_route_token ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::unique_strategy_refuses_an_ambiguous_hint ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::unique_uri_checks_route_uniqueness_before_kid ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::unique_uri_yields_exactly_one_candidate_among_sessions_sharing_kid ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis::unknown_route_token_or_kid_yields_no_candidate ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test memory::unique_kid_checks_kid_uniqueness_before_route ... ok
+test memory::unique_uri_checks_route_uniqueness_before_kid ... ok
+test memory::unique_route_policy_rejects_duplicate_route_token ... ok
+test memory::unknown_route_token_or_kid_yields_no_candidate ... ok
+test memory::unique_strategy_refuses_an_ambiguous_hint ... ok
+test memory::bounded_trial_rejects_more_candidates_than_budget ... ok
+test memory::bounded_trial_returns_all_candidates_within_budget ... ok
+test memory::concurrent_async_claims_commit_exactly_once ... ok
+test memory::unique_uri_yields_exactly_one_candidate_among_sessions_sharing_kid ... ok
+test memory::unique_kid_yields_exactly_one_candidate_among_sessions_sharing_route ... ok
+
+test result: ok. 27 passed; 0 failed; 27 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/differential.rs (target/debug/build/session-redis/01ebae4fe8efd201/out/differential-01ebae4fe8efd201)
+
+running 1 test
+test redis_matches_memory_registry_on_random_operation_sequences ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/redis_backend.rs (target/debug/build/session-redis/7862da955706cbdd/out/redis_backend-7862da955706cbdd)
+
+running 17 tests
+test candidate_from_another_namespace_cannot_claim_its_session ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test claim_delayed_past_the_ttl_in_transit_is_not_committed ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test counters_at_or_above_1e14_round_trip_exactly ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test due_keys_are_dropped_while_redis_is_unreachable ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test index_entry_naming_another_session_fails_closed ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test key_table_growth_is_bounded_during_an_outage ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test local_keys_are_dropped_once_sessions_leave_pending ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test private_keys_never_reach_redis ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test redis_killed_mid_run_fails_closed_without_memory_fallback ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test refused_insert_drops_its_key_immediately ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test server_time_mode_inserts_resolves_claims_and_sweeps ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test swapped_key_reference_fails_closed ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test two_workers_racing_claims_commit_exactly_once ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test undecodable_record_fails_closed ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test worker_without_the_key_fails_closed ... ignored, requires Redis; run via scripts/ci_local.sh <dir> redis
+test connect_rejects_malformed_namespace ... ok
+test unreachable_redis_fails_closed_at_connect ... ok
+
+test result: ok. 2 passed; 0 failed; 15 ignored; 0 measured; 0 filtered out; finished in 0.08s
 
    Doc-tests jose_hpke
 
@@ -54,6 +600,12 @@ running 0 tests
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
    Doc-tests session_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests session_redis
 
 running 0 tests
 
@@ -61,7 +613,7 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 
 test=pass
 ## doctest: cargo test --doc --workspace --locked
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.17s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.21s
    Doc-tests jose_hpke
 
 running 0 tests
@@ -86,7 +638,13 @@ running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
+   Doc-tests session_redis
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
 doctest=pass
-tests_passed_total=2
+tests_passed_total=185
 required_tests=pass
 stage_test=pass

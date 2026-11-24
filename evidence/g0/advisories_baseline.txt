@@ -1,5 +1,5 @@
 # Unfiltered RustSec findings for the lab Cargo.lock (cargo-audit, repo ignore list NOT applied)
-# generated 2026-11-23T14:08:59Z | cargo-audit 0.23.0 | Cargo.lock sha256 c8f093ea095c6def3a1d00a8e99cfa4f4b74211d12b92ec216f704aa8d01f563
+# generated 2026-11-24T14:30:54Z | cargo-audit 0.23.0 | Cargo.lock sha256 3c6c55cdd5778112c2c546eff5d2bcd148adb925453693cc3f5e63539332245a
 # Dependency chains and rationale: deny.toml [advisories].ignore
 RUSTSEC-2021-0127	unmaintained	serde_cbor	0.11.2	serde_cbor is unmaintained
 RUSTSEC-2023-0071	vulnerability	rsa	0.6.1	Marvin Attack: potential key recovery through timing sidechannels
