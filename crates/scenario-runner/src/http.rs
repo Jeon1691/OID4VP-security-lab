@@ -890,6 +890,8 @@ pub async fn run(
             rows.push(burst(fixtures, params, run_id, strategy, limited).await?);
         }
     }
+    eprintln!("limits: in-flight cap under controlled admission");
+    rows.push(in_flight_cap(fixtures, params, run_id).await?);
     Ok(rows)
 }
 
@@ -931,12 +933,120 @@ fn burst_violations(
     if !limited && admitted != statuses.len() {
         violations.push("503 with limits off".to_owned());
     }
-    // A burst larger than the in-flight cap must be shed; a round without any 503 would leave
-    // the limits-on invariant unexercised.
-    if limited && admitted == statuses.len() {
-        violations.push("limits on, but no request was shed (no 503)".to_owned());
+    // With limits on, shedding is reported (status_503), not required: requests may finish
+    // before the cap fills. `in_flight_cap` proves the cap under controlled admission.
+    violations
+}
+
+/// Longest wait for the held requests to reach the paused decryption step; loopback requests
+/// get there in milliseconds, so this only bounds a broken run.
+const PARK_DEADLINE: Duration = Duration::from_secs(5);
+const PARK_POLL: Duration = Duration::from_millis(1);
+
+/// The invariants of one controlled-admission round: `held` = the answers of the
+/// [`LIMITED_IN_FLIGHT`] requests held in the pipeline (after release), `probe` = the answer
+/// to the one sent while they were held, `records` = the evidence the round left.
+fn cap_violations(held: &[u16], probe: u16, records: &[EvidenceRecord]) -> Vec<String> {
+    let mut violations = Vec::new();
+    if probe != SERVICE_UNAVAILABLE {
+        violations.push(format!(
+            "request beyond the in-flight cap answered {probe}, not 503"
+        ));
+    }
+    if held.len() != LIMITED_IN_FLIGHT || held.iter().any(|&s| s != OK) {
+        violations.push(format!("held requests answered {held:?}, not all 200"));
+    }
+    if records.len() != LIMITED_IN_FLIGHT {
+        violations.push(format!(
+            "{} evidence records for {LIMITED_IN_FLIGHT} held requests (the 503 must leave none)",
+            records.len()
+        ));
+    }
+    for record in records {
+        if record.commit_result != CommitResult::Committed || record.hpke_attempts != 1 {
+            violations.push(format!(
+                "held request: attempts {}, commit {:?}",
+                record.hpke_attempts, record.commit_result
+            ));
+        }
     }
     violations
+}
+
+/// Controlled admission (limits on, unique-uri): per round, takes every decryption slot
+/// (`LabServer::pause_decryptions`), sends [`LIMITED_IN_FLIGHT`] valid responses and waits
+/// until all of them are parked in the pipeline, so they hold every in-flight slot. Then it
+/// sends one more, which must be refused with 503 before the pipeline. Then it releases the
+/// held ones, which must commit. The row's latency is that of the refused probe.
+async fn in_flight_cap(fixtures: &Fixtures, params: &Params, run_id: &str) -> Result<Row> {
+    let strategy = Strategy::UniqueUri;
+    let limits = Limits {
+        in_flight: LIMITED_IN_FLIGHT,
+        decryptions: LIMITED_DECRYPTIONS,
+    };
+    let mut lab = Lab::start(fixtures, strategy, params.session_ttl, Some(limits)).await?;
+    let mut acc = Acc::new();
+    let mut pool = Vec::with_capacity(LIMITED_IN_FLIGHT + 1);
+    for _ in 0..params.burst_rounds {
+        lab.keep_fresh(&mut pool, LIMITED_IN_FLIGHT + 1).await?;
+        lab.fill(&mut pool, LIMITED_IN_FLIGHT + 1).await?;
+        let probe_target = pool.pop().context("pool is filled")?;
+        let held: Vec<Pooled> = std::mem::take(&mut pool);
+        let pause = lab.server.pause_decryptions().await;
+        let mut set = JoinSet::new();
+        for pooled in &held {
+            let jwe = lab.wallet.seal(&pooled.request, &SealOptions::default())?;
+            let wallet = lab.wallet.clone();
+            let uri = pooled.request.response_uri.clone();
+            set.spawn(async move { wallet.post_response(&uri, &jwe).await });
+        }
+        let deadline = Instant::now() + PARK_DEADLINE;
+        while lab.server.parked_trials() < LIMITED_IN_FLIGHT {
+            ensure!(
+                Instant::now() < deadline,
+                "held requests did not reach the paused decryption step"
+            );
+            tokio::time::sleep(PARK_POLL).await;
+        }
+        let jwe = lab
+            .wallet
+            .seal(&probe_target.request, &SealOptions::default())?;
+        let started = Instant::now();
+        let probe = lab
+            .wallet
+            .post_response(&probe_target.request.response_uri, &jwe)
+            .await?;
+        let latency = started.elapsed();
+        drop(pause);
+        let mut statuses = Vec::with_capacity(held.len());
+        while let Some(joined) = set.join_next().await {
+            statuses.push(joined.context("held request task")??.status);
+        }
+        let records = lab.server.evidence().take();
+        for v in cap_violations(&statuses, probe.status, &records) {
+            acc.violation(v);
+        }
+        acc.add(&Sample {
+            latency,
+            status: probe.status,
+            record: None,
+        });
+        // The refused probe never reached the pipeline; its session is still pending.
+        pool.push(probe_target);
+    }
+    lab.shutdown().await;
+    let head = RowHead {
+        run_id,
+        scenario: "limits",
+        strategy,
+        pending: LIMITED_IN_FLIGHT,
+        case: "in_flight_cap",
+        limits: "on",
+    };
+    let busy = acc.busy;
+    let rule = "with the cap's requests held in the pipeline, one more is refused with 503 and \
+                leaves no evidence; the held ones then commit with 1 attempt";
+    Ok(acc.row(head, busy, None, rule))
 }
 
 /// `params.burst` sessions, all answered at once with valid responses, `burst_rounds` times
@@ -1051,8 +1161,8 @@ async fn burst(
         limits: if limited { "on" } else { "off" },
     };
     let rule = if limited {
-        "every round sheds load (>= 1 503, none with evidence); every admitted request commits \
-         within the attempt bound"
+        "503s leave no evidence; every admitted request commits within the attempt bound \
+         (shedding is reported in status_503, not required)"
     } else {
         "no 503; every request commits within the attempt bound"
     };
@@ -1389,6 +1499,24 @@ mod tests {
         assert!(!burst_violations(Strategy::UniqueUri, N, false, &shed, &records[1..]).is_empty());
         // A 503 that still left an evidence record.
         assert!(!burst_violations(Strategy::UniqueUri, N, true, &shed, &records).is_empty());
+    }
+
+    #[test]
+    fn in_flight_cap_requires_a_503_beyond_the_held_requests() {
+        let held = vec![OK; LIMITED_IN_FLIGHT];
+        let records: Vec<EvidenceRecord> = (0..LIMITED_IN_FLIGHT).map(|_| committed(1)).collect();
+        assert!(cap_violations(&held, SERVICE_UNAVAILABLE, &records).is_empty());
+        // The probe got through although the cap was full.
+        assert!(!cap_violations(&held, OK, &records).is_empty());
+        // The refused probe left an evidence record.
+        let mut extra = records.clone();
+        extra.push(committed(1));
+        assert!(!cap_violations(&held, SERVICE_UNAVAILABLE, &extra).is_empty());
+        // A held request did not commit, or was not held at all.
+        let mut failed = held.clone();
+        failed[0] = BAD_REQUEST;
+        assert!(!cap_violations(&failed, SERVICE_UNAVAILABLE, &records).is_empty());
+        assert!(!cap_violations(&held[1..], SERVICE_UNAVAILABLE, &records).is_empty());
     }
 
     /// The synthetic lab fixtures, read as the runner reads them.
