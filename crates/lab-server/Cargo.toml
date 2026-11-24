@@ -21,6 +21,7 @@ lab-instrumentation = []
 [dependencies]
 axum = { workspace = true }
 base64 = { workspace = true }
+bs58 = { workspace = true }
 form_urlencoded = { workspace = true }
 getrandom = { workspace = true }
 hyper = { workspace = true }
@@ -35,6 +36,7 @@ sha2 = { workspace = true }
 ssi = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
+zeroize = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }

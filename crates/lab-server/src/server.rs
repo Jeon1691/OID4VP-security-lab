@@ -147,6 +147,8 @@ const JWK_USE_ENC: &str = "enc";
 /// SEC1 uncompressed point: `0x04 || x || y` with 32-byte P-256 coordinates (SEC1 §2.3.3).
 pub(crate) const SEC1_UNCOMPRESSED_TAG: u8 = 0x04;
 pub(crate) const P256_COORDINATE_BYTES: usize = 32;
+/// JWT NumericDates are whole seconds (RFC 7519 §2); session-core timestamps are milliseconds.
+const MILLIS_PER_SECOND: u64 = 1000;
 /// OpenID4VP `response_type` of every lab request (§5.2).
 const RESPONSE_TYPE_VP_TOKEN: &str = "vp_token";
 /// DCQL `format` of the synthetic credential query; deliberately not a registered format.
@@ -372,7 +374,7 @@ impl LabServer {
     /// # Errors
     /// [`StartError`]; a non-loopback address is refused before binding.
     pub async fn start(config: LabConfig) -> Result<Self, StartError> {
-        config::check(&config)?;
+        let request_kid = config::check(&config)?;
         let listener = TcpListener::bind(config.bind).await?;
         let addr = listener.local_addr()?;
         let base_url = format!("http://{addr}");
@@ -397,7 +399,7 @@ impl LabServer {
             }
         };
         let evidence = EvidenceLog::default();
-        let signer = RequestSigner::new(config.request_signing_key, &config.client_id);
+        let signer = RequestSigner::new(config.request_signing_key, request_kid);
         let state = Arc::new(AppState {
             mode: config.mode,
             client_id: config.client_id,
@@ -757,9 +759,12 @@ async fn issue(
     };
     // Signed here, once, over the binding that is then moved into the registry; `request_uri`
     // serves these bytes unchanged (no path re-signs or edits them).
-    let request_object = state
-        .signer
-        .sign(request_object(&binding, &key, &kid).to_string().as_bytes());
+    let lifetime = Lifetime::starting_now(state.session_ttl);
+    let request_object = state.signer.sign(
+        request_object(&binding, &key, &kid, lifetime)
+            .to_string()
+            .as_bytes(),
+    );
     let response_uri = match &binding {
         RequestBinding::DirectPostJwt { response_uri, .. } => response_uri.as_str().to_owned(),
         RequestBinding::DcApiJwt { .. } => return Err(fail()),
@@ -810,10 +815,36 @@ async fn issue(
     Ok(created)
 }
 
+/// `iat` / `exp` of a Request Object, as JWT NumericDates (RFC 7519 §2, §4.1.6, §4.1.4).
+#[derive(Clone, Copy)]
+struct Lifetime {
+    issued_at: u64,
+    expires_at: u64,
+}
+
+impl Lifetime {
+    /// `iat` = now, rounded down; `exp` = now + `ttl` (the session's expiry), rounded up, so
+    /// the request object never expires before its session does.
+    fn starting_now(ttl: Duration) -> Self {
+        let now = SystemClock.now();
+        let expiry = now.saturating_add(ttl).as_unix_millis();
+        Self {
+            issued_at: now.as_unix_millis() / MILLIS_PER_SECOND,
+            expires_at: expiry.div_ceil(MILLIS_PER_SECOND),
+        }
+    }
+}
+
 /// The request object payload for `binding`: exactly the stored wire values, the HPKE-0 public
-/// key in `client_metadata.jwks`, and `aud` (OpenID4VP 1.1 §5.8, Static Discovery). No `iss`:
-/// it MAY be present and Wallets MUST ignore it (§5). Signed by `RequestSigner::sign`.
-fn request_object(binding: &RequestBinding, key: &RecipientPrivateKey, kid: &KeyId) -> Value {
+/// key in `client_metadata.jwks`, `aud` (OpenID4VP 1.1 §5.8, Static Discovery), `iat` and `exp`
+/// ([`Lifetime`]). No `iss`: it MAY be present and Wallets MUST ignore it (§5). Signed by
+/// `RequestSigner::sign`.
+fn request_object(
+    binding: &RequestBinding,
+    key: &RecipientPrivateKey,
+    kid: &KeyId,
+    lifetime: Lifetime,
+) -> Value {
     let RequestBinding::DirectPostJwt {
         client_id,
         nonce,
@@ -837,6 +868,8 @@ fn request_object(binding: &RequestBinding, key: &RecipientPrivateKey, kid: &Key
     jwk.insert("kid".into(), kid.as_str().into());
     json!({
         "aud": REQUEST_OBJECT_AUD,
+        "iat": lifetime.issued_at,
+        "exp": lifetime.expires_at,
         "client_id": client_id.as_str(),
         "response_type": RESPONSE_TYPE_VP_TOKEN,
         "response_mode": EncryptedResponseMode::DirectPostJwt.as_str(),

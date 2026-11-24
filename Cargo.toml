@@ -61,6 +61,12 @@ hyper-util = { version = "0.1.21", default-features = false, features = ["server
 # p256 0.13 line signs over crypto-bigint 0.5 (RUSTSEC-2026-0387). Tests pin byte equality.
 p256 = { version = "0.14.0", default-features = false, features = ["ecdsa"] }
 
+# lab-server did:key derivation of the Request Object signing key (base58btc, did:key v0.7).
+# Already in the tree through ssi; `alloc` only (no `check`, so no extra sha2).
+bs58 = { version = "0.4.0", default-features = false, features = ["alloc"] }
+# Wipes the signing key JWK file buffer and decoded `d`. Already in the tree (p256, hpke).
+zeroize = "1.9.2"
+
 # SHA-256 for the lab-server response digest (session-core `ResponseDigest`). Same 0.11 line
 # hpke's HKDF already pulls in, so no new crate enters the tree; `oid` is not needed.
 sha2 = { version = "0.11.1", default-features = false }

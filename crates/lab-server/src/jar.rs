@@ -17,9 +17,10 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use p256::ecdsa::signature::Signer as _;
 use p256::ecdsa::{Signature, SigningKey};
-use protocol_model::ClientIdWire;
 use serde_json::{Value, json};
+use zeroize::Zeroizing;
 
+use crate::config::StartError;
 use crate::server::{JWK_CRV_P256, JWK_KTY_EC, P256_COORDINATE_BYTES, SEC1_UNCOMPRESSED_TAG};
 
 /// JOSE `typ` of a Request Object (OpenID4VP 1.1 §5: Verifiers MUST include it, Wallets MUST
@@ -35,18 +36,38 @@ pub const REQUEST_OBJECT_AUD: &str = "https://self-issued.me/v2";
 pub const REQUEST_OBJECT_ALG: &str = "ES256";
 /// Client Identifier Prefix of a DID `client_id` (OpenID4VP 1.1 §5.9.3).
 pub(crate) const DECENTRALIZED_IDENTIFIER_PREFIX: &str = "decentralized_identifier:";
+/// Client Identifier Prefixes (OpenID4VP 1.1 §5.9.3) the lab cannot sign for correctly:
+/// `redirect_uri` requests cannot be signed at all; `openid_federation`, `verifier_attestation`,
+/// `x509_san_dns` and `x509_hash` need trust material (entity statements, an attestation JWT,
+/// an `x5c` chain) the lab does not have; `origin` is reserved for the DC API (Appendix A).
+const UNSIGNABLE_CLIENT_ID_PREFIXES: [&str; 6] = [
+    "redirect_uri:",
+    "openid_federation:",
+    "verifier_attestation:",
+    "x509_san_dns:",
+    "x509_hash:",
+    "origin:",
+];
 /// did:key DIDs; their single verification method is `<did>#<method-specific id>` (did:key
 /// Method v0.7 §3.1).
 const DID_KEY_PREFIX: &str = "did:key:";
+/// Multibase prefix of base58btc, the encoding of a did:key method-specific id (did:key Method
+/// v0.7 §3.1.1; multibase table).
+const MULTIBASE_BASE58BTC: char = 'z';
+/// Multicodec `p256-pub` (0x1200) as an unsigned varint, followed in a did:key by the
+/// compressed SEC1 point (multicodec table; did:key Method v0.7 §2 "P-256").
+const P256_PUB_MULTICODEC_VARINT: [u8; 2] = [0x80, 0x24];
 /// Separates a DID from its fragment in a DID URL (DID Core §3.2).
 pub(crate) const DID_URL_FRAGMENT: char = '#';
+/// JWK member holding the private scalar (RFC 7518 §6.2.2.1).
+const JWK_D: &str = "d";
 
 /// The Verifier's Request Object signing key: an EC P-256 private JWK from configuration.
 ///
 /// The lab ships no key. Tests load the synthetic SpruceID fixture
 /// (`tests/fixtures/spruce_verifier.jwk`) through [`RequestSigningKey::from_jwk`]; the binary
-/// reads a JWK file named by `--signing-key`. `Debug` never shows the private scalar.
-#[derive(Clone)]
+/// reads a JWK file named by `--signing-key`. Not `Clone`, so the scalar is not copied around;
+/// `SigningKey` zeroizes it on drop, and `Debug` never shows it.
 pub struct RequestSigningKey {
     key: SigningKey,
 }
@@ -75,32 +96,88 @@ impl RequestSigningKey {
     /// Parses an EC P-256 private JWK (RFC 7518 §6.2: `kty`, `crv`, `x`, `y`, `d`; each
     /// coordinate and `d` exactly 32 bytes) and checks that `x` / `y` belong to `d`.
     ///
+    /// `d` is moved out of the parsed JSON and, like its decoded bytes, zeroized when dropped.
+    /// The caller owns (and should zeroize) `jwk` itself.
+    ///
     /// # Errors
     /// [`SigningKeyError`].
     pub fn from_jwk(jwk: &str) -> Result<Self, SigningKeyError> {
-        let jwk: Value = serde_json::from_str(jwk).map_err(|_| SigningKeyError::Malformed)?;
+        let mut jwk: Value = serde_json::from_str(jwk).map_err(|_| SigningKeyError::Malformed)?;
+        let d = match jwk.as_object_mut().and_then(|o| o.remove(JWK_D)) {
+            Some(Value::String(d)) => Zeroizing::new(d),
+            _ => return Err(SigningKeyError::Unsupported),
+        };
         let member = |name| jwk.get(name).and_then(Value::as_str);
-        if member("kty") != Some(JWK_KTY_EC)
-            || member("crv") != Some(JWK_CRV_P256)
-            || member("d").is_none()
-        {
+        if member("kty") != Some(JWK_KTY_EC) || member("crv") != Some(JWK_CRV_P256) {
             return Err(SigningKeyError::Unsupported);
         }
-        let field = |name| {
-            member(name)
-                .and_then(|v| URL_SAFE_NO_PAD.decode(v).ok())
-                .filter(|bytes| bytes.len() == P256_COORDINATE_BYTES)
-                .ok_or(SigningKeyError::Malformed)
+        // Each decoded buffer is moved (not copied) into `Zeroizing`.
+        let decode = |value: Option<&str>| {
+            let bytes = Zeroizing::new(
+                value
+                    .and_then(|v| URL_SAFE_NO_PAD.decode(v).ok())
+                    .ok_or(SigningKeyError::Malformed)?,
+            );
+            if bytes.len() == P256_COORDINATE_BYTES {
+                Ok(bytes)
+            } else {
+                Err(SigningKeyError::Malformed)
+            }
         };
-        let key = SigningKey::from_slice(&field("d")?).map_err(|_| SigningKeyError::Malformed)?;
+        let key = SigningKey::from_slice(&decode(Some(d.as_str()))?)
+            .map_err(|_| SigningKeyError::Malformed)?;
         let mut expected = vec![SEC1_UNCOMPRESSED_TAG];
-        expected.extend(field("x")?);
-        expected.extend(field("y")?);
+        expected.extend_from_slice(&decode(member("x"))?);
+        expected.extend_from_slice(&decode(member("y"))?);
         if key.verifying_key().to_sec1_point(false).as_bytes() != expected.as_slice() {
             return Err(SigningKeyError::PublicKeyMismatch);
         }
         Ok(Self { key })
     }
+
+    /// `did:key:z…` of the public key: base58btc of the `p256-pub` multicodec varint and the
+    /// compressed point (did:key Method v0.7).
+    fn did_key(&self) -> String {
+        let mut bytes = P256_PUB_MULTICODEC_VARINT.to_vec();
+        bytes.extend_from_slice(self.key.verifying_key().to_sec1_point(true).as_bytes());
+        format!(
+            "{DID_KEY_PREFIX}{MULTIBASE_BASE58BTC}{}",
+            bs58::encode(bytes).into_string()
+        )
+    }
+}
+
+/// The JWS `kid` for `client_id`, refusing client ids the lab cannot sign for correctly.
+///
+/// * `decentralized_identifier:did:key:<id>`: `<id>` must be the did:key of `key` (derived
+///   here, so a mismatch is caught at start, not by wallets); `kid` = `did:key:<id>#<id>`
+///   (OpenID4VP 1.1 §5.9.3: `kid` identifies the DID Document key). Other DID methods need a
+///   `kid` the lab cannot derive.
+/// * A prefix in `UNSIGNABLE_CLIENT_ID_PREFIXES` is refused.
+/// * Anything else is a pre-registered client (§5.9.2): no `kid`, the wallet knows the key.
+///
+/// # Errors
+/// [`StartError::ClientIdKeyMismatch`] or [`StartError::UnsupportedClientIdPrefix`].
+pub(crate) fn request_kid(
+    client_id: &str,
+    key: &RequestSigningKey,
+) -> Result<Option<String>, StartError> {
+    if let Some(did) = client_id.strip_prefix(DECENTRALIZED_IDENTIFIER_PREFIX) {
+        let Some(id) = did.strip_prefix(DID_KEY_PREFIX) else {
+            return Err(StartError::UnsupportedClientIdPrefix);
+        };
+        if did != key.did_key() {
+            return Err(StartError::ClientIdKeyMismatch);
+        }
+        return Ok(Some(format!("{did}{DID_URL_FRAGMENT}{id}")));
+    }
+    if UNSIGNABLE_CLIENT_ID_PREFIXES
+        .iter()
+        .any(|prefix| client_id.starts_with(prefix))
+    {
+        return Err(StartError::UnsupportedClientIdPrefix);
+    }
+    Ok(None)
 }
 
 /// Signs request objects for one `client_id`: the protected header is fixed at start.
@@ -111,13 +188,10 @@ pub(crate) struct RequestSigner {
 }
 
 impl RequestSigner {
-    /// The header names the did:key verification method as `kid` when `client_id` is a
-    /// `decentralized_identifier:did:key:` identifier (OpenID4VP 1.1 §5.9.3: the `kid`
-    /// identifies the DID Document key that signed). Other client ids (lab experiments) get no
-    /// `kid`; a wallet must then already know the Verifier's key.
-    pub(crate) fn new(key: RequestSigningKey, client_id: &ClientIdWire) -> Self {
+    /// `kid` from [`request_kid`] (checked before the server binds).
+    pub(crate) fn new(key: RequestSigningKey, kid: Option<String>) -> Self {
         let mut header = json!({ "alg": REQUEST_OBJECT_ALG, "typ": REQUEST_OBJECT_TYP });
-        if let Some(kid) = did_key_verification_method(client_id.as_str()) {
+        if let Some(kid) = kid {
             header["kid"] = kid.into();
         }
         Self {
@@ -133,12 +207,4 @@ impl RequestSigner {
         let signature: Signature = self.key.sign(input.as_bytes());
         format!("{input}.{}", URL_SAFE_NO_PAD.encode(signature.to_bytes()))
     }
-}
-
-/// `did:key:<id>#<id>` for `decentralized_identifier:did:key:<id>`, else `None`.
-fn did_key_verification_method(client_id: &str) -> Option<String> {
-    let did = client_id.strip_prefix(DECENTRALIZED_IDENTIFIER_PREFIX)?;
-    let id = did.strip_prefix(DID_KEY_PREFIX)?;
-    (!id.is_empty() && !id.contains(DID_URL_FRAGMENT))
-        .then(|| format!("{did}{DID_URL_FRAGMENT}{id}"))
 }

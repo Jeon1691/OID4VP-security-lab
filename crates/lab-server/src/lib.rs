@@ -29,7 +29,8 @@
 //!   and is identified by `kid`).
 //! * Payload: `client_id` identical to the Authorization Request's (§5.10.1; RFC 9101 §6.3),
 //!   `aud` `https://self-issued.me/v2` (§5.8, Static Discovery: the lab has no Wallet
-//!   metadata), no `iss` (§5: MAY, and Wallets MUST ignore it).
+//!   metadata), `iat` and `exp` = the session's expiry rounded up to the second (RFC 7519
+//!   §4.1.6, §4.1.4), no `iss` (§5: MAY, and Wallets MUST ignore it).
 //!
 //! Each object is signed once, when its session is issued, over the JSON built from the
 //! session's `RequestBinding`, which is then moved into the registry; `GET` serves those stored
@@ -40,8 +41,12 @@
 //! The key is [`LabConfig::request_signing_key`] ([`RequestSigningKey::from_jwk`]); the lab
 //! ships none. For [`DEFAULT_CLIENT_ID`] it is the synthetic SpruceID fixture
 //! `tests/fixtures/spruce_verifier.jwk`, which tests load and the binary takes only as an
-//! explicit `--signing-key` path, so no default or release build contains a private key. The
-//! server cannot check that the key matches a did:key client id; wallets do. ES256 is computed
+//! explicit `--signing-key` path, so no default or release build contains a private key. At
+//! start the server derives the key's did:key and refuses a `decentralized_identifier:did:key:`
+//! client id that is not it ([`StartError::ClientIdKeyMismatch`]), and refuses Client
+//! Identifier Prefixes it cannot sign for: `redirect_uri` (unsigned only), other DID methods,
+//! x509, attestation, federation and `origin` ([`StartError::UnsupportedClientIdPrefix`]). A
+//! client id without a prefix is a pre-registered client (§5.9.2): signed, no `kid`. ES256 is computed
 //! with RustCrypto `p256` 0.14 rather than SpruceID's `P256Signer` (that would put `openid4vp`,
 //! reqwest and the ssi advisory tree into the Verifier build); a test pins the signature
 //! byte-identical to `P256Signer`'s.

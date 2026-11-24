@@ -9,11 +9,12 @@
 //! absent. Defaults: hardened on `127.0.0.1:0`, `client_id` = `DEFAULT_CLIENT_ID`.
 //!
 //! The Request Object signing key (EC P-256 private JWK) is required and only ever read from
-//! the named file; the binary contains no key. `client_id` must be the did:key of that key.
+//! the named file (buffer zeroized after parsing); the binary contains no key. A did:key
+//! `client_id` must be the did:key of that key, or the server refuses to start.
 //! The synthetic SpruceID fixture matches the default `client_id`, so a lab run passes it
 //! explicitly: `--signing-key crates/lab-server/tests/fixtures/spruce_verifier.jwk`.
 //!
-//! Every mode Every mode refuses non-loopback addresses (lab policy; anything else needs an
+//! Every mode refuses non-loopback addresses (lab policy; anything else needs an
 //! explicit future ADR). Build release artifacts with a plain `cargo build -p lab-server`, so
 //! the test-only `wallet-sim` feature is not unified in.
 
@@ -22,6 +23,7 @@ use std::process::ExitCode;
 use lab_server::{LabConfig, LabServer, Mode, RequestSigningKey, SharedRouteStrategy};
 use protocol_model::ClientIdWire;
 use session_core::CandidateBudget;
+use zeroize::Zeroizing;
 
 const USAGE: &str = "usage: lab-server --signing-key <jwk file> [--client-id <id>] \
 [--mode hardened|research-kid|research-trial=<budget>] [--bind <ip:port>]";
@@ -59,8 +61,10 @@ fn config() -> Result<LabConfig, String> {
         *slot = Some(args.next().ok_or_else(|| USAGE.to_owned())?);
     }
     let path = signing_key.ok_or_else(|| USAGE.to_owned())?;
-    let jwk = std::fs::read_to_string(&path)
-        .map_err(|e| format!("cannot read signing key {path:?}: {e}"))?;
+    let jwk = Zeroizing::new(
+        std::fs::read_to_string(&path)
+            .map_err(|e| format!("cannot read signing key {path:?}: {e}"))?,
+    );
     let key = RequestSigningKey::from_jwk(&jwk).map_err(|e| format!("{path:?}: {e}"))?;
     let mut config = LabConfig::new(mode.as_deref().map_or(Ok(Mode::Hardened), parse_mode)?, key);
     if let Some(client_id) = client_id {
