@@ -50,6 +50,9 @@ confidence-threshold = 0.8
 # feature unification (ssi). Crate-scoped; Zlib is not allowed globally.
 exceptions = [
     { allow = ["Zlib"], crate = "foldhash" },
+    # Non-optional dependency of redis 1.8 (session-redis; xxh3 value digests, unused here).
+    # Boost 1.0 is OSI-approved and permissive; crate-scoped, not allowed globally.
+    { allow = ["BSL-1.0"], crate = "xxhash-rust" },
 ]
 # The list mirrors upstream and will be needed as crates are added; don't warn while unused.
 unused-allowed-license = "allow"

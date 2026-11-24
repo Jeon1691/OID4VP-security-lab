@@ -1,11 +1,12 @@
 [workspace]
 resolver = "3"
-# MVP scope (06 · Design Review §6): four packages only. spruce-adapter, session-redis,
-# scenario-runner and evidence-report are split out only after the G0/G1 gates pass.
+# MVP scope (06 · Design Review §6) was four packages; session-redis (G5, IMP-014) is split out
+# now that G0/G1 have passed. spruce-adapter, scenario-runner and evidence-report follow later.
 members = [
     "crates/protocol-model",
     "crates/jose-hpke",
     "crates/session-core",
+    "crates/session-redis",
     "crates/lab-server",
 ]
 # Pinned upstream checkout for G0 reproduction (scripts/g0_upstream.sh); built standalone.
@@ -76,10 +77,17 @@ protocol-model = { path = "crates/protocol-model" }
 jose-hpke = { path = "crates/jose-hpke" }
 session-core = { path = "crates/session-core" }
 
+# session-redis (G5, IMP-014). Async client on the tokio runtime the lab-server already uses;
+# defaults (acl, streams, geospatial, num-bigint) are not needed. `script` = EVALSHA with
+# NOSCRIPT reload, `connection-manager` = reconnect after a Redis restart (every call while
+# disconnected still fails; there is no fallback store). BSD-3-Clause.
+redis = { version = "1.8.3", default-features = false, features = ["script", "tokio-comp", "connection-manager"] }
+
 # jose-hpke (S1). HPKE-0 = DHKEM(P-256, HKDF-SHA256) + HKDF-SHA256 + AES-128-GCM. Defaults pull
 # X25519/ML-KEM/ChaCha, which HPKE-0 does not need. Uses p256 0.14 (openid4vp: 0.13).
 hpke = { version = "0.15.1", default-features = false, features = ["alloc", "nistp", "aes", "hkdfsha2"] }
-# Only the Deserialize/Visitor traits are used (duplicate-member check); no derive needed.
+# jose-hpke: Deserialize/Visitor (duplicate-member check). session-redis: the Serialize /
+# DeserializeOwned bound on stored results. No derive needed.
 serde = "1.0.229"
 # OS RNG. jose-hpke: test-only seal round trips (`sys_rng` implements the rand_core 0.10 traits
 # hpke takes). session-core: route tokens via `getrandom::fill`. One entry, one version.
