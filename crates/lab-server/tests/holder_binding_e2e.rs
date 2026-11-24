@@ -235,7 +235,7 @@ async fn honest_sd_jwt_kb_presentation_commits_only_the_requested_claims() {
             "vct": SYNTHETIC_CREDENTIAL_VCT,
             "holder_key_thumbprint": lab.wallet.holder_key_thumbprint(),
             "claims": { "given_name": "Alex", "family_name": "Sample", "age_over_18": true },
-            "disclosed_claim_names": ["age_over_18", "family_name", "given_name"],
+            "disclosed_claim_names": ["/age_over_18", "/family_name", "/given_name"],
         })
     );
     let text = result.to_string();

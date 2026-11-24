@@ -264,14 +264,27 @@ fn p256_coordinates(key: &VerifyingKey) -> (String, String) {
 mod tests {
     use super::*;
 
+    /// A JSON `\u00XX` escape as raw bytes (backslash, `u`, `0`, `0`).
+    const ESCAPE_PREFIX: &[u8] = b"\\u00";
+
     #[test]
     fn strict_json_refuses_duplicate_members_at_any_depth() {
         assert!(parse_strict_json(br#"{"a":1,"b":{"c":[{"d":1}]}}"#).is_some());
         assert!(parse_strict_json(br#"{"a":1,"a":2}"#).is_none());
         assert!(parse_strict_json(br#"{"a":{"b":1,"b":1}}"#).is_none());
         assert!(parse_strict_json(br#"[{"x":1},{"y":[{"z":1,"z":2}]}]"#).is_none());
-        // An escaped spelling of the same name is the same name.
-        assert!(parse_strict_json(br#"{"a":1,"a":2}"#).is_none());
+        // An escaped spelling of the same name is the same name (RFC 8259 §7), at the top level
+        // and nested.
+        let escaped = b"{\"alg\":\"ES256\",\"\\u0061lg\":\"none\"}";
+        let nested = b"{\"cnf\":{\"jwk\":{\"x\":\"a\",\"\\u0078\":\"b\"}}}";
+        for json in [escaped.as_slice(), nested.as_slice()] {
+            assert!(
+                json.windows(ESCAPE_PREFIX.len())
+                    .any(|w| w == ESCAPE_PREFIX),
+                "the test input keeps its \\u escape"
+            );
+            assert!(parse_strict_json(json).is_none());
+        }
         assert!(parse_strict_json(br#"{"a":1} x"#).is_none());
     }
 
