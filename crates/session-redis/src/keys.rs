@@ -67,15 +67,14 @@ impl<K> KeyTable<K> {
         Ok(self.len()? == 0)
     }
 
-    /// Registers `key` under `key_ref` before the Redis insert; the returned guard removes it
-    /// again unless [`Staged::keep`] is called (rejected insert, failed or cancelled call).
-    pub(crate) fn stage(
+    /// Registers `key` under `key_ref`, before the Redis insert that names it.
+    pub(crate) fn insert(
         &self,
         key_ref: String,
         session: SessionId,
         expires_at: Timestamp,
         key: K,
-    ) -> Result<Staged<'_, K>, StoreUnavailable> {
+    ) -> Result<(), StoreUnavailable> {
         let entry = Entry {
             session,
             expires_at,
@@ -84,11 +83,8 @@ impl<K> KeyTable<K> {
         self.entries
             .lock()
             .map_err(|_| StoreUnavailable)?
-            .insert(key_ref.clone(), entry);
-        Ok(Staged {
-            table: self,
-            key_ref: Some(key_ref),
-        })
+            .insert(key_ref, entry);
+        Ok(())
     }
 
     /// The key registered under `key_ref` for `session`.
@@ -144,27 +140,6 @@ impl<K> Clone for KeyTable<K> {
     fn clone(&self) -> Self {
         Self {
             entries: Arc::clone(&self.entries),
-        }
-    }
-}
-
-/// A key registered ahead of its Redis insert; removed on drop unless kept.
-pub(crate) struct Staged<'a, K> {
-    table: &'a KeyTable<K>,
-    key_ref: Option<String>,
-}
-
-impl<K> Staged<'_, K> {
-    /// The insert committed: the key stays.
-    pub(crate) fn keep(mut self) {
-        self.key_ref = None;
-    }
-}
-
-impl<K> Drop for Staged<'_, K> {
-    fn drop(&mut self) {
-        if let Some(r) = self.key_ref.take() {
-            self.table.remove([r.as_str()]);
         }
     }
 }
