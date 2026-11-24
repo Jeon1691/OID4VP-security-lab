@@ -156,8 +156,9 @@ impl<K> fmt::Debug for NewSession<K> {
 /// A pending session that an ingress hint matched: everything needed to trial-decrypt the
 /// response and then claim the session at the revision seen here.
 ///
-/// Only the store creates candidates (no public constructor), and `claim` takes one, so a
-/// caller can only commit a session that `resolve` actually returned. A copy taken under the
+/// Only the store creates candidates (no public constructor outside the `store-backend`
+/// feature, which only store backends enable), and `claim` takes one, so a caller can only
+/// commit a session that `resolve` actually returned. A copy taken under the
 /// registry lock; it never reflects or causes later changes. The key is shared read-only
 /// (`Arc`), and nothing here can modify the authoritative record.
 pub struct Candidate<K> {
@@ -207,6 +208,41 @@ impl<K> Candidate<K> {
     #[must_use]
     pub const fn expires_at(&self) -> Timestamp {
         self.expires_at
+    }
+}
+
+/// For [`SessionStore`](crate::SessionStore) backends outside this crate (feature
+/// `store-backend`). A backend must only hand out candidates for records it holds as `Pending`,
+/// and its `claim` must re-check `incarnation` and `revision` against the authoritative record,
+/// because the type no longer guarantees that a candidate came from `resolve`.
+#[cfg(feature = "store-backend")]
+impl<K> Candidate<K> {
+    /// A candidate for the authoritative record `id` / `incarnation` at `revision`.
+    #[must_use]
+    pub const fn from_store_record(
+        id: SessionId,
+        incarnation: u64,
+        binding: RequestBinding,
+        kid: Option<KeyId>,
+        key: Arc<K>,
+        revision: Revision,
+        expires_at: Timestamp,
+    ) -> Self {
+        Self {
+            id,
+            incarnation,
+            binding,
+            kid,
+            key,
+            revision,
+            expires_at,
+        }
+    }
+
+    /// Which insertion of the id this candidate names; `claim` compares it.
+    #[must_use]
+    pub const fn incarnation(&self) -> u64 {
+        self.incarnation
     }
 }
 
@@ -301,6 +337,33 @@ impl<R> SessionSnapshot<R> {
     #[must_use]
     pub const fn state(&self) -> &SessionState<R> {
         &self.state
+    }
+}
+
+/// For [`SessionStore`](crate::SessionStore) backends outside this crate (feature
+/// `store-backend`).
+#[cfg(feature = "store-backend")]
+impl<R> SessionSnapshot<R> {
+    /// A snapshot of an authoritative record.
+    #[must_use]
+    pub const fn from_store_record(
+        id: SessionId,
+        binding: RequestBinding,
+        route_token: RouteToken,
+        kid: Option<KeyId>,
+        revision: Revision,
+        expires_at: Timestamp,
+        state: SessionState<R>,
+    ) -> Self {
+        Self {
+            id,
+            binding,
+            route_token,
+            kid,
+            revision,
+            expires_at,
+            state,
+        }
     }
 }
 

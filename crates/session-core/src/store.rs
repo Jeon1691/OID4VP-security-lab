@@ -1,4 +1,4 @@
-//! The store contract shared by the in-memory registry and the later Redis implementation.
+//! The store contract shared by the in-memory registry and the Redis one (crate `session-redis`).
 
 use std::future::Future;
 

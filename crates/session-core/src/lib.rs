@@ -41,7 +41,8 @@
 //! ```
 //!
 //! Every transition bumps the session's [`Revision`]. Reserved / lease / fencing states are out of
-//! scope until the Redis phase.
+//! scope; the Redis store (crate `session-redis`) commits with one atomic script and does not
+//! need them either.
 //!
 //! # Sync or async
 //!
