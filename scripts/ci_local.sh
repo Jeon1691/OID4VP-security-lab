@@ -127,6 +127,7 @@ REQUIRED_TESTS=(
   research_nonce_length_is_capped_so_the_presentation_always_fits
   shutdown_drains_in_flight_requests_and_commits_nothing_afterwards
   connection_cap_holds_connections_stalled_before_headers
+  stalled_header_connection_is_closed_at_the_header_timeout_and_frees_its_slot
   sweep_expires_and_purges_stale_sessions
 )
 

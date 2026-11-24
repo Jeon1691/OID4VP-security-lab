@@ -48,6 +48,15 @@ pub const DEFAULT_MAX_CONCURRENT_DECRYPTIONS: usize = 8;
 /// see (no request exists yet). Keep it below the process file-descriptor limit.
 pub const DEFAULT_MAX_CONNECTIONS: usize = 2 * DEFAULT_MAX_IN_FLIGHT_REQUESTS;
 
+/// Default time a client gets to deliver one complete set of request headers (config
+/// candidate, not normative). It starts when the connection opens and again after each
+/// response, so it also closes idle keep-alive connections.
+///
+/// Loopback clients send headers in microseconds; five seconds tolerates a stalled test
+/// runner or a debugger pause while a connection that sends nothing, or dribbles bytes, frees
+/// its [`DEFAULT_MAX_CONNECTIONS`] slot well within the request timeout's order of magnitude.
+pub const DEFAULT_HEADER_READ_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Extra time beyond [`DEFAULT_REQUEST_TIMEOUT`] the shutdown drain waits.
 const DRAIN_SLACK: Duration = Duration::from_secs(2);
 
@@ -142,6 +151,9 @@ pub struct LabConfig {
     pub max_concurrent_decryptions: usize,
     /// Accepted connections at once; see [`DEFAULT_MAX_CONNECTIONS`].
     pub max_connections: usize,
+    /// Time to read one request's headers before the connection is closed; see
+    /// [`DEFAULT_HEADER_READ_TIMEOUT`].
+    pub header_read_timeout: Duration,
     /// Graceful-shutdown drain deadline; see [`DEFAULT_SHUTDOWN_DRAIN`].
     pub shutdown_drain: Duration,
 }
@@ -163,6 +175,7 @@ impl LabConfig {
             max_in_flight_requests: DEFAULT_MAX_IN_FLIGHT_REQUESTS,
             max_concurrent_decryptions: DEFAULT_MAX_CONCURRENT_DECRYPTIONS,
             max_connections: DEFAULT_MAX_CONNECTIONS,
+            header_read_timeout: DEFAULT_HEADER_READ_TIMEOUT,
             shutdown_drain: DEFAULT_SHUTDOWN_DRAIN,
         }
     }
@@ -202,6 +215,7 @@ pub(crate) fn check(config: &LabConfig) -> Result<(), StartError> {
         || config.max_in_flight_requests == 0
         || config.max_concurrent_decryptions == 0
         || config.max_connections == 0
+        || config.header_read_timeout.is_zero()
     {
         return Err(StartError::ZeroLimit);
     }
