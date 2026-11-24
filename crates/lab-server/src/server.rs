@@ -20,6 +20,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use hyper::server::conn::http1;
+use hyper_util::rt::{TokioIo, TokioTimer};
+use hyper_util::server::graceful::GracefulShutdown;
+use hyper_util::service::TowerToHyperService;
 use jose_hpke::rand_core::UnwrapErr;
 use jose_hpke::{ALG_HPKE_0, CompactJwe, RecipientPrivateKey, SessionInfo};
 use protocol_model::{
@@ -279,36 +283,39 @@ pub struct DecryptionPause {
     _slots: OwnedSemaphorePermit,
 }
 
-/// [`TcpListener`] that accepts at most `slots` connections at once. Each accepted stream
-/// holds a permit until hyper drops it, so connections that never send headers count too.
+/// Accepts connections while holding one slot per live connection, so at most `slots` exist
+/// at once. Each accepted stream keeps its permit until hyper drops it, so connections that
+/// never send headers count too.
 struct CappedListener {
     inner: TcpListener,
     slots: Arc<Semaphore>,
 }
 
-impl axum::serve::Listener for CappedListener {
-    type Io = CappedStream;
-    type Addr = SocketAddr;
-
-    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+impl CappedListener {
+    /// Waits for a free slot, then for a connection. Accept errors (typically descriptor
+    /// exhaustion or a connection reset before accept) are retried after
+    /// [`ACCEPT_ERROR_BACKOFF`], as `axum::serve` does.
+    async fn accept(&self) -> CappedStream {
         // The semaphore is never closed, so acquiring only waits.
         let Ok(permit) = Arc::clone(&self.slots).acquire_owned().await else {
             return std::future::pending().await;
         };
-        let (stream, addr) = axum::serve::Listener::accept(&mut self.inner).await;
-        (
-            CappedStream {
-                stream,
-                _permit: permit,
-            },
-            addr,
-        )
-    }
-
-    fn local_addr(&self) -> std::io::Result<Self::Addr> {
-        self.inner.local_addr()
+        loop {
+            match self.inner.accept().await {
+                Ok((stream, _)) => {
+                    return CappedStream {
+                        stream,
+                        _permit: permit,
+                    };
+                }
+                Err(_) => tokio::time::sleep(ACCEPT_ERROR_BACKOFF).await,
+            }
+        }
     }
 }
+
+/// Pause after a failed `accept` so a persistent error (descriptor exhaustion) does not spin.
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_secs(1);
 
 /// An accepted connection and its slot.
 struct CappedStream {
@@ -414,13 +421,8 @@ impl LabServer {
             slots: Arc::new(Semaphore::new(config.max_connections)),
         };
         let (stop, stopped) = oneshot::channel::<()>();
-        let serve = tokio::spawn(async move {
-            axum::serve(listener, app)
-                .with_graceful_shutdown(async move {
-                    let _ = stopped.await;
-                })
-                .await
-        });
+        let header_read_timeout = config.header_read_timeout;
+        let serve = tokio::spawn(serve(listener, app, header_read_timeout, stopped));
         Ok(Self {
             addr,
             base_url,
@@ -520,6 +522,38 @@ impl LabServer {
             Ok(()) => panic!("sweep task exited early"),
         }
     }
+}
+
+/// Accept loop: one hyper HTTP/1 connection task per accepted stream, with a header read
+/// timeout (`axum::serve` gives hyper no timer, so it could never fire). When `stopped`
+/// resolves it stops accepting and waits for every connection to finish (idle ones are closed
+/// at once); [`LabServer::shutdown`] bounds that wait.
+async fn serve(
+    listener: CappedListener,
+    app: Router,
+    header_read_timeout: Duration,
+    stopped: oneshot::Receiver<()>,
+) -> std::io::Result<()> {
+    let graceful = GracefulShutdown::new();
+    let mut http = http1::Builder::new();
+    http.timer(TokioTimer::new())
+        .header_read_timeout(header_read_timeout);
+    let mut stopped = std::pin::pin!(stopped);
+    loop {
+        let stream = tokio::select! {
+            stream = listener.accept() => stream,
+            _ = &mut stopped => break,
+        };
+        let service = TowerToHyperService::new(app.clone());
+        let connection = http.serve_connection(TokioIo::new(stream), service);
+        let connection = graceful.watch(connection);
+        tokio::spawn(async move {
+            // A connection error (client reset, header timeout) ends only that connection.
+            let _ = connection.await;
+        });
+    }
+    graceful.shutdown().await;
+    Ok(())
 }
 
 fn registry(route_policy: RoutePolicy) -> Registry {

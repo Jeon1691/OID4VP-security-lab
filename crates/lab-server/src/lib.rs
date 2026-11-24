@@ -63,12 +63,12 @@
 //! which also bounds connections that stall before sending headers. The defaults are config
 //! candidates, not normative values.
 //!
-//! **Known gap:** there is no header read timeout. `axum::serve` builds hyper's connection
-//! builder without a timer, so hyper's `header_read_timeout` never fires; a connection that
-//! sends nothing, or dribbles its headers, holds its connection slot until the client closes
-//! it. The connection cap bounds the damage (loopback only). Closing the gap means replacing
-//! `axum::serve` with an accept loop over `hyper-util` (`http1().timer(..)
-//! .header_read_timeout(..)`), which is already in the dependency tree.
+//! **Header read timeout:** the server runs its own accept loop over `hyper-util` (not
+//! `axum::serve`, which gives hyper no timer) with a `TokioTimer` and
+//! [`LabConfig::header_read_timeout`] ([`DEFAULT_HEADER_READ_TIMEOUT`]). A connection that
+//! sends nothing, or dribbles its headers, is closed after that time and frees its connection
+//! slot. The timeout covers each request's headers, so it also closes idle keep-alive
+//! connections. It does not bound a slow body; the request timeout does.
 //!
 //! # Shutdown
 //!

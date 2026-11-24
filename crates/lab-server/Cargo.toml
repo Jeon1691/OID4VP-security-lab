@@ -21,6 +21,8 @@ axum = { workspace = true }
 base64 = { workspace = true }
 form_urlencoded = { workspace = true }
 getrandom = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
 jose-hpke = { workspace = true }
 protocol-model = { workspace = true }
 reqwest = { workspace = true, optional = true }
