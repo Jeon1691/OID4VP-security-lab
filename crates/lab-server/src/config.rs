@@ -7,6 +7,8 @@ use jose_hpke::MAX_COMPACT_JWE_LEN;
 use protocol_model::ClientIdWire;
 use session_core::{CandidateBudget, ResolutionStrategy};
 
+use crate::validate::MAX_CLIENT_ID_LEN;
+
 /// Default request lifetime: five minutes, the typical request TTL session-core's consumed
 /// retention window is sized for (`DEFAULT_CONSUMED_RETENTION` = two TTLs).
 pub const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(300);
@@ -38,6 +40,21 @@ pub const DEFAULT_MAX_IN_FLIGHT_REQUESTS: usize = 512;
 /// free, and bounds the CPU that concurrent unauthenticated POSTs can claim (each trial is at
 /// most `MAX_CANDIDATE_BUDGET` attempts). Further trials wait for a slot.
 pub const DEFAULT_MAX_CONCURRENT_DECRYPTIONS: usize = 8;
+
+/// Default cap on accepted connections (config candidate, not normative): twice
+/// [`DEFAULT_MAX_IN_FLIGHT_REQUESTS`], so idle keep-alive connections never use up request
+/// capacity. Connections beyond it wait in the kernel backlog until one closes. It also bounds
+/// connections that stall before sending headers, which the request limit and timeout cannot
+/// see (no request exists yet). Keep it below the process file-descriptor limit.
+pub const DEFAULT_MAX_CONNECTIONS: usize = 2 * DEFAULT_MAX_IN_FLIGHT_REQUESTS;
+
+/// Extra time beyond [`DEFAULT_REQUEST_TIMEOUT`] the shutdown drain waits.
+const DRAIN_SLACK: Duration = Duration::from_secs(2);
+
+/// Default graceful-shutdown drain deadline: every in-flight request ends within the request
+/// timeout (or is answered 408), so the drain waits that long plus a little slack before it
+/// stops waiting and closes commits.
+pub const DEFAULT_SHUTDOWN_DRAIN: Duration = DEFAULT_REQUEST_TIMEOUT.saturating_add(DRAIN_SLACK);
 
 /// Room for the form encoding around the JWE: the `response=` name (9 bytes) plus slack for a
 /// client that percent-encodes some of the base64url/`.` characters. Anything else is rejected
@@ -123,6 +140,10 @@ pub struct LabConfig {
     pub max_in_flight_requests: usize,
     /// HPKE trials at once; see [`DEFAULT_MAX_CONCURRENT_DECRYPTIONS`].
     pub max_concurrent_decryptions: usize,
+    /// Accepted connections at once; see [`DEFAULT_MAX_CONNECTIONS`].
+    pub max_connections: usize,
+    /// Graceful-shutdown drain deadline; see [`DEFAULT_SHUTDOWN_DRAIN`].
+    pub shutdown_drain: Duration,
 }
 
 impl LabConfig {
@@ -141,6 +162,8 @@ impl LabConfig {
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             max_in_flight_requests: DEFAULT_MAX_IN_FLIGHT_REQUESTS,
             max_concurrent_decryptions: DEFAULT_MAX_CONCURRENT_DECRYPTIONS,
+            max_connections: DEFAULT_MAX_CONNECTIONS,
+            shutdown_drain: DEFAULT_SHUTDOWN_DRAIN,
         }
     }
 }
@@ -152,6 +175,9 @@ pub enum StartError {
     /// `IpAddr::is_loopback` does not count as loopback). Checked before binding.
     #[error("the lab binds to loopback addresses only")]
     LoopbackOnly,
+    /// `client_id` longer than `MAX_CLIENT_ID_LEN`.
+    #[error("client_id exceeds the lab length limit")]
+    ClientIdTooLong,
     /// A zero sweep interval, request timeout or concurrency limit.
     #[error("intervals, timeouts and limits must be non-zero")]
     ZeroLimit,
@@ -168,10 +194,14 @@ pub(crate) fn check(config: &LabConfig) -> Result<(), StartError> {
     if !config.bind.ip().is_loopback() {
         return Err(StartError::LoopbackOnly);
     }
+    if config.client_id.as_str().len() > MAX_CLIENT_ID_LEN {
+        return Err(StartError::ClientIdTooLong);
+    }
     if config.sweep_interval.is_zero()
         || config.request_timeout.is_zero()
         || config.max_in_flight_requests == 0
         || config.max_concurrent_decryptions == 0
+        || config.max_connections == 0
     {
         return Err(StartError::ZeroLimit);
     }

@@ -52,11 +52,31 @@
 //!    [`LabConfig::max_concurrent_decryptions`]. All candidates are tried; with bounded trial,
 //!    more than one that validates is an integrity failure (reject, claim nothing, record it).
 //!    Only the first validated result is kept.
-//! 9. `claim` with `SHA-256(compact JWE)` as the response digest.
+//! 9. Verifier-wide replay guard: a response whose `SHA-256(compact JWE)` already validated
+//!    for a *different* session is refused (`Rejection::CrossSessionReplay`); see
+//!    [`MAX_REMEMBERED_DIGESTS`].
+//! 10. `claim` with that digest as the response digest.
 //!
 //! Around every route except `/health`: [`LabConfig::max_in_flight_requests`] (503 above it,
-//! no queue) and [`LabConfig::request_timeout`] (408). The defaults are config candidates, not
-//! normative values.
+//! no queue) and [`LabConfig::request_timeout`] (408). Below that, the listener accepts at
+//! most [`LabConfig::max_connections`] connections at once (more wait in the kernel backlog),
+//! which also bounds connections that stall before sending headers. The defaults are config
+//! candidates, not normative values.
+//!
+//! **Known gap:** there is no header read timeout. `axum::serve` builds hyper's connection
+//! builder without a timer, so hyper's `header_read_timeout` never fires; a connection that
+//! sends nothing, or dribbles its headers, holds its connection slot until the client closes
+//! it. The connection cap bounds the damage (loopback only). Closing the gap means replacing
+//! `axum::serve` with an accept loop over `hyper-util` (`http1().timer(..)
+//! .header_read_timeout(..)`), which is already in the dependency tree.
+//!
+//! # Shutdown
+//!
+//! [`LabServer::shutdown`] is graceful: it stops accepting, lets in-flight requests finish for
+//! up to [`LabConfig::shutdown_drain`], then closes commits. After it returns no request can
+//! commit; one still running is refused (`Rejection::ShuttingDown`).
+//! [`LabServer::pause_decryptions`] and [`LabServer::parked_trials`] are research
+//! instrumentation for placing a POST at a known point (races, shutdown) deterministically.
 //!
 //! Steps 1-3 answer with distinct admission errors (they reveal nothing about sessions). Every
 //! failure from step 4 on answers with the single [`GENERIC_REJECTION_BODY`] (400); the real
@@ -69,6 +89,11 @@
 //!   live population of the shared route, and unique-kid answers whether a `kid` is pending.
 //!   Neither shows in the HTTP answer, but both show in response timing. Hardened mode has no
 //!   shared route.
+//! * Cross-session replay: on the shared research route, sessions can share `session_info`
+//!   (shared key and route, reused nonce via the research `nonce` knob), so a consumed
+//!   session's response would decrypt and validate for a new one. Per-session state cannot
+//!   see that, so the verifier-wide replay guard refuses any response already validated for
+//!   another session, and records `CrossSessionReplay` as evidence of the #792 condition.
 //! * Results are readable only with the result token, so the request id (visible to the
 //!   wallet and anyone who sees the `request_uri`) does not reveal the outcome.
 //! * Consumed records retain only the bounded [`ValidatedResponse`], never decrypted input.
@@ -104,15 +129,17 @@ mod validate;
 pub mod wallet_sim;
 
 pub use config::{
-    DEFAULT_CLIENT_ID, DEFAULT_MAX_CONCURRENT_DECRYPTIONS, DEFAULT_MAX_IN_FLIGHT_REQUESTS,
-    DEFAULT_REQUEST_TIMEOUT, DEFAULT_SESSION_TTL, DEFAULT_SWEEP_INTERVAL, LabConfig,
-    MAX_RESPONSE_BODY_BYTES, Mode, RouteKind, SharedRouteStrategy, StartError,
+    DEFAULT_CLIENT_ID, DEFAULT_MAX_CONCURRENT_DECRYPTIONS, DEFAULT_MAX_CONNECTIONS,
+    DEFAULT_MAX_IN_FLIGHT_REQUESTS, DEFAULT_REQUEST_TIMEOUT, DEFAULT_SESSION_TTL,
+    DEFAULT_SHUTDOWN_DRAIN, DEFAULT_SWEEP_INTERVAL, LabConfig, MAX_RESPONSE_BODY_BYTES, Mode,
+    RouteKind, SharedRouteStrategy, StartError,
 };
 pub use evidence::{
     AdmissionError, CommitResult, CryptoResult, EvidenceLog, EvidenceRecord, MAX_EVIDENCE_RECORDS,
     Rejection, ValidationResult,
 };
-pub use server::{GENERIC_REJECTION_BODY, LabServer};
+pub use server::{DecryptionPause, GENERIC_REJECTION_BODY, LabServer, MAX_REMEMBERED_DIGESTS};
 pub use validate::{
-    MAX_COMMITTED_VP_TOKEN_BYTES, SYNTHETIC_CREDENTIAL_QUERY_ID, ValidatedResponse, ValidationError,
+    MAX_CLIENT_ID_LEN, MAX_COMMITTED_VP_TOKEN_BYTES, MAX_RESEARCH_NONCE_LEN,
+    SYNTHETIC_CREDENTIAL_QUERY_ID, ValidatedResponse, ValidationError,
 };
