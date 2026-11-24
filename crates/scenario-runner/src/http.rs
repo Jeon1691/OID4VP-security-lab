@@ -210,6 +210,16 @@ pub struct Params {
     pub over_budget: usize,
     pub burst: usize,
     pub burst_rounds: u64,
+    /// Lifetime of every lab session (`LabConfig::session_ttl`); the lab default in a run.
+    pub session_ttl: Duration,
+}
+
+/// Request limits of a server (`LabConfig::max_in_flight_requests` /
+/// `max_concurrent_decryptions`); `None` where the lab defaults apply.
+#[derive(Debug, Clone, Copy)]
+struct Limits {
+    in_flight: usize,
+    decryptions: usize,
 }
 
 /// One session in the client's pool: its verified Request Object (the response target).
@@ -232,16 +242,36 @@ struct Lab {
 }
 
 impl Lab {
-    async fn start(fixtures: &Fixtures, strategy: Strategy, config: LabConfig) -> Result<Self> {
+    async fn start(
+        fixtures: &Fixtures,
+        strategy: Strategy,
+        session_ttl: Duration,
+        limits: Option<Limits>,
+    ) -> Result<Self> {
+        Ok(Self {
+            server: Self::server(fixtures, strategy, session_ttl, limits).await?,
+            wallet: fixtures.wallet()?,
+            route: strategy.route(),
+        })
+    }
+
+    async fn server(
+        fixtures: &Fixtures,
+        strategy: Strategy,
+        session_ttl: Duration,
+        limits: Option<Limits>,
+    ) -> Result<LabServer> {
+        let mut config = fixtures.config(strategy.mode()?)?;
+        config.session_ttl = session_ttl;
+        if let Some(limits) = limits {
+            config.max_in_flight_requests = limits.in_flight;
+            config.max_concurrent_decryptions = limits.decryptions;
+        }
         let server = LabServer::start(config)
             .await
             .context("lab server starts")?;
         ensure!(server.local_addr().ip().is_loopback(), "loopback only");
-        Ok(Self {
-            server,
-            wallet: fixtures.wallet()?,
-            route: strategy.route(),
-        })
+        Ok(server)
     }
 
     async fn session(&self) -> Result<Pooled> {
@@ -659,7 +689,7 @@ async fn block(
     block_cases: &[Case],
     schedule: &mut Schedule,
 ) -> Result<Vec<Row>> {
-    let lab = Lab::start(fixtures, strategy, fixtures.config(strategy.mode()?)?).await?;
+    let lab = Lab::start(fixtures, strategy, params.session_ttl, None).await?;
     let mut pool = Vec::with_capacity(n);
     lab.fill(&mut pool, n).await?;
     let valid: Vec<usize> = (0..block_cases.len())
@@ -867,15 +897,18 @@ async fn burst(
     limited: bool,
 ) -> Result<Row> {
     let n = params.burst;
-    let mut config = fixtures.config(strategy.mode()?)?;
-    if limited {
-        config.max_in_flight_requests = LIMITED_IN_FLIGHT;
-        config.max_concurrent_decryptions = LIMITED_DECRYPTIONS;
+    let limits = if limited {
+        Limits {
+            in_flight: LIMITED_IN_FLIGHT,
+            decryptions: LIMITED_DECRYPTIONS,
+        }
     } else {
-        config.max_in_flight_requests = DEFAULT_MAX_IN_FLIGHT_REQUESTS.max(n);
-        config.max_concurrent_decryptions = n;
-    }
-    let lab = Lab::start(fixtures, strategy, config).await?;
+        Limits {
+            in_flight: DEFAULT_MAX_IN_FLIGHT_REQUESTS.max(n),
+            decryptions: n,
+        }
+    };
+    let lab = Lab::start(fixtures, strategy, params.session_ttl, Some(limits)).await?;
     let mut pool = Vec::with_capacity(n);
     let mut acc = Acc::new();
     let mut wall = Duration::ZERO;
