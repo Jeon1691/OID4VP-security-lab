@@ -174,6 +174,7 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args> {
             over_budget,
             burst,
             burst_rounds,
+            session_ttl: lab_server::DEFAULT_SESSION_TTL,
         },
     })
 }
