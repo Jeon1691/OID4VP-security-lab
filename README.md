@@ -30,7 +30,9 @@ evidence.
 The MVP was limited to four packages (Notion 06 §6); `session-redis` is split out after G0/G1,
 `scenario-runner` and `evidence-report` after the MVP (G6). `scenario-runner` is not a default
 workspace member: it enables lab-server's test-only `wallet-sim` as a normal dependency, so a
-plain `cargo build` stays a Verifier build.
+plain `cargo build` stays a Verifier build. The gate step `default_members_are_verifier_builds`
+fails if a default member enables `wallet-sim` or `lab-instrumentation`. A `--workspace` build
+is never a Verifier build.
 
 ## Pins
 
@@ -68,9 +70,10 @@ did:key as `--client-id`. `--issuer-key` (or `LAB_ISSUER_KEY`) is required too: 
 *public* JWK (no `d`) of the only SD-JWT VC issuer the Verifier trusts.
 
 Every mode binds loopback only; a non-loopback deployment needs an explicit ADR first.
-Release binaries come from a plain `cargo build -p lab-server --release`: builds that include
-test targets, or `scenario-runner` (`--workspace`), unify the test-only `wallet-sim` feature
-(sealing) into the library.
+Release binaries come from a plain `cargo build -p lab-server --release`. Builds that include
+test targets, `--workspace` builds, and any build that includes `scenario-runner` unify the
+test-only `wallet-sim` feature (sealing, ssi) into the library, so none of them is a Verifier
+build.
 
 Endpoints, modes, the per-POST pipeline and the evidence records are documented in
 `crates/lab-server/src/lib.rs`. Request objects are signed JWTs (JAR, RFC 9101; OpenID4VP 1.1
@@ -126,7 +129,7 @@ serializes absent `exp`/`nbf` as `null`, which the lab refuses (RFC 7519 §4.1.4
 | --- | --- |
 | `rust-quality` | fmt, clippy `-D warnings`, machete, shellcheck, actionlint |
 | `unit` | build, test, doctest, required G0 tests, non-zero test count |
-| `supply-chain` | cargo-deny, advisory baseline sync, core containment, Verifier build without sealing or session-core `store-backend`, cargo-audit |
+| `supply-chain` | cargo-deny, advisory baseline sync, core containment, Verifier build without sealing or session-core `store-backend`, default workspace members are Verifier builds, cargo-audit |
 | `redis` | session-redis against a Valkey service container (Redis-compatible, BSD-3-Clause): contract suite, two-worker race, fail closed, required Redis tests |
 | `g0-upstream` | SpruceID CI reproduction at the pinned SHA (main / manual only) |
 | `ci-gate` | Single required check: fails unless every gate job's result is `success` |
