@@ -87,7 +87,7 @@ if redis.call('ZCARD', P .. 'pending') >= max then
   if redis.call('ZCARD', P .. 'pending') >= max then return append({'capacity'}, refs) end
 end
 local inc = redis.call('INCR', P .. 'incarnation')
-redis.call('HSET', s, 'inc', inc, 'rev', 0, 'exp', exp, 'state', 'pending', 'route', route,
+redis.call('HSET', s, 'inc', fmt(inc), 'rev', 0, 'exp', exp, 'state', 'pending', 'route', route,
   'keyref', ARGV[7], 'mode', ARGV[10], 'b1', ARGV[11], 'b2', ARGV[12], 'b3', ARGV[13])
 if kid then
   redis.call('HSET', s, 'kid', kid)
@@ -95,21 +95,45 @@ if kid then
 end
 redis.call('ZADD', P .. 'pr:' .. route, inc, id)
 redis.call('ZADD', P .. 'pending', exp, id)
-return append({'ok', tostring(inc)}, refs)
+return append({'ok', fmt(inc)}, refs)
 ";
 
-/// Read-only. `ARGV`: prefix, index key suffix (`pr:<route>` / `pk:<kid>`), terminal counts
-/// key suffix. Returns `consumed, expired`, then per pending id in insertion order the id and
-/// its [`RECORD_FIELDS`].
+/// Read-only. `ARGV`: prefix, index kind (`pr` route / `pk` kid), index value, terminal counts
+/// key suffix, now, limit, due route (`''` = any), kid filter (`''` = none).
+///
+/// Walks the index in insertion order. Every entry must name a pending record whose route
+/// (`pr`) or kid (`pk`) is the indexed value, otherwise the script fails (a corrupt or tampered
+/// index is never resolved around). Records past their TTL are skipped and only noted (when
+/// they match the due route and kid filter). Live records matching the kid filter are counted;
+/// only the first `limit` are returned. The walk visits at most the `pending` index, which
+/// `insert` caps at `max_pending`, so it is bounded; the reply is bounded by `limit`.
+///
+/// Returns `consumed, expired, saw_due (1|0), live`, then per returned record its id and
+/// [`RECORD_FIELDS`].
 const RESOLVE: &str = r"#!lua flags=no-writes
-local P = ARGV[1]
-local counts = redis.call('HMGET', P .. ARGV[3], 'consumed', 'expired')
-local out = {counts[1] or '0', counts[2] or '0'}
-for _, id in ipairs(redis.call('ZRANGE', P .. ARGV[2], 0, -1)) do
+local P, kind, value = ARGV[1], ARGV[2], ARGV[3]
+local now, limit = tonumber(ARGV[5]), tonumber(ARGV[6])
+local due_route, filter_kid = ARGV[7], ARGV[8]
+local counts = redis.call('HMGET', P .. ARGV[4], 'consumed', 'expired')
+local saw_due, live, records = '0', 0, {}
+for _, id in ipairs(redis.call('ZRANGE', P .. kind .. ':' .. value, 0, -1)) do
   local f = redis.call('HMGET', P .. 's:' .. id, FIELDS)
-  out[#out + 1] = id
-  for i = 1, NFIELDS do out[#out + 1] = f[i] end
+  if f[4] ~= 'pending' then return redis.error_reply('index names a record that is not pending') end
+  if kind == 'pr' and f[5] ~= value then return redis.error_reply('route index mismatch') end
+  if kind == 'pk' and f[6] ~= value then return redis.error_reply('kid index mismatch') end
+  local kid_ok = filter_kid == '' or f[6] == filter_kid
+  if now >= tonumber(f[3]) then
+    if kid_ok and (due_route == '' or f[5] == due_route) then saw_due = '1' end
+  elseif kid_ok then
+    live = live + 1
+    if live <= limit then
+      records[#records + 1] = id
+      for i = 1, NFIELDS do records[#records + 1] = f[i] end
+    end
+  end
 end
+local out = {counts[1] or '0', counts[2] or '0', saw_due, string.format('%.0f', live)}
+for i = 1, #records do out[#out + 1] = records[i] end
 return out
 ";
 
@@ -140,7 +164,7 @@ local purge_at = math.min(exp + tonumber(ARGV[8]), MAX_EXACT)
 redis.call('HSET', s, 'state', 'consumed', 'digest', ARGV[5], 'result', ARGV[6])
 local rev = redis.call('HINCRBY', s, 'rev', 1)
 leave_pending(id, f[5], f[6], 'consumed', fmt(purge_at))
-return {'ok', tostring(rev), f[7], f[5]}
+return {'ok', fmt(rev), f[7], f[5]}
 ";
 
 /// `ARGV`: prefix, now. Returns the key references of the sessions it expired.

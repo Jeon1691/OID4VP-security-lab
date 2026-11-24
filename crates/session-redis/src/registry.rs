@@ -16,7 +16,7 @@ use session_core::{
 };
 
 use crate::codec::{self, Fields, Record, Reply};
-use crate::keys::{KeyTable, new_key_ref};
+use crate::keys::{KEY_TABLE_SLACK, KeyTable, new_key_ref};
 use crate::scripts::{RECORD_FIELDS, SCRIPTS};
 
 /// How long one Redis call may take before it fails closed. Loopback Redis answers in well
@@ -29,16 +29,31 @@ const RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
 /// bounds the wait when the server is gone and the port does not answer.
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// Reconnect attempts per call after the connection dropped, and the backoff between them.
-/// One retry with a short delay rides out a Redis restart without letting a request hang:
-/// a call made while Redis is down fails after about one connect timeout plus the delay.
+/// Reconnect behaviour of the connection manager. A call that finds the connection dropped
+/// fails at once (it is never retried, so nothing is sent twice); the manager then reconnects
+/// in the background with up to `RECONNECT_RETRIES` further attempts after the first, backing
+/// off between `RECONNECT_MIN_DELAY` and `RECONNECT_MAX_DELAY`. Calls made meanwhile wait for
+/// that attempt and fail if it fails, so while Redis is down a call fails within about two
+/// connect timeouts plus the delay, and a restarted Redis is picked up without a new registry.
 const RECONNECT_RETRIES: usize = 1;
 const RECONNECT_MIN_DELAY: Duration = Duration::from_millis(50);
 const RECONNECT_MAX_DELAY: Duration = Duration::from_millis(200);
 
+/// Records a unique strategy needs back from `resolve`: whether there are zero, one or more
+/// live matches is all it decides on.
+const UNIQUE_LIMIT: usize = 2;
+
 /// Longest namespace accepted. Key names repeat it, so it is kept short; 64 characters
 /// is ample for a run identifier.
 const MAX_NAMESPACE_LEN: usize = 64;
+
+/// Whether a failed call can have reached Redis.
+enum Outcome {
+    /// The connection was refused: nothing was sent.
+    NotSent,
+    /// Anything else: the script may have run.
+    Unknown,
+}
 
 /// Errors from [`RedisRegistry::connect`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -129,16 +144,29 @@ impl<K, R> RedisRegistry<K, R> {
 
     /// Runs `script` with the prefix as `ARGV[1]` followed by `args`.
     async fn run(&self, script: &Script, args: &[&[u8]]) -> Result<Fields, StoreUnavailable> {
+        self.invoke(script, args)
+            .await
+            .map_err(|_| StoreUnavailable)
+    }
+
+    /// Like [`run`](Self::run), but tells whether the call can have reached Redis. Only a
+    /// refused connection proves it did not: the script was then never sent (a `NOSCRIPT`
+    /// reload is not an exception: `NOSCRIPT` means the script did not run either). Any other
+    /// error (timeout, dropped connection, bad reply) may have followed a script that ran.
+    async fn invoke(&self, script: &Script, args: &[&[u8]]) -> Result<Fields, Outcome> {
         let mut invocation = script.prepare_invoke();
         invocation.arg(self.prefix.as_str());
         for a in args {
             invocation.arg(*a);
         }
         let mut conn = self.conn.clone();
-        let reply: Reply = invocation
-            .invoke_async(&mut conn)
-            .await
-            .map_err(|_| StoreUnavailable)?;
+        let reply: Reply = invocation.invoke_async(&mut conn).await.map_err(|e| {
+            if e.is_connection_refusal() {
+                Outcome::NotSent
+            } else {
+                Outcome::Unknown
+            }
+        })?;
         Ok(Fields::new(reply))
     }
 
@@ -163,11 +191,13 @@ impl<K, R> RedisRegistry<K, R> {
         } = session;
         let key_ref = new_key_ref()?;
         // The key is in the table before the record is visible in Redis, so another worker
-        // never sees a pending session whose key it cannot find. It is removed again only when
-        // Redis definitely rejected the insert: after an error or a cancelled call the script
-        // may still have run, so the key stays until `purge` / `expire_due` drop it at its TTL.
+        // never sees a pending session whose key it cannot find. It is removed again when
+        // Redis rejected the insert or it was provably never sent. After any other error, or a
+        // cancelled call, the script may still have run, so the key stays until `purge` /
+        // `expire_due` drop it at its TTL; the table cap bounds how many such keys pile up.
+        let cap = self.config.max_pending.saturating_add(KEY_TABLE_SLACK);
         self.keys
-            .insert(key_ref.clone(), id.clone(), expires_at, key)?;
+            .insert(key_ref.clone(), (id.clone(), expires_at, key), cap, now)?;
         let route = route_token.to_url_segment();
         let [mode, b1, b2, b3] = codec::encode_binding(&binding);
         let unique = if self.config.route_policy == RoutePolicy::UniquePerSession {
@@ -195,7 +225,14 @@ impl<K, R> RedisRegistry<K, R> {
             b2.as_bytes(),
             b3.as_bytes(),
         ];
-        let mut f = self.run(&SCRIPTS.insert, &args).await?;
+        let mut f = match self.invoke(&SCRIPTS.insert, &args).await {
+            Ok(f) => f,
+            Err(Outcome::NotSent) => {
+                self.forget(&[key_ref]);
+                return Err(StoreUnavailable.into());
+            }
+            Err(Outcome::Unknown) => return Err(StoreUnavailable.into()),
+        };
         match f.text()?.as_str() {
             "ok" => {
                 let _incarnation = f.number()?;
@@ -236,76 +273,106 @@ impl<K, R> RedisRegistry<K, R> {
         let route = hint.route_token.to_url_segment();
         let route_kid = |k: &KeyId| format!("trk:{route}:{}", k.as_str());
         // Same index and terminal counts as `MemoryRegistry`: uniqueness is judged on the
-        // route (unique-uri, bounded-trial) or the kid (unique-kid) alone.
-        let (index, counts) = match strategy {
-            ResolutionStrategy::UniqueUri => (format!("pr:{route}"), format!("tr:{route}")),
+        // route (unique-uri, bounded-trial) or the kid (unique-kid) alone, before the other,
+        // equally attacker-chosen hint is consulted.
+        let hint_kid = hint.kid.as_ref().map(KeyId::as_str);
+        let (kind, value, counts, due_route, filter_kid, limit) = match strategy {
+            ResolutionStrategy::UniqueUri => (
+                "pr",
+                route.as_str(),
+                format!("tr:{route}"),
+                "",
+                "",
+                UNIQUE_LIMIT,
+            ),
             ResolutionStrategy::UniqueKid => {
                 let kid = hint.kid.as_ref().ok_or(ResolveError::MissingKid)?;
-                (format!("pk:{}", kid.as_str()), route_kid(kid))
+                (
+                    "pk",
+                    kid.as_str(),
+                    route_kid(kid),
+                    route.as_str(),
+                    "",
+                    UNIQUE_LIMIT,
+                )
             }
-            ResolutionStrategy::BoundedTrial(_) => (
-                format!("pr:{route}"),
+            ResolutionStrategy::BoundedTrial(budget) => (
+                "pr",
+                route.as_str(),
                 hint.kid
                     .as_ref()
                     .map_or_else(|| format!("tr:{route}"), route_kid),
+                "",
+                hint_kid.unwrap_or(""),
+                // One more than the budget is enough to tell "over budget".
+                budget.get().saturating_add(1),
             ),
         };
-        let now = self.now();
-        let mut f = self
-            .run(&SCRIPTS.resolve, &[index.as_bytes(), counts.as_bytes()])
-            .await?;
+        let now_ts = self.now();
+        let now = now_ts.as_unix_millis().to_string();
+        let limit_s = limit.to_string();
+        let args: [&[u8]; 7] = [
+            kind.as_bytes(),
+            value.as_bytes(),
+            counts.as_bytes(),
+            now.as_bytes(),
+            limit_s.as_bytes(),
+            due_route.as_bytes(),
+            filter_kid.as_bytes(),
+        ];
+        let mut f = self.run(&SCRIPTS.resolve, &args).await?;
         let (consumed, expired) = (f.number()?, f.number()?);
-        let mut live = Vec::new();
-        let mut due = Vec::new();
+        let saw_due = f.text()? == "1";
+        let live = usize::try_from(f.number()?).map_err(|_| StoreUnavailable)?;
+        let mut records = Vec::new();
         while !f.is_done() {
             let id = codec::session_id(f.text()?)?;
-            // Index entries always name a pending record; anything else is corruption.
             let record = Record::read(&mut f)?.ok_or(StoreUnavailable)?;
-            if record.state != "pending" {
+            // The script already refused an index entry that does not match its record; check
+            // again here, so a reply that disagrees with the index is never trusted either.
+            let consistent = record.state == "pending"
+                && !record.is_due(now_ts)
+                && match kind {
+                    "pr" => record.route == hint.route_token,
+                    _ => record.kid.as_ref().map(KeyId::as_str) == Some(value),
+                }
+                && (filter_kid.is_empty() || record.kid.as_ref().map(KeyId::as_str) == hint_kid);
+            if !consistent {
                 return Err(StoreUnavailable.into());
             }
-            if record.is_due(now) {
-                due.push(record);
-            } else {
-                live.push((id, record));
-            }
+            records.push((id, record));
         }
-        let kid_matches = |r: &Record| hint.kid.as_ref().is_none_or(|k| r.kid.as_ref() == Some(k));
-        let no_live = |saw_due: bool| {
-            if consumed > 0 {
+        if records.len() != live.min(limit) {
+            return Err(StoreUnavailable.into());
+        }
+        if live == 0 {
+            return Err(if consumed > 0 {
                 ResolveError::Replay
             } else if expired > 0 || saw_due {
                 ResolveError::SessionExpired
             } else {
                 ResolveError::NoCandidate
-            }
-        };
+            });
+        }
+        let kid_matches = |r: &Record| hint.kid.as_ref().is_none_or(|k| r.kid.as_ref() == Some(k));
         let chosen = match strategy {
-            ResolutionStrategy::UniqueUri => match live.len() {
-                0 => return Err(no_live(!due.is_empty())),
-                1 if kid_matches(&live[0].1) => live,
-                1 => return Err(ResolveError::NoCandidate),
-                found => return Err(ResolveError::NotUnique { found }),
-            },
-            ResolutionStrategy::UniqueKid => match live.len() {
-                0 => return Err(no_live(due.iter().any(|r| r.route == hint.route_token))),
-                1 if live[0].1.route == hint.route_token => live,
-                1 => return Err(ResolveError::NoCandidate),
-                found => return Err(ResolveError::NotUnique { found }),
-            },
-            ResolutionStrategy::BoundedTrial(budget) => {
-                live.retain(|(_, r)| kid_matches(r));
-                if live.is_empty() {
-                    return Err(no_live(due.iter().any(kid_matches)));
-                }
-                if live.len() > budget.get() {
-                    return Err(ResolveError::CandidateBudgetExceeded {
-                        found: live.len(),
-                        budget: budget.get(),
-                    });
-                }
-                live
+            ResolutionStrategy::UniqueUri | ResolutionStrategy::UniqueKid if live > 1 => {
+                return Err(ResolveError::NotUnique { found: live });
             }
+            // Only now the secondary hint: the kid on a unique route, the route for a unique kid.
+            ResolutionStrategy::UniqueUri if !kid_matches(&records[0].1) => {
+                return Err(ResolveError::NoCandidate);
+            }
+            ResolutionStrategy::UniqueKid if records[0].1.route != hint.route_token => {
+                return Err(ResolveError::NoCandidate);
+            }
+            ResolutionStrategy::BoundedTrial(budget) if live > budget.get() => {
+                return Err(ResolveError::CandidateBudgetExceeded {
+                    found: live,
+                    budget: budget.get(),
+                });
+            }
+            _ => records,
         };
         chosen
             .into_iter()
@@ -429,19 +496,21 @@ impl<K, R> RedisRegistry<K, R> {
         )))
     }
 
-    /// Runs a sweep script and drops the local keys it reports, plus any past their TTL.
+    /// Drops local keys past their TTL, then runs a sweep script and drops the keys it reports.
+    /// The local step comes first, so it also happens while Redis is unreachable.
     async fn sweep(&self, script: &Script) -> Result<usize, StoreUnavailable> {
         let now = self.now();
+        self.keys.remove_due(now)?;
         let now_s = now.as_unix_millis().to_string();
         let refs = self.run(script, &[now_s.as_bytes()]).await?.rest()?;
         self.forget(&refs);
-        self.keys.remove_due(now)?;
         Ok(refs.len())
     }
 }
 
 // `async fn` bodies run only when polled, so an unpolled, dropped future sends nothing. A
-// future dropped after its script was sent may still have committed; see the crate docs.
+// future dropped (or timed out) after its script was sent may have changed state that the
+// caller never sees acknowledged; see the crate docs.
 impl<K, R> SessionStore<K, R> for RedisRegistry<K, R>
 where
     K: Send + Sync,

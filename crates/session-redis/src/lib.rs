@@ -67,13 +67,25 @@
 //! Every Redis error, timeout or undecodable reply is [`session_core::StoreUnavailable`] (or
 //! the `Unavailable` variant of the operation's error). There is no in-memory fallback: a
 //! registry that cannot reach Redis refuses every operation, so a response is never accepted
-//! without the authoritative commit. Calls time out after two seconds; after a dropped
-//! connection one reconnect is attempted per call, so a Redis restart recovers without a new
-//! registry while every call in between fails.
+//! without the authoritative commit. A call waits at most two seconds for its reply. A call
+//! that finds the connection dropped fails immediately and is not retried; the connection
+//! manager then reconnects in the background (one retry after the first attempt, short
+//! backoff), calls made meanwhile wait for that attempt and fail if it fails, and once Redis is
+//! back the same registry works again.
 //!
-//! A `claim` whose script reached Redis may commit even if the caller's future is then dropped
-//! or times out. That is the safe direction: the session is consumed at most once, and the
-//! caller, having seen no success, rejects the response.
+//! Index entries are cross-checked against their records (state `Pending`, route or `kid` equal
+//! to the indexed value), in the script and again in Rust; a mismatch fails closed instead of
+//! being resolved around. The local key table is bounded (`max_pending` +
+//! [`KEY_TABLE_SLACK`]) and sheds keys past their TTL on every sweep before contacting Redis, so
+//! it stays bounded during an outage.
+//!
+//! **Committed but unacknowledged.** A call whose script reached Redis has run in full, even if
+//! the caller then sees `Unavailable` (reply timeout, connection lost before the reply) or
+//! nothing at all (its future was dropped). For `claim` that means the session can be
+//! `Consumed` in Redis while no caller was told: at-most-once still holds, and the caller,
+//! having seen no success, rejects the response, so that session can no longer complete. For
+//! `insert` the session can exist although the caller saw an error; its key is therefore kept
+//! locally until the TTL. Only a refused connection proves a call was not sent.
 //!
 //! # Concurrency across workers, and why no lease
 //!
@@ -97,5 +109,5 @@ mod keys;
 mod registry;
 mod scripts;
 
-pub use keys::KeyTable;
+pub use keys::{KEY_TABLE_SLACK, KeyTable};
 pub use registry::{RedisRegistry, SetupError};

@@ -11,6 +11,16 @@ use session_core::{StoreUnavailable, Timestamp};
 /// coordination through Redis.
 const KEY_REF_BYTES: usize = 16;
 
+/// Keys a [`KeyTable`] may hold beyond the registry's `max_pending`: twice the largest lab
+/// scenario (128 concurrent sessions).
+///
+/// Redis caps pending sessions at `max_pending`, but the local table also holds keys Redis
+/// cannot vouch for: inserts whose outcome is unknown (timed out or cancelled after they were
+/// sent, so they may have committed) and sessions another registry consumed or expired. Those
+/// stay until their TTL passes. The slack absorbs them; beyond it, inserts fail closed instead
+/// of growing the table while Redis is unreachable.
+pub const KEY_TABLE_SLACK: usize = 256;
+
 /// A fresh random key reference, hex-encoded. Not a secret: it only names an entry in a
 /// [`KeyTable`], and knowing it gives no access to the key.
 pub(crate) fn new_key_ref() -> Result<String, StoreUnavailable> {
@@ -35,9 +45,11 @@ struct Entry<K> {
 /// need a shared key service instead, which is out of scope. A registry that finds a pending
 /// session whose key is not in its table fails closed ([`StoreUnavailable`]).
 ///
-/// Entries are removed when their session is consumed or expired, and by `purge` /
-/// `expire_due` once their `expires_at` has passed (also for sessions another registry moved
-/// on), so the table holds at most the sessions that are still live.
+/// Entries are removed when their session is consumed or expired, when Redis refused the
+/// insert or the connection was refused before it was sent, and by `purge` / `expire_due`
+/// (before they contact Redis, so also during an outage) once their `expires_at` has passed.
+/// A registry's inserts are refused once the table holds `max_pending` +
+/// [`KEY_TABLE_SLACK`] keys.
 pub struct KeyTable<K> {
     entries: Arc<Mutex<HashMap<String, Entry<K>>>>,
 }
@@ -67,24 +79,38 @@ impl<K> KeyTable<K> {
         Ok(self.len()? == 0)
     }
 
-    /// Registers `key` under `key_ref`, before the Redis insert that names it.
+    /// Registers `key` under `key_ref`, before the Redis insert that names it. A table holding
+    /// `cap` keys first drops those past their TTL at `now`; if it is still full the key is
+    /// refused ([`StoreUnavailable`]), so the table stays bounded even while Redis is
+    /// unreachable and unacknowledged inserts keep their keys.
     pub(crate) fn insert(
         &self,
         key_ref: String,
-        session: SessionId,
-        expires_at: Timestamp,
-        key: K,
+        entry: (SessionId, Timestamp, K),
+        cap: usize,
+        now: Timestamp,
     ) -> Result<(), StoreUnavailable> {
+        let (session, expires_at, key) = entry;
         let entry = Entry {
             session,
             expires_at,
             key: Arc::new(key),
         };
-        self.entries
-            .lock()
-            .map_err(|_| StoreUnavailable)?
-            .insert(key_ref, entry);
-        Ok(())
+        let mut entries = self.entries.lock().map_err(|_| StoreUnavailable)?;
+        let mut removed = Vec::new();
+        if entries.len() >= cap {
+            removed = take_due(&mut entries, now);
+        }
+        let outcome = if entries.len() >= cap {
+            Err(entry)
+        } else {
+            entries.insert(key_ref, entry);
+            Ok(())
+        };
+        // Keys (removed or refused) are dropped after the lock is released.
+        drop(entries);
+        drop(removed);
+        outcome.map_err(|_| StoreUnavailable)
     }
 
     /// The key registered under `key_ref` for `session`.
@@ -117,16 +143,21 @@ impl<K> KeyTable<K> {
     /// Forgets every key whose session is past its TTL at `now`.
     pub(crate) fn remove_due(&self, now: Timestamp) -> Result<(), StoreUnavailable> {
         let mut entries = self.entries.lock().map_err(|_| StoreUnavailable)?;
-        let due: Vec<String> = entries
-            .iter()
-            .filter(|(_, e)| now >= e.expires_at)
-            .map(|(r, _)| r.clone())
-            .collect();
-        let removed: Vec<Entry<K>> = due.iter().filter_map(|r| entries.remove(r)).collect();
+        let removed = take_due(&mut entries, now);
         drop(entries);
         drop(removed);
         Ok(())
     }
+}
+
+/// Removes and returns the entries past their TTL at `now`, for dropping outside the lock.
+fn take_due<K>(entries: &mut HashMap<String, Entry<K>>, now: Timestamp) -> Vec<Entry<K>> {
+    let due: Vec<String> = entries
+        .iter()
+        .filter(|(_, e)| now >= e.expires_at)
+        .map(|(r, _)| r.clone())
+        .collect();
+    due.iter().filter_map(|r| entries.remove(r)).collect()
 }
 
 impl<K> Default for KeyTable<K> {
