@@ -16,6 +16,7 @@ evidence.
 | `crates/session-core` | Session resolution strategies, atomic registry (IMP-007/011/012) |
 | `crates/session-redis` | Redis-backed `SessionStore`: Lua compare-and-set, keys kept in-process, fail closed (G5, IMP-014) |
 | `crates/lab-server` | axum lab Verifier for HPKE-0 `direct_post.jwt` (IMP-008..010) with SD-JWT VC + KB-JWT holder binding (Evidence level 3), wallet simulator and synthetic issuer (`wallet-sim` feature); G0-C API smoke test, G0-D ECDH-ES loopback e2e |
+| `docs/interop/` | G7: OIDF #792 reproduction map (`issue-792-reproduction.md`), OIDF conformance-suite plan and INTEROP-02 outline (`oidf-conformance-plan.md`) |
 | `scripts/` | Gate stages (shared by local and CI), upstream reproduction, evidence manifest |
 | `.github/workflows/` | `ci.yml` PR/main gate, `security.yml` daily advisory scan |
 | `evidence/g0/` | G0 run logs, upstream lockfile, advisory baseline, manifest |
