@@ -108,6 +108,17 @@ REQUIRED_TESTS=(
   unique_uri_form_post_succeeds_with_one_hpke_attempt
   unique_uri_among_many_sessions_consumes_only_the_addressed_one
   request_object_carries_exact_wire_values
+  # lab-server signed Request Objects (JAR, RFC 9101; OpenID4VP 1.1 §5, §5.10.1).
+  request_uri_serves_signed_jar_with_spec_header_and_claims
+  lab_request_signature_is_byte_identical_to_spruce_p256_signer
+  signed_request_object_binding_bytes_match_stored_session_and_session_info
+  served_request_object_is_signed_once_and_never_changes
+  wallet_refuses_tampered_request_payload
+  wallet_refuses_request_signed_with_wrong_key
+  wallet_refuses_request_with_wrong_typ
+  wallet_refuses_unsigned_alg_none_request
+  wallet_refuses_request_with_foreign_client_id_or_aud
+  request_signing_key_is_loaded_from_config_and_never_printed
   unique_kid_on_shared_route_yields_one_candidate_and_one_attempt
   bounded_trial_succeeds_with_right_session_last_within_budget
   bounded_trial_over_budget_is_rejected_without_decryption
