@@ -510,6 +510,17 @@ impl LabServer {
         Some(snapshot.binding().clone())
     }
 
+    /// Research instrumentation (`lab-instrumentation` feature only): the stored session's
+    /// expiry in Unix milliseconds, so tests can check the signed `exp` never precedes it.
+    #[cfg(feature = "lab-instrumentation")]
+    #[must_use]
+    pub fn stored_session_expiry_millis(&self, session_id: &str) -> Option<u64> {
+        let id = SessionId::new(session_id).ok()?;
+        let route = self.state.issued().requests.get(&id)?.route;
+        let snapshot = self.state.registry(route)?.snapshot(&id).ok()??;
+        Some(snapshot.expires_at().as_unix_millis())
+    }
+
     /// Research instrumentation (`lab-instrumentation` feature only): POSTs currently waiting
     /// for a decryption slot.
     #[cfg(feature = "lab-instrumentation")]
@@ -757,30 +768,33 @@ async fn issue(
         nonce,
         response_uri,
     };
-    // Signed here, once, over the binding that is then moved into the registry; `request_uri`
-    // serves these bytes unchanged (no path re-signs or edits them).
-    let lifetime = Lifetime::starting_now(state.session_ttl);
-    let request_object = state.signer.sign(
-        request_object(&binding, &key, &kid, lifetime)
-            .to_string()
-            .as_bytes(),
-    );
     let response_uri = match &binding {
         RequestBinding::DirectPostJwt { response_uri, .. } => response_uri.as_str().to_owned(),
         RequestBinding::DcApiJwt { .. } => return Err(fail()),
     };
-    SessionStore::insert(
+    let issued_at = SystemClock.now();
+    let stored = SessionStore::insert(
         registry,
         NewSession {
             id: id.clone(),
             binding,
             route_token,
-            kid: Some(kid),
-            key,
+            kid: Some(kid.clone()),
+            key: Arc::clone(&key),
             ttl: state.session_ttl,
         },
     )
     .await?;
+    // Signed once, after insertion, over the binding and expiry the registry actually stored:
+    // `exp` then derives from the session's own deadline (a clock read before insertion could
+    // straddle a second boundary and expire the request before its session). The request is
+    // published below only once signed; `request_uri` serves these bytes unchanged.
+    let lifetime = Lifetime::for_session(issued_at, stored.expires_at());
+    let request_object = state.signer.sign(
+        request_object(stored.binding(), &key, &kid, lifetime)
+            .to_string()
+            .as_bytes(),
+    );
     let request_uri = format!("{}{REQUESTS_PATH}/{id}", state.base_url);
     let result_token = RouteToken::generate().map_err(|_| fail())?;
     let result_uri = format!(
@@ -823,14 +837,14 @@ struct Lifetime {
 }
 
 impl Lifetime {
-    /// `iat` = now, rounded down; `exp` = now + `ttl` (the session's expiry), rounded up, so
+    /// `iat` = issuance time, rounded down; `exp` = the stored session's expiry, rounded up, so
     /// the request object never expires before its session does.
-    fn starting_now(ttl: Duration) -> Self {
-        let now = SystemClock.now();
-        let expiry = now.saturating_add(ttl).as_unix_millis();
+    const fn for_session(issued_at: Timestamp, session_expires_at: Timestamp) -> Self {
         Self {
-            issued_at: now.as_unix_millis() / MILLIS_PER_SECOND,
-            expires_at: expiry.div_ceil(MILLIS_PER_SECOND),
+            issued_at: issued_at.as_unix_millis() / MILLIS_PER_SECOND,
+            expires_at: session_expires_at
+                .as_unix_millis()
+                .div_ceil(MILLIS_PER_SECOND),
         }
     }
 }

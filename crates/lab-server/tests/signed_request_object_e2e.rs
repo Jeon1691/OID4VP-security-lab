@@ -854,3 +854,45 @@ async fn wallet_refuses_attacker_did_key_claiming_the_lab_client_id() {
     );
     lab.server.shutdown().await;
 }
+
+/// Milliseconds per JWT NumericDate second (RFC 7519 §2).
+const MILLIS_PER_NUMERIC_DATE_SECOND: u64 = 1000;
+/// Sessions issued per route kind; many issuances make a second-boundary straddle likely if
+/// `exp` were ever derived from a clock read other than the stored session's expiry.
+const EXPIRY_SAMPLES: usize = 200;
+
+/// PR review: the signed `exp` is derived from the expiry the registry actually stored, so the
+/// Request Object can never expire before its session (a clock read taken before insertion
+/// could straddle a second boundary). Checked on every route kind, over many issuances.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn request_object_exp_never_precedes_the_stored_session_expiry() {
+    let cases = [
+        (Mode::Hardened, RouteKind::Unique),
+        (trial(), RouteKind::Shared),
+        (
+            Mode::Research(SharedRouteStrategy::UniqueKid),
+            RouteKind::Shared,
+        ),
+    ];
+    for (mode, route) in cases {
+        let lab = Lab::start(mode).await;
+        for _ in 0..EXPIRY_SAMPLES {
+            let session = lab.session(route).await;
+            let payload = decode_json(segments(&lab.raw_request(&session).await)[JWS_PAYLOAD]);
+            let exp = payload["exp"].as_u64().expect("exp is a NumericDate");
+            let stored = lab
+                .server
+                .stored_session_expiry_millis(&session.session_id)
+                .expect("session is stored");
+            assert!(
+                exp * MILLIS_PER_NUMERIC_DATE_SECOND >= stored,
+                "{route:?}: exp {exp}s precedes the session expiry {stored}ms"
+            );
+            assert!(
+                exp * MILLIS_PER_NUMERIC_DATE_SECOND < stored + MILLIS_PER_NUMERIC_DATE_SECOND,
+                "{route:?}: exp {exp}s is not the session expiry {stored}ms rounded up"
+            );
+        }
+        lab.server.shutdown().await;
+    }
+}
