@@ -19,6 +19,7 @@
 
 use protocol_model::RequestBinding;
 use serde_json::{Map, Value, json};
+use sha2::{Digest as _, Sha256};
 
 use crate::jose;
 use crate::sd_jwt::{
@@ -285,6 +286,31 @@ pub(crate) fn dcql_query() -> Value {
     })
 }
 
+/// A validated response: what is committed, and the digest the replay guard binds to the
+/// session (never committed or logged).
+pub(crate) struct Validated {
+    pub(crate) response: ValidatedResponse,
+    /// [`holder_proof_digest`] of the verified presentation.
+    pub(crate) holder_proof: [u8; SHA256_DIGEST_BYTES],
+}
+
+/// Digest of the verified holder proof, for the Verifier-wide replay guard: SHA-256 of the
+/// KB-JWT's JWS Signing Input (`BASE64URL(header) '.' BASE64URL(payload)`, RFC 7515 §5.2
+/// step 8) exactly as received.
+///
+/// Why the KB-JWT and not the whole presentation: its payload carries `sd_hash` over the issuer
+/// JWT and the selected Disclosures (RFC 9901 §4.3.1), so equal KB-JWTs mean equal SD-JWTs; a
+/// different Disclosure set needs a new holder signature, which only the holder can make. Why
+/// without the signature: ECDSA signatures are malleable (`(r, s)` and `(r, n - s)` both
+/// verify, and the Verifier does not require low-S), so anyone holding a proof could mint a
+/// second valid encoding with a fresh digest. The signing input cannot change without failing
+/// verification, and canonical base64url leaves it one spelling.
+fn holder_proof_digest(presentation: &str) -> [u8; SHA256_DIGEST_BYTES] {
+    let kb_jwt = presentation.rsplit('~').next().unwrap_or_default();
+    let signing_input = kb_jwt.rsplit_once('.').map_or(kb_jwt, |(input, _)| input);
+    Sha256::digest(signing_input.as_bytes()).into()
+}
+
 /// Validates `plaintext` against the session's stored `binding`, the trusted issuer and `now`
 /// (seconds since the Unix epoch).
 pub(crate) fn validate(
@@ -292,7 +318,7 @@ pub(crate) fn validate(
     binding: &RequestBinding,
     issuer: &TrustedIssuerKey,
     now: u64,
-) -> Result<ValidatedResponse, ValidationError> {
+) -> Result<Validated, ValidationError> {
     let RequestBinding::DirectPostJwt {
         client_id, nonce, ..
     } = binding
@@ -312,7 +338,7 @@ pub(crate) fn validate(
         Some([Value::String(p)]) => p,
         _ => return Err(ValidationError::PresentationShape),
     };
-    sd_jwt::verify_sd_jwt_vc(
+    let response = sd_jwt::verify_sd_jwt_vc(
         presentation,
         issuer,
         &SYNTHETIC_CREDENTIAL_QUERY,
@@ -321,5 +347,9 @@ pub(crate) fn validate(
             nonce: nonce.as_str(),
             now,
         },
-    )
+    )?;
+    Ok(Validated {
+        response,
+        holder_proof: holder_proof_digest(presentation),
+    })
 }

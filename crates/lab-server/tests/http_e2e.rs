@@ -1142,8 +1142,8 @@ async fn cross_session_replay_on_shared_route_is_rejected() {
 /// PR #10 review: the JWE digest alone does not stop a replay of the *holder proof*. With a
 /// reused nonce and the same client_id, A's exact SD-JWT+KB re-sealed into a fresh JWE for B
 /// has a new ciphertext digest but the same verified KB-JWT; it is refused as
-/// `HolderProofReplay` and B stays pending. A's own retry with a fresh JWE still reaches the
-/// claim and is reported there as a replay.
+/// `HolderProofReplay` and B stays pending. A session's own retry with a fresh JWE still
+/// reaches the claim and is reported there as a replay.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn holder_proof_resealed_for_another_session_is_rejected() {
     const REUSED_NONCE: &str = "lab-reused-nonce";
@@ -1181,14 +1181,61 @@ async fn holder_proof_resealed_for_another_session_is_rejected() {
     assert_eq!(record.commit_result, CommitResult::NotRun);
     lab.assert_pending(&b).await;
 
-    // A's own retry with a fresh JWE: same session, so it reaches the claim.
-    let (_, status, body) = lab.respond(&a, &reseal).await;
-    assert_generic(status, &body);
+    // A consumed session is never resolved again (sequential retries end at resolve), so a
+    // same-session retry reaches the guard only while the session is still pending: two fresh
+    // JWEs of one proof for C, both parked before decryption. The proof is bound to C, so the
+    // guard lets both through and the claim commits one and reports the other as a replay.
+    let c = lab
+        .wallet
+        .create_session(&base, RouteKind::Unique, None)
+        .await
+        .expect("session c with its own nonce");
+    let request_c = lab.wallet.fetch_request(&c).await.expect("request c");
+    let own = SealOptions {
+        vp_token: Some(json!({ lab_server::SYNTHETIC_CREDENTIAL_QUERY_ID: [lab
+            .wallet
+            .present(&request_c, &PresentationTamper::None)
+            .expect("presentation c")] })),
+        ..SealOptions::default()
+    };
+    let jwes = [
+        lab.wallet.seal(&request_c, &own).expect("seal"),
+        lab.wallet.seal(&request_c, &own).expect("seal"),
+    ];
+    assert_ne!(jwes[0], jwes[1]);
+    let pause = lab.server.pause_decryptions().await;
+    let posts: Vec<_> = jwes
+        .into_iter()
+        .map(|jwe| {
+            let wallet = lab.wallet.clone();
+            let uri = request_c.response_uri.clone();
+            tokio::spawn(async move { wallet.post_response(&uri, &jwe).await })
+        })
+        .collect();
+    wait_parked(&lab.server, posts.len()).await;
+    drop(pause);
+    let mut statuses = Vec::new();
+    for post in posts {
+        statuses.push(post.await.expect("task").expect("answered").status);
+    }
+    statuses.sort_unstable();
+    assert_eq!(statuses, [OK, BAD_REQUEST]);
+    let mut rejections: Vec<_> = lab
+        .server
+        .evidence()
+        .take()
+        .into_iter()
+        .map(|r| r.rejection)
+        .collect();
+    rejections.sort_by_key(Option::is_some);
     assert_eq!(
-        lab.record().rejection,
-        Some(Rejection::Claim(ClaimError::Replay {
-            same_response: false
-        }))
+        rejections,
+        [
+            None,
+            Some(Rejection::Claim(ClaimError::Replay {
+                same_response: false
+            }))
+        ]
     );
     lab.shutdown().await;
 }
