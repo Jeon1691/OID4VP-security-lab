@@ -32,8 +32,9 @@ The test summaries say:
 > 'openid4vp://' and then start the flow in your verifier as normal."
 
 The suite then fetches the Verifier's `request_uri` itself and POSTs the response to the
-Verifier's `response_uri`. The research report names `FetchRequestUriAndExtractRequestObject`
-and `CallDirectPostEndpoint` as the conditions that do this.
+Verifier's `response_uri`: `AbstractVP1FinalVerifierTest.java` calls
+`FetchRequestUriAndExtractRequestObject` (L488, `"JAR-5.2.3"`) and `CallDirectPostEndpoint`
+(imported at L79, called at L872).
 
 ### 2.1 Test plans (verifier role)
 
@@ -65,11 +66,11 @@ It also says:
 | `credential_format` | `sd_jwt_vc`, `iso_mdl`. The happy-flow summary uses an SD-JWT VC "with a vct of urn:eudi:pid:1". The issuer key is supplied as config field `credential.signing_jwk`. | `dc+sd-jwt` ✔. The lab asks for vct `https://credentials.lab.invalid/synthetic-identity/v1` and claims `given_name`, `family_name`, `age_over_18` ✘ (needs a configurable query) |
 | Query language | DCQL ("The DCQL query must request only a single credential") | DCQL, one credential ✔ |
 | Response encryption | JOSE only. `JWEUtil.createEncrypter` (L250-275) builds AES, direct, RSA, ECDH (`ECDHEncrypter`) or X25519 encrypters. Under HAIP, `ValidateVpClientMetadataEncryptionForHaip.java` requires "a JWKS key with alg=ECDH-ES and P-256 curve" (L83) and `encrypted_response_enc_values_supported` "to contain both A128GCM and A256GCM" (L51). | HPKE-0 only ✘ |
-| Transport | `EnsureRequestUriIsHttps` ("The scheme used in the request_uri value MUST be https", L18) and `EnsureValidResponseUriForAuthorizationEndpointRequest` ("response_uri scheme is not https.", L41). The suite's outbound HTTP client trusts all certificates (`AbstractCondition.java` L678-697, `NoopHostnameVerifier`). | `http://127.0.0.1` only ✘ |
+| Transport | `EnsureRequestUriIsHttps` ("The scheme used in the request_uri value MUST be https", L18) and `EnsureValidResponseUriForAuthorizationEndpointRequest` ("response_uri scheme is not https.", L41). The suite's outbound HTTP client trusts all certificates (`AbstractCondition.java`: trust-all `X509TrustManager` ~L677-694, `NoopHostnameVerifier` L702). | `http://127.0.0.1` only ✘ |
 
-**HPKE / `session_info` / 1.1.** No occurrence of `session_info` exists in `src/`. "HPKE"
-appears in no file under `src/`, `frontend/` or `scripts/` (case-sensitive search) (the research report found one
-accidental match inside test-certificate data). The OpenID4VP 1.1 and HAIP 1.1 drafts are stored in the repository only
+**HPKE / `session_info` / 1.1.** No occurrence of `session_info` exists in `src/`. A case-sensitive search for "HPKE" has 0 hits in `src/`. A case-insensitive search has 1 hit,
+only in a unit test (`src/test/java/net/openid/conformance/condition/client/ValidateIdTokenSignature_UnitTest.java`),
+not in any VP code. The OpenID4VP 1.1 and HAIP 1.1 drafts are stored in the repository only
 as reference text (`library/specs/…`); no test cites them.
 
 > **Conclusion.** As of commit `246b2c1`, the suite cannot test the lab's HPKE-0 path or the
@@ -93,9 +94,19 @@ as reference text (`library/specs/…`); no test cites them.
 | `…InvalidSessionTranscript` | none | mdoc only, out of scope |
 
 The suite has no multi-session or response-correlation tests (nothing like #792 shared-route
-routing or cross-session replay). Its positive tests end in REVIEW with an uploaded screenshot,
-and its negative tests pass on an HTTP 4xx from `response_uri`
-(`AbstractVP1FinalVerifierNegativeTest.java`, from the research report).
+routing or cross-session replay). Its positive tests end in REVIEW with an uploaded screenshot
+(`VP1FinalVerifierHappyFlow.java` L27; `AbstractVP1FinalVerifierTest.java` L767-773).
+Its negative tests accept two outcomes (`AbstractVP1FinalVerifierNegativeTest.java` L6-12,
+L17-30):
+
+- an HTTP 4xx from `response_uri` (immediate rejection): the test finishes as PASSED
+  (`EnsureHttpStatusCodeIs4xx`);
+- a 2xx (verification deferred until after the redirect, which the class comment says 1.0
+  Final permits, citing suite issue #1828): the 2xx must still be a well-formed §8.2 response,
+  the tester uploads a screenshot showing the Verifier reporting the failure, and the test ends
+  as REVIEW.
+
+Anything else (3xx, 5xx, no status) fails.
 
 ## 3. Running the suite locally (as documented, not executed)
 
@@ -103,7 +114,8 @@ and its negative tests pass on an HTTP 4xx from `response_uri`
   - `docker compose -f docker-compose-prebuilt.yml up`, then open
     `https://localhost.emobix.co.uk:8443/`. The hostname must be mapped in the hosts file.
   - The images are `registry.gitlab.com/openid/conformance-suite:${IMAGE_TAG:-latest}`, its
-    nginx image, and `mongo:6.0.13` (`docker-compose-prebuilt.yml` L3, L12, L30).
+    nginx image, and `${MONGODB_IMAGE:-mongo:6.0.13}` (an overridable default)
+    (`docker-compose-prebuilt.yml` L3, L12, L30).
   - `BASE_URL` can be overridden.
 - **From source**:
   - Maven and Java. `pom.xml` sets `java.version` 21. The wiki says "17 or later". **Which one
@@ -154,10 +166,12 @@ None of these is in scope for G7. Each needs its own decision record.
    (`POST /lab/v1/sessions`). A small driver must turn these into
    `<suite authorization endpoint>?client_id=…&request_uri=…`.
 6. **Response URI answer.** The lab answers `200 {}`. Whether the suite expects or tolerates a
-   `redirect_uri` in that JSON is **UNKNOWN**. The lab's generic 400 should satisfy the
-   negative tests' "HTTP 4xx" pass criterion.
-7. `request_uri_method=post` (§5.10) is not supported. The plan would mark that module as
-   failed or skipped.
+   `redirect_uri` in that JSON is **UNKNOWN**. The lab rejects at the `response_uri` with the
+   generic 400, which takes the negative tests' 4xx path (PASSED). The lab never uses the
+   deferred 2xx path, which ends in REVIEW with a screenshot (§2.3).
+7. `request_uri_method=post` (§5.10) is not supported. That module would be skipped: it calls
+   `fireTestSkipped` when the request has no `request_uri_method=post`
+   (`VP1FinalVerifierRequestUriMethodPost.java` L37).
 
 ## 5. Staged plan
 
