@@ -73,7 +73,9 @@ jobs:
         run: rustup toolchain install && rustc -Vv
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # Inputs reach the script only as environment variables (no expression interpolation in
-      # `run`), and scenario-runner validates each value.
+      # `run`). They are shape-checked and capped here so a dispatch cannot outrun the job
+      # timeout; scenario-runner validates the values again (budget <= 256, N above the
+      # over-budget budget, burst above the limited in-flight cap).
       - name: Run benchmark (release build)
         env:
           INPUT_SIZES: ${{ inputs.sizes }}
@@ -81,7 +83,17 @@ jobs:
           INPUT_WARMUP: ${{ inputs.warmup }}
           INPUT_SEED: ${{ inputs.seed }}
           BENCH_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+          # Caps: 1000 measured requests per row is about ten times the default and still fits
+          # the 60-minute timeout for the full matrix; at most 8 sizes of up to 3 digits.
+          MAX_ITERATIONS: 1000
+          MAX_WARMUP: 100
         run: |
+          [[ "$INPUT_SIZES" =~ ^[0-9]{1,3}(,[0-9]{1,3}){0,7}$ ]] || { echo "invalid sizes"; exit 2; }
+          [[ "$INPUT_ITERATIONS" =~ ^[0-9]{1,4}$ && "$INPUT_ITERATIONS" -le "$MAX_ITERATIONS" ]] \
+            || { echo "iterations must be 1..$MAX_ITERATIONS"; exit 2; }
+          [[ "$INPUT_WARMUP" =~ ^[0-9]{1,3}$ && "$INPUT_WARMUP" -le "$MAX_WARMUP" ]] \
+            || { echo "warmup must be 0..$MAX_WARMUP"; exit 2; }
+          [[ "$INPUT_SEED" =~ ^[0-9]{1,19}$ ]] || { echo "seed must be a decimal u64"; exit 2; }
           scripts/bench.sh "$BENCH_OUT" -- \
             --sizes "$INPUT_SIZES" \
             --iterations "$INPUT_ITERATIONS" \

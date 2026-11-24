@@ -7,15 +7,28 @@
 #   OUT_ROOT     default evidence/g6; the run is written to OUT_ROOT/<run-id>/
 #   BENCH_RUN_ID run id (default <UTC yyyymmddThhmmssZ>-<12-char git sha>)
 #   REDIS_URL    if set, adds the Redis store rows (the URL itself is never logged)
-# Methodology: docs/benchmarks.md.
+# Exit status: 0 every invariant held, 1 an invariant broke, 2 the run could not complete
+# (build failure, bad arguments, broken run). Methodology: docs/benchmarks.md.
 set -euo pipefail
 export CARGO_TERM_COLOR=never
 
+readonly EXIT_BROKEN=2
+USAGE="usage: scripts/bench.sh [OUT_ROOT] [-- scenario-runner args...]"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-OUT_ROOT="${1:-evidence/g6}"
-shift || true
-[[ "${1:-}" != "--" ]] || shift
+OUT_ROOT="evidence/g6"
+# OUT_ROOT is optional; runner arguments always follow `--`.
+if [[ $# -gt 0 && "$1" != "--" ]]; then
+  OUT_ROOT="$1"
+  shift
+fi
+if [[ $# -gt 0 ]]; then
+  if [[ "$1" != "--" ]]; then
+    echo "$USAGE" >&2
+    exit "$EXIT_BROKEN"
+  fi
+  shift
+fi
 SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || echo nogit)"
 RUN_ID="${BENCH_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-${SHA}}"
 OUT="${OUT_ROOT}/${RUN_ID}"
@@ -32,7 +45,7 @@ if cargo build --release --locked -p scenario-runner 2>&1 | sanitize >>"$LOG"; t
 else
   echo "bench_build=FAIL" | tee -a "$LOG"
   scripts/evidence_manifest.sh "$OUT" >/dev/null
-  exit 1
+  exit "$EXIT_BROKEN"
 fi
 
 echo "## scenario_runner: run ${RUN_ID} ($*)" | tee -a "$LOG"
@@ -44,7 +57,7 @@ set -e
 case "$status" in
   0) echo "scenario_runner=pass" | tee -a "$LOG"; echo "invariants=pass" | tee -a "$LOG" ;;
   1) echo "scenario_runner=pass" | tee -a "$LOG"; echo "invariants=FAIL" | tee -a "$LOG" ;;
-  *) echo "scenario_runner=FAIL" | tee -a "$LOG" ;;
+  *) echo "scenario_runner=FAIL" | tee -a "$LOG"; status="$EXIT_BROKEN" ;;
 esac
 scripts/evidence_manifest.sh "$OUT" >/dev/null
 echo "bench exit ${status}: ${OUT}"
