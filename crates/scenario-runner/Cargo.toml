@@ -28,10 +28,13 @@ getrandom = { workspace = true }
 # Sealing for the HPKE-open benchmark input (sender side, test-only).
 jose-hpke = { workspace = true, features = ["test-support"] }
 
-# HPKE-0 open (right and wrong key) and session resolution per strategy and N.
+# HPKE-0 open and session resolution per strategy and N. `test = true`: `cargo test` also
+# builds it and runs every benchmark once (criterion's test mode, no measurement), so the gate
+# exercises the benches and cargo sees criterion used by a built target.
 [[bench]]
 name = "micro"
 harness = false
+test = true
 
 [lints]
 workspace = true
