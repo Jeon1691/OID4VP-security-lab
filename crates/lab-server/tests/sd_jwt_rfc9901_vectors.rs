@@ -51,6 +51,11 @@ fn rfc9901_fixture_provenance_is_pinned() {
     );
     assert_eq!(provenance["sha256_of_document"], RFC9901_TXT_SHA256);
     assert_eq!(provenance["retrieved"], "2026-11-24");
+    let license = provenance["license"].as_str().expect("license");
+    assert!(
+        license.contains("IETF Trust") && license.contains("NOTICE"),
+        "{license}"
+    );
 }
 
 /// RFC 9901 §4.2.3: the digest is base64url(SHA-256(US-ASCII of the encoded Disclosure)), for
