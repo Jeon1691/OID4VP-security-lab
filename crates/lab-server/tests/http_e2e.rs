@@ -20,8 +20,8 @@ use jose_hpke::Error as JweError;
 use lab_server::wallet_sim::{CreatedSession, KidChoice, SealOptions, WalletSim};
 use lab_server::{
     AdmissionError, CommitResult, CryptoResult, EvidenceRecord, GENERIC_REJECTION_BODY, LabConfig,
-    LabServer, MAX_RESPONSE_BODY_BYTES, Mode, Rejection, RouteKind, SharedRouteStrategy,
-    StartError, ValidationError, ValidationResult,
+    LabServer, MAX_RESPONSE_BODY_BYTES, Mode, Rejection, RequestSigningKey, RouteKind,
+    SharedRouteStrategy, StartError, ValidationError, ValidationResult,
 };
 use session_core::{CandidateBudget, ClaimError, ResolutionStrategy, ResolveError};
 
@@ -61,6 +61,17 @@ const REQUEST_TIMEOUT_STATUS: &str = "HTTP/1.1 408";
 const EXTRA_MEMBER: &str = "extra";
 const OVERSIZE_FILLER: usize = lab_server::MAX_COMMITTED_VP_TOKEN_BYTES + 1;
 
+/// Synthetic SpruceID fixture key that signs every request object (its did:key is the default
+/// `client_id`). Loaded through config, never compiled into the library.
+const FIXTURE_JWK: &str = include_str!("fixtures/spruce_verifier.jwk");
+
+fn lab_config(mode: Mode) -> LabConfig {
+    LabConfig::new(
+        mode,
+        RequestSigningKey::from_jwk(FIXTURE_JWK).expect("fixture signing key"),
+    )
+}
+
 struct Lab {
     server: LabServer,
     wallet: WalletSim,
@@ -68,7 +79,7 @@ struct Lab {
 
 impl Lab {
     async fn start(mode: Mode) -> Self {
-        Self::start_with(LabConfig::new(mode)).await
+        Self::start_with(lab_config(mode)).await
     }
 
     async fn start_with(config: LabConfig) -> Self {
@@ -118,7 +129,7 @@ impl Lab {
     ) -> (String, u16, Vec<u8>) {
         let request = self
             .wallet
-            .fetch_request(&session.request_uri)
+            .fetch_request(&session)
             .await
             .expect("request object is served");
         let jwe = self.wallet.seal(&request, opts).expect("wallet seals");
@@ -233,12 +244,12 @@ async fn request_object_carries_exact_wire_values() {
     let b = lab.session(RouteKind::Unique).await;
     let ra = lab
         .wallet
-        .fetch_request(&a.request_uri)
+        .fetch_request(&a)
         .await
         .expect("request a");
     let rb = lab
         .wallet
-        .fetch_request(&b.request_uri)
+        .fetch_request(&b)
         .await
         .expect("request b");
 
@@ -404,7 +415,7 @@ async fn admission_failures_are_rejected_before_decryption() {
     let session = lab.session(RouteKind::Unique).await;
     let request = lab
         .wallet
-        .fetch_request(&session.request_uri)
+        .fetch_request(&session)
         .await
         .expect("request");
     let jwe = lab
@@ -499,7 +510,7 @@ async fn jwe_bound_to_another_sessions_values_fails() {
     let b = lab.session(RouteKind::Unique).await;
     let rb = lab
         .wallet
-        .fetch_request(&b.request_uri)
+        .fetch_request(&b)
         .await
         .expect("request b");
 
@@ -586,7 +597,7 @@ async fn concurrent_identical_posts_consume_exactly_once() {
         let session = lab.session(RouteKind::Unique).await;
         let request = lab
             .wallet
-            .fetch_request(&session.request_uri)
+            .fetch_request(&session)
             .await
             .expect("request");
         let jwe = lab
@@ -726,7 +737,7 @@ async fn generic_rejection_bodies_are_byte_identical() {
     let session = lab.session(RouteKind::Unique).await;
     let request = lab
         .wallet
-        .fetch_request(&session.request_uri)
+        .fetch_request(&session)
         .await
         .expect("request");
     let mut bodies = Vec::new();
@@ -818,7 +829,7 @@ async fn hardened_mode_has_no_shared_route() {
     let session = lab.session(RouteKind::Unique).await;
     let request = lab
         .wallet
-        .fetch_request(&session.request_uri)
+        .fetch_request(&session)
         .await
         .expect("request");
     let jwe = lab
@@ -869,7 +880,7 @@ async fn every_mode_binds_loopback_only() {
     let ipv6_available = std::net::TcpListener::bind("[::1]:0").is_ok();
     for mode in modes {
         for bind in refused {
-            let mut config = LabConfig::new(mode);
+            let mut config = lab_config(mode);
             config.bind = bind.parse().expect("addr");
             match LabServer::start(config).await {
                 Err(StartError::LoopbackOnly) => {}
@@ -882,7 +893,7 @@ async fn every_mode_binds_loopback_only() {
         }
         for bind in ["127.0.0.1:0", "[::1]:0"] {
             let want: SocketAddr = bind.parse().expect("addr");
-            let mut config = LabConfig::new(mode);
+            let mut config = lab_config(mode);
             config.bind = want;
             match LabServer::start(config).await {
                 Ok(server) => {
@@ -899,14 +910,14 @@ async fn every_mode_binds_loopback_only() {
 /// The background sweep expires and purges sessions whose TTL passed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sweep_expires_and_purges_stale_sessions() {
-    let mut config = LabConfig::new(Mode::Hardened);
+    let mut config = lab_config(Mode::Hardened);
     config.session_ttl = SHORT_TTL;
     config.sweep_interval = FAST_SWEEP;
     let lab = Lab::start_with(config).await;
     let session = lab.session(RouteKind::Unique).await;
     let request = lab
         .wallet
-        .fetch_request(&session.request_uri)
+        .fetch_request(&session)
         .await
         .expect("request");
     let jwe = lab
@@ -1025,7 +1036,7 @@ async fn jwe_without_kid_is_rejected_on_every_route() {
 /// a request whose body never arrives is answered 408 at the request timeout, freeing its slot.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn request_limit_sheds_load_and_times_out_stalled_bodies() {
-    let mut config = LabConfig::new(Mode::Hardened);
+    let mut config = lab_config(Mode::Hardened);
     config.max_in_flight_requests = SINGLE_IN_FLIGHT;
     config.request_timeout = SHORT_REQUEST_TIMEOUT;
     let lab = Lab::start_with(config).await;
@@ -1134,11 +1145,16 @@ async fn cross_session_replay_on_shared_route_is_rejected() {
 /// MAX_COMMITTED_VP_TOKEN_BYTES and commits; longer nonces and client ids are refused up front.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn research_nonce_length_is_capped_so_the_presentation_always_fits() {
-    let mut config = LabConfig::new(trial(TRIAL_SIZES[0]));
+    let mut config = lab_config(trial(TRIAL_SIZES[0]));
     config.client_id =
         protocol_model::ClientIdWire::new("\"".repeat(lab_server::MAX_CLIENT_ID_LEN))
             .expect("client_id");
-    let lab = Lab::start_with(config).await;
+    let mut lab = Lab::start_with(config).await;
+    // This client_id is not a DID, so the wallet cannot resolve the signing key from it; it
+    // trusts the Verifier's pinned public key instead (pre-registered client, §5.9.2).
+    let mut public: serde_json::Value = serde_json::from_str(FIXTURE_JWK).expect("fixture JSON");
+    public.as_object_mut().expect("JWK object").remove("d");
+    lab.wallet = WalletSim::with_pinned_verifier_key(&public.to_string()).expect("pinned wallet");
     let longest = "n".repeat(lab_server::MAX_RESEARCH_NONCE_LEN);
     let session = lab
         .wallet
@@ -1160,7 +1176,7 @@ async fn research_nonce_length_is_capped_so_the_presentation_always_fits() {
     }
     lab.shutdown().await;
 
-    let mut config = LabConfig::new(Mode::Hardened);
+    let mut config = lab_config(Mode::Hardened);
     config.client_id =
         protocol_model::ClientIdWire::new("c".repeat(lab_server::MAX_CLIENT_ID_LEN + 1))
             .expect("client_id");
@@ -1176,13 +1192,13 @@ async fn research_nonce_length_is_capped_so_the_presentation_always_fits() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn shutdown_drains_in_flight_requests_and_commits_nothing_afterwards() {
     for release_during_drain in [true, false] {
-        let mut config = LabConfig::new(Mode::Hardened);
+        let mut config = lab_config(Mode::Hardened);
         config.shutdown_drain = SHORT_DRAIN;
         let lab = Lab::start_with(config).await;
         let session = lab.session(RouteKind::Unique).await;
         let request = lab
             .wallet
-            .fetch_request(&session.request_uri)
+            .fetch_request(&session)
             .await
             .expect("request");
         let jwe = lab
@@ -1230,7 +1246,7 @@ async fn shutdown_drains_in_flight_requests_and_commits_nothing_afterwards() {
 /// frees when that connection closes. `/health` is used because it bypasses the request limit.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn connection_cap_holds_connections_stalled_before_headers() {
-    let mut config = LabConfig::new(Mode::Hardened);
+    let mut config = lab_config(Mode::Hardened);
     config.max_connections = SINGLE_IN_FLIGHT;
     let lab = Lab::start_with(config).await;
     let health = format!("{}/health", lab.base());
@@ -1271,7 +1287,7 @@ const STALL_CLOSE_DEADLINE: Duration = Duration::from_secs(10);
 async fn stalled_header_connection_is_closed_at_the_header_timeout_and_frees_its_slot() {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-    let mut config = LabConfig::new(Mode::Hardened);
+    let mut config = lab_config(Mode::Hardened);
     config.max_connections = STALL_TEST_MAX_CONNECTIONS;
     config.header_read_timeout = SHORT_HEADER_TIMEOUT;
     let lab = Lab::start_with(config).await;
@@ -1312,13 +1328,13 @@ const HTTP_REQUEST_TIMEOUT: u16 = 408;
 /// counting it, or later research steps that wait on `parked_trials()` proceed too early.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn timed_out_parked_post_is_no_longer_counted_as_parked() {
-    let mut config = LabConfig::new(Mode::Hardened);
+    let mut config = lab_config(Mode::Hardened);
     config.request_timeout = SHORT_REQUEST_TIMEOUT;
     let lab = Lab::start_with(config).await;
     let session = lab.session(RouteKind::Unique).await;
     let request = lab
         .wallet
-        .fetch_request(&session.request_uri)
+        .fetch_request(&session)
         .await
         .expect("request");
     let jwe = lab
@@ -1348,14 +1364,14 @@ async fn timed_out_parked_post_is_no_longer_counted_as_parked() {
 /// waiting for a response that never comes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn new_connections_are_refused_while_shutdown_drains() {
-    let mut config = LabConfig::new(Mode::Hardened);
+    let mut config = lab_config(Mode::Hardened);
     config.shutdown_drain = SHORT_DRAIN;
     let lab = Lab::start_with(config).await;
     let addr = lab.server.local_addr();
     let session = lab.session(RouteKind::Unique).await;
     let request = lab
         .wallet
-        .fetch_request(&session.request_uri)
+        .fetch_request(&session)
         .await
         .expect("request");
     let jwe = lab
