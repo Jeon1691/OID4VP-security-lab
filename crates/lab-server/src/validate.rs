@@ -34,6 +34,36 @@ const PRESENTATION_MEMBERS: [&str; 2] = [PRESENTATION_NONCE, PRESENTATION_AUD];
 /// registry by default).
 pub const MAX_COMMITTED_VP_TOKEN_BYTES: usize = 4096;
 
+/// Longest `client_id` the server accepts in its configuration (lab policy). Real identifiers
+/// (DIDs, `x509_hash:` values, URLs) stay well under 200 characters; 1 KiB leaves room for
+/// experiments while keeping a matching presentation under [`MAX_COMMITTED_VP_TOKEN_BYTES`].
+pub const MAX_CLIENT_ID_LEN: usize = 1024;
+
+/// Longest caller-chosen nonce for a research session (generated nonces are 22 characters).
+/// 512 bytes leaves room for nonce-format experiments; see the size relation below.
+pub const MAX_RESEARCH_NONCE_LEN: usize = 512;
+
+/// The serialized synthetic `vp_token` with every name and value empty:
+/// `{"<query id>":[{"<nonce>":"<value>","<aud>":"<value>"}]}`.
+const VP_TOKEN_SKELETON: &str = r#"{"":[{"":"","":""}]}"#;
+/// Bytes of a synthetic `vp_token` that do not depend on the session's values.
+const VP_TOKEN_FIXED_BYTES: usize = VP_TOKEN_SKELETON.len()
+    + SYNTHETIC_CREDENTIAL_QUERY_ID.len()
+    + PRESENTATION_NONCE.len()
+    + PRESENTATION_AUD.len();
+/// JSON string escaping at most doubles a visible-ASCII `client_id` (`"` and `\` become two
+/// bytes; nothing else in `%x20-7E` is escaped). Nonces use only the §5.2 URL-safe set, which
+/// is never escaped.
+const JSON_ESCAPE_FACTOR: usize = 2;
+
+// A presentation matching any allowed session (longest client_id, all of it escaped, and the
+// longest research nonce) always fits under the commit cap, so the cap never rejects an honest
+// response.
+const _: () = assert!(
+    VP_TOKEN_FIXED_BYTES + JSON_ESCAPE_FACTOR * MAX_CLIENT_ID_LEN + MAX_RESEARCH_NONCE_LEN
+        <= MAX_COMMITTED_VP_TOKEN_BYTES
+);
+
 /// Why a decrypted payload was not accepted. Internal evidence only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ValidationError {
