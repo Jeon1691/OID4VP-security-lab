@@ -175,14 +175,18 @@ core_containment() {
 }
 
 # The Verifier build (lab-server default features, which the binary uses) must not contain
-# sender-side sealing: jose-hpke `test-support` and the wallet simulator's HTTP client are only
-# reachable through the `wallet-sim` feature that tests enable.
+# sender-side sealing (jose-hpke `test-support`, the wallet simulator's HTTP client) or the
+# decryption pause lever. Both are only reachable through the `wallet-sim` /
+# `lab-instrumentation` features that tests enable via the self dev-dependency.
 verifier_without_sealing() {
-  local features normal
+  local features own normal
   features="$(cargo tree --locked -p lab-server -e normal,features -i jose-hpke)" || return 1
+  own="$(cargo tree --locked -p lab-server -e normal,features -i lab-server)" || return 1
   normal="$(cargo tree --locked -p lab-server -e normal --prefix none)" || return 1
-  if grep -F 'feature "test-support"' <<<"$features" || grep -E '^reqwest ' <<<"$normal"; then
-    echo "sealing reachable from the default lab-server build"
+  if grep -F 'feature "test-support"' <<<"$features" \
+    || grep -E 'lab-server feature "(wallet-sim|lab-instrumentation)"' <<<"$own" \
+    || grep -E '^reqwest ' <<<"$normal"; then
+    echo "test-only feature reachable from the default lab-server build"
     return 1
   fi
 }

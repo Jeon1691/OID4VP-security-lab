@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::pin::Pin;
+#[cfg(feature = "lab-instrumentation")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll};
@@ -201,8 +202,10 @@ struct AppState {
     /// Slots for HPKE trials on the blocking pool.
     decryptions: Arc<Semaphore>,
     /// Size of `decryptions`, for `LabServer::pause_decryptions`.
+    #[cfg(feature = "lab-instrumentation")]
     decryption_slots: u32,
     /// POSTs waiting for a decryption slot (instrumentation).
+    #[cfg(feature = "lab-instrumentation")]
     parked_trials: AtomicUsize,
     replay_guard: Mutex<ReplayGuard>,
     /// `true` while commits are allowed. Every claim runs under a read guard; shutdown takes
@@ -270,6 +273,7 @@ pub struct LabServer {
 }
 
 /// Holds every decryption slot until dropped; see [`LabServer::pause_decryptions`].
+#[cfg(feature = "lab-instrumentation")]
 #[derive(Debug)]
 pub struct DecryptionPause {
     _slots: OwnedSemaphorePermit,
@@ -380,8 +384,10 @@ impl LabServer {
             shared,
             issued: Mutex::new(Issued::default()),
             decryptions: Arc::new(Semaphore::new(config.max_concurrent_decryptions)),
+            #[cfg(feature = "lab-instrumentation")]
             decryption_slots: u32::try_from(config.max_concurrent_decryptions)
                 .map_err(|_| StartError::ZeroLimit)?,
+            #[cfg(feature = "lab-instrumentation")]
             parked_trials: AtomicUsize::new(0),
             replay_guard: Mutex::new(ReplayGuard::default()),
             commits_open: RwLock::new(true),
@@ -455,12 +461,13 @@ impl LabServer {
         result
     }
 
-    /// Research instrumentation: takes every decryption slot until the returned guard is
-    /// dropped, so POSTs park before HPKE. Lets scenarios and tests place a request at a known
-    /// point (races, shutdown) without timing assumptions.
+    /// Research instrumentation (`lab-instrumentation` feature only): takes every decryption
+    /// slot until the returned guard is dropped, so POSTs park before HPKE. Lets scenarios and
+    /// tests place a request at a known point (races, shutdown) without timing assumptions.
     ///
     /// # Panics
     /// Never: the semaphore is never closed.
+    #[cfg(feature = "lab-instrumentation")]
     pub async fn pause_decryptions(&self) -> DecryptionPause {
         let permit = Arc::clone(&self.state.decryptions)
             .acquire_many_owned(self.state.decryption_slots)
@@ -469,7 +476,9 @@ impl LabServer {
         DecryptionPause { _slots: permit }
     }
 
-    /// Research instrumentation: POSTs currently waiting for a decryption slot.
+    /// Research instrumentation (`lab-instrumentation` feature only): POSTs currently waiting
+    /// for a decryption slot.
+    #[cfg(feature = "lab-instrumentation")]
     #[must_use]
     pub fn parked_trials(&self) -> usize {
         self.state.parked_trials.load(Ordering::SeqCst)
@@ -933,8 +942,10 @@ async fn pipeline(
     record.candidate_count = candidates.len();
 
     // HPKE is CPU-bound: run it on the blocking pool, at most `decryptions` trials at once.
+    #[cfg(feature = "lab-instrumentation")]
     state.parked_trials.fetch_add(1, Ordering::SeqCst);
     let slot = Arc::clone(&state.decryptions).acquire_owned().await;
+    #[cfg(feature = "lab-instrumentation")]
     state.parked_trials.fetch_sub(1, Ordering::SeqCst);
     let slot = slot.map_err(|_| Rejection::TrialAborted)?;
     let (trial, candidates) = tokio::task::spawn_blocking(move || {

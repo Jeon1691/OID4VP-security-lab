@@ -75,8 +75,9 @@
 //! [`LabServer::shutdown`] is graceful: it stops accepting, lets in-flight requests finish for
 //! up to [`LabConfig::shutdown_drain`], then closes commits. After it returns no request can
 //! commit; one still running is refused (`Rejection::ShuttingDown`).
-//! [`LabServer::pause_decryptions`] and [`LabServer::parked_trials`] are research
-//! instrumentation for placing a POST at a known point (races, shutdown) deterministically.
+//! `LabServer::pause_decryptions` and `LabServer::parked_trials` are research instrumentation
+//! for placing a POST at a known point (races, shutdown) deterministically; they exist only
+//! with the `lab-instrumentation` feature.
 //!
 //! Steps 1-3 answer with distinct admission errors (they reveal nothing about sessions). Every
 //! failure from step 4 on answers with the single [`GENERIC_REJECTION_BODY`] (400); the real
@@ -114,9 +115,9 @@
 //!
 //! # Features
 //!
-//! `wallet-sim` enables `wallet_sim` and with it `jose-hpke/test-support` (sealing). The
-//! default build, including the `lab-server` binary, contains no sealing code; the gate step
-//! `verifier_without_sealing` checks it. Release artifacts must come from a plain
+//! `wallet-sim` enables `wallet_sim` and with it `jose-hpke/test-support` (sealing);
+//! `lab-instrumentation` enables the decryption pause lever. The default build, including the
+//! `lab-server` binary, has neither; the gate step `verifier_without_sealing` checks it. Release artifacts must come from a plain
 //! `cargo build -p lab-server` (`--release`): a build that also compiles test targets (e.g.
 //! `cargo build --workspace --all-targets`) unifies the self dev-dependency's `wallet-sim`
 //! feature into the library the binary links.
@@ -138,7 +139,9 @@ pub use evidence::{
     AdmissionError, CommitResult, CryptoResult, EvidenceLog, EvidenceRecord, MAX_EVIDENCE_RECORDS,
     Rejection, ValidationResult,
 };
-pub use server::{DecryptionPause, GENERIC_REJECTION_BODY, LabServer, MAX_REMEMBERED_DIGESTS};
+#[cfg(feature = "lab-instrumentation")]
+pub use server::DecryptionPause;
+pub use server::{GENERIC_REJECTION_BODY, LabServer, MAX_REMEMBERED_DIGESTS};
 pub use validate::{
     MAX_CLIENT_ID_LEN, MAX_COMMITTED_VP_TOKEN_BYTES, MAX_RESEARCH_NONCE_LEN,
     SYNTHETIC_CREDENTIAL_QUERY_ID, ValidatedResponse, ValidationError,
