@@ -222,10 +222,21 @@ struct Limits {
     decryptions: usize,
 }
 
-/// One session in the client's pool: its verified Request Object (the response target).
+/// One session in the client's pool: its verified Request Object (the response target) and
+/// when its creation was requested (an upper bound on its age).
 struct Pooled {
     request: RequestObject,
+    created: Instant,
 }
+
+/// The pool is rebuilt once its oldest session has lived 1 / `REFRESH_DIVISOR` of the session
+/// TTL, so a fixture never expires while it is still a candidate. The check runs before every
+/// case run, and one case run (at most two POSTs and a pool top-up: milliseconds in a release
+/// build, well under a second in a debug test) never takes the remaining half of a TTL. With
+/// the default 300 s TTL, that is at most one rebuild every 150 s.
+const REFRESH_DIVISOR: u32 = 2;
+/// Path of the lab's liveness endpoint, used to reconnect after a rebuild off the clock.
+const HEALTH_PATH: &str = "/health";
 
 /// One answered request.
 struct Sample {
@@ -234,16 +245,20 @@ struct Sample {
     record: Option<EvidenceRecord>,
 }
 
-/// A running server and the wallet driving it.
-struct Lab {
+/// A running server, the wallet driving it, and what it takes to start an identical one.
+struct Lab<'a> {
+    fixtures: &'a Fixtures,
+    strategy: Strategy,
+    session_ttl: Duration,
+    limits: Option<Limits>,
     server: LabServer,
     wallet: WalletSim,
     route: RouteKind,
 }
 
-impl Lab {
+impl<'a> Lab<'a> {
     async fn start(
-        fixtures: &Fixtures,
+        fixtures: &'a Fixtures,
         strategy: Strategy,
         session_ttl: Duration,
         limits: Option<Limits>,
@@ -252,7 +267,42 @@ impl Lab {
             server: Self::server(fixtures, strategy, session_ttl, limits).await?,
             wallet: fixtures.wallet()?,
             route: strategy.route(),
+            fixtures,
+            strategy,
+            session_ttl,
+            limits,
         })
+    }
+
+    /// Keeps every pooled session well inside its TTL. Once the oldest has lived
+    /// 1 / [`REFRESH_DIVISOR`] of it, this starts an identical server and builds a fresh pool
+    /// of `n` sessions in order. A fresh server, rather than replacing stale sessions in
+    /// place, because the old ones would stay pending in the registry (extra bounded-trial
+    /// candidates) until they expired. Building in order keeps pool index = candidate
+    /// position. It runs between case runs, never inside a timed request, and reconnects
+    /// through `/health` so the next timed request does not pay a TCP connect. Returns whether
+    /// it rebuilt.
+    async fn keep_fresh(&mut self, pool: &mut Vec<Pooled>, n: usize) -> Result<bool> {
+        let refresh_after = self.session_ttl / REFRESH_DIVISOR;
+        let stale = pool
+            .iter()
+            .map(|p| p.created)
+            .min()
+            .is_some_and(|oldest| oldest.elapsed() >= refresh_after);
+        if !stale {
+            return Ok(false);
+        }
+        let fresh =
+            Self::server(self.fixtures, self.strategy, self.session_ttl, self.limits).await?;
+        std::mem::replace(&mut self.server, fresh).shutdown().await;
+        pool.clear();
+        let health = self
+            .wallet
+            .get(&format!("{}{HEALTH_PATH}", self.server.base_url()))
+            .await?;
+        ensure!(health.status == OK, "rebuilt server is not healthy");
+        self.fill(pool, n).await?;
+        Ok(true)
     }
 
     async fn server(
@@ -275,6 +325,7 @@ impl Lab {
     }
 
     async fn session(&self) -> Result<Pooled> {
+        let created = Instant::now();
         let session = self
             .wallet
             .create_session(&self.server.base_url(), self.route, None)
@@ -285,7 +336,7 @@ impl Lab {
             .fetch_request(&session)
             .await
             .context("request object verifies")?;
-        Ok(Pooled { request })
+        Ok(Pooled { request, created })
     }
 
     async fn fill(&self, pool: &mut Vec<Pooled>, n: usize) -> Result<()> {
@@ -313,8 +364,10 @@ impl Lab {
         (records.len() == 1).then(|| records.remove(0))
     }
 
-    /// Runs `case` once against `pool` (kept at `n` pending sessions in insertion order).
-    async fn run(&self, case: Case, pool: &mut Vec<Pooled>, n: usize) -> Result<Sample> {
+    /// Runs `case` once against `pool` (kept at `n` pending sessions in insertion order), after
+    /// [`Self::keep_fresh`] (off the clock).
+    async fn run(&mut self, case: Case, pool: &mut Vec<Pooled>, n: usize) -> Result<Sample> {
+        self.keep_fresh(pool, n).await?;
         let last = n.saturating_sub(1);
         match case {
             Case::Valid(position) => {
@@ -689,7 +742,7 @@ async fn block(
     block_cases: &[Case],
     schedule: &mut Schedule,
 ) -> Result<Vec<Row>> {
-    let lab = Lab::start(fixtures, strategy, params.session_ttl, None).await?;
+    let mut lab = Lab::start(fixtures, strategy, params.session_ttl, None).await?;
     let mut pool = Vec::with_capacity(n);
     lab.fill(&mut pool, n).await?;
     let valid: Vec<usize> = (0..block_cases.len())
@@ -908,7 +961,7 @@ async fn burst(
             decryptions: n,
         }
     };
-    let lab = Lab::start(fixtures, strategy, params.session_ttl, Some(limits)).await?;
+    let mut lab = Lab::start(fixtures, strategy, params.session_ttl, Some(limits)).await?;
     let mut pool = Vec::with_capacity(n);
     let mut acc = Acc::new();
     let mut wall = Duration::ZERO;
@@ -916,6 +969,8 @@ async fn burst(
     let mut cpu_known = true;
     for round in 0..=params.burst_rounds {
         let measured = round > 0;
+        // Sessions shed with 503 stay in the pool for the next round; keep them inside their TTL.
+        lab.keep_fresh(&mut pool, n).await?;
         lab.fill(&mut pool, n).await?;
         let batch: Vec<Pooled> = std::mem::take(&mut pool);
         let mut sealed = Vec::with_capacity(batch.len());

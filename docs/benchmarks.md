@@ -67,6 +67,13 @@ the largest N must exceed `--over-budget`, `--burst` must exceed the limits-on i
   The client keeps a pool of exactly N sessions in creation order. session-core resolves
   bounded-trial candidates in that order, so pool position = candidate position. A committed
   session is replaced by a new one at the end of the order before the next request.
+* Fixture freshness: sessions live for the lab's session TTL (300 s). Once the oldest pooled
+  session has lived half of it, the runner starts an identical server and builds a fresh pool
+  of N in order, between requests and off the clock. A fresh server is used because the stale
+  sessions would otherwise stay pending in the registry as extra candidates. The new server is
+  reconnected through `/health` before the next timed request. No measured request ever sees
+  an expired fixture, so the candidate count stays exactly N. A unit test runs a bounded-trial
+  block with a 1 s TTL across several TTLs to prove it.
 * Order: per block, the cases run in an order shuffled by the seed. The generator is
   SplitMix64, and only the schedule is seeded: all keys, nonces and tokens come from the OS
   CSPRNG.
