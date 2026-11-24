@@ -231,7 +231,9 @@ REQUIRED_TESTS=(
   http::tests::failure_cases_must_carry_their_rejection_reason
   http::tests::a_violation_fails_the_row
   http::tests::attempts_mean_counts_only_requests_with_an_evidence_record
-  http::tests::burst_with_limits_on_must_shed_load
+  http::tests::burst_without_503_is_not_a_violation
+  http::tests::in_flight_cap_requires_a_503_beyond_the_held_requests
+  http::tests::bounded_trial_still_sees_n_candidates_when_the_block_outlives_the_session_ttl
   tests::exit_code_fails_when_any_row_breaks_its_invariant
   tests::arguments_must_exercise_over_budget_and_the_limited_burst
 )

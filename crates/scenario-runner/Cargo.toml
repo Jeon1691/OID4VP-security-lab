@@ -14,7 +14,9 @@ publish.workspace = true
 anyhow = { workspace = true }
 evidence-report = { workspace = true }
 hdrhistogram = { workspace = true }
-lab-server = { workspace = true, features = ["wallet-sim"] }
+# `lab-instrumentation`: the decryption pause that holds requests in the pipeline, so the
+# in-flight cap is exercised under controlled admission (http::in_flight_cap).
+lab-server = { workspace = true, features = ["wallet-sim", "lab-instrumentation"] }
 protocol-model = { workspace = true }
 redis = { workspace = true }
 serde_json = { workspace = true }

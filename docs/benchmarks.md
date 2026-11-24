@@ -99,12 +99,25 @@ the largest N must exceed `--over-budget`, `--burst` must exceed the limits-on i
 | `admission` | A valid form body sent as `application/json` | 415 before the JWE is parsed |
 | `over_budget` | Bounded trial, budget 8, N = 32 / 64 / 128 pending | 400 at resolve, before any HPKE |
 | `valid_concurrent` (burst) | N = 64 honest responses at once, 10 rounds after one warm-up round, limits on and off | see below |
+| `in_flight_cap` (limits) | Limits on: 8 valid responses held in the pipeline (decryption paused), then one more | the extra one gets 503; the held 8 then commit |
 
 Burst limits: **on** = `max_in_flight_requests` 8 and `max_concurrent_decryptions` 2, so the
 burst sheds load (503) and queues trials. **Off** = the default in-flight cap (512, above the
 burst) and one decryption slot per concurrent request, so neither limit binds. The lab has no
 rate limiter: "rate limit" here means the in-flight cap. A 503 is answered by the limit
 middleware before the pipeline runs, so it leaves no evidence record and makes no HPKE attempt.
+
+The burst is measured as it happens. Requests can finish before the cap fills, so the 503s
+there are reported (`status_503`, `rejection_ratio`) but not required. The cap itself is proven
+under **controlled admission** (`in_flight_cap`, one probe per `--burst-rounds`):
+
+1. The runner takes every decryption slot (lab-server's `lab-instrumentation` pause).
+2. It sends 8 valid responses and waits until all 8 are parked at the paused decryption step,
+   so they hold every in-flight slot.
+3. It sends a 9th, which must be answered 503 and leave no evidence record.
+4. It releases the 8, which must each commit with one attempt.
+
+The row's latency is the refused probe's.
 
 ### Session store (no HTTP)
 
@@ -180,8 +193,10 @@ pending, and the lab tries every candidate:
 * every request: exactly one evidence record, and a recorded trial time whenever an attempt was
   made.
 * burst, every round: every admitted request commits within the strategy's attempt bound and a
-  503 leaves no evidence record. With limits on, at least one request is shed (503). With
-  limits off, none is.
+  503 leaves no evidence record. With limits off, no request is shed. With limits on, shedding
+  is reported, not required.
+* `in_flight_cap`, every probe: with the cap's 8 requests held in the pipeline, one more gets a
+  503 and leaves no evidence record. The held 8 then commit with exactly one attempt each.
 
 The unit tests in `scenario-runner` (listed in the gate's required tests) feed records that
 break each rule and check that the row fails and that the exit status is 1.

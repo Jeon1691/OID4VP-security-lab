@@ -400,6 +400,26 @@ pub fn markdown_summary(run_id: &str, rows: &[Row]) -> String {
             );
         }
     }
+    let limits: Vec<&Row> = rows.iter().filter(|r| r.scenario == "limits").collect();
+    if !limits.is_empty() {
+        let _ = writeln!(
+            md,
+            "\n## In-flight cap (controlled admission: cap requests held, one more sent)\n"
+        );
+        let _ = writeln!(md, "| cap | probes | 503 | probe latency | invariant |");
+        let _ = writeln!(md, "| ---: | ---: | ---: | --- | --- |");
+        for row in limits {
+            let _ = writeln!(
+                md,
+                "| {} | {} | {} | {} | {} |",
+                row.pending,
+                row.requests,
+                row.status_503,
+                triple(row.latency),
+                row.invariant.status()
+            );
+        }
+    }
     let store: Vec<&Row> = rows.iter().filter(|r| r.scenario == "store").collect();
     if !store.is_empty() {
         let _ = writeln!(md, "\n## Session store (no HTTP): memory vs Redis\n");
