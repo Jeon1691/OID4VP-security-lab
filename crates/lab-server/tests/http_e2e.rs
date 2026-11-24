@@ -209,6 +209,7 @@ async fn unique_uri_form_post_succeeds_with_one_hpke_attempt() {
     assert_eq!(record.strategy, ResolutionStrategy::UniqueUri);
     assert_eq!(record.candidate_count, 1);
     assert_eq!(record.hpke_attempts, 1);
+    assert!(record.trial_time > Duration::ZERO, "trial time is recorded");
     assert_eq!(record.crypto_result, CryptoResult::Opened { opened: 1 });
     assert_eq!(
         record.validation_result,
@@ -484,6 +485,7 @@ async fn admission_failures_are_rejected_before_decryption() {
         let record = lab.record();
         assert_eq!(record.rejection, Some(Rejection::Admission(want)), "{name}");
         assert_eq!(record.hpke_attempts, 0, "{name}");
+        assert_eq!(record.trial_time, Duration::ZERO, "{name}");
         assert_eq!(record.candidate_count, 0, "{name}");
         lab.assert_pending(&session).await;
     }

@@ -1,11 +1,12 @@
 //! Per-request evidence, kept in process for tests and scenario runs.
 //!
-//! Records hold counts, strategies and error variants only: never keys, plaintext, nonces,
-//! route tokens or JWE bytes. The session id of a committed session is included; it names the
+//! Records hold counts, strategies, error variants and the HPKE trial's duration only: never
+//! keys, plaintext, nonces, route tokens or JWE bytes. The session id of a committed session is included; it names the
 //! session in the lab's own result endpoint and is not a capability for posting responses.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use protocol_model::SessionId;
 use session_core::{ClaimError, ResolutionStrategy, ResolveError};
@@ -131,6 +132,10 @@ pub struct EvidenceRecord {
     pub candidate_count: usize,
     /// HPKE open attempts made for this request.
     pub hpke_attempts: usize,
+    /// Wall time of the trial on the blocking pool: every HPKE open and the validation of
+    /// each opened plaintext, without the wait for a decryption slot. Zero when no trial ran.
+    /// Research evidence (G6 benchmarks); it never reaches the HTTP answer.
+    pub trial_time: Duration,
     /// HPKE outcome.
     pub crypto_result: CryptoResult,
     /// Validation outcome.
@@ -150,6 +155,7 @@ impl EvidenceRecord {
             strategy,
             candidate_count: 0,
             hpke_attempts: 0,
+            trial_time: Duration::ZERO,
             crypto_result: CryptoResult::NotAttempted,
             validation_result: ValidationResult::NotRun,
             commit_result: CommitResult::NotRun,
