@@ -1,8 +1,12 @@
 //! Criterion micro-benchmarks behind the G6 HTTP numbers (`cargo bench -p scenario-runner`):
 //!
-//! * `hpke0_open/{right_key,wrong_key}`: parse + HPKE-0 open of one compact JWE. A bounded trial
-//!   pays `wrong_key` for every candidate but one, so N × `wrong_key` approximates its crypto
-//!   floor (validation of the opened plaintext comes on top).
+//! * `hpke0_open/{right_key,wrong_session_info,wrong_key}`: parse + HPKE-0 open of one compact
+//!   JWE. `wrong_session_info` is exactly the bounded-trial failure: the route's shared key with
+//!   another session's `session_info` (different nonce), so the key schedule differs and the
+//!   AEAD tag fails after the full ECDH. A bounded trial pays it for every candidate but one, so
+//!   N × `wrong_session_info` is its crypto floor (validation of the opened plaintext comes on
+//!   top). `wrong_key` (another recipient key) is the unique-strategy failure shape and only
+//!   approximates the trial's.
 //! * `resolve/{unique_uri,unique_kid,bounded_trial}/N`: session-core `MemoryRegistry::resolve`
 //!   with N pending sessions on one shared route (unique-uri: one route per session).
 //!
@@ -45,6 +49,7 @@ fn hpke_open(c: &mut Criterion) {
     let key = RecipientPrivateKey::generate(&mut rng);
     let other = RecipientPrivateKey::generate(&mut rng);
     let info = SessionInfo::from_binding(&binding("g6-nonce", RESPONSE_URI));
+    let other_info = SessionInfo::from_binding(&binding("g6-other-nonce", RESPONSE_URI));
     let jwe = seal_compact(
         &key.public_key(),
         Some(KID),
@@ -58,6 +63,12 @@ fn hpke_open(c: &mut Criterion) {
         b.iter(|| {
             let parsed = CompactJwe::parse(black_box(&jwe)).expect("parse");
             black_box(parsed.open(&key, info.as_bytes()).expect("opens"))
+        });
+    });
+    group.bench_function("wrong_session_info", |b| {
+        b.iter(|| {
+            let parsed = CompactJwe::parse(black_box(&jwe)).expect("parse");
+            black_box(parsed.open(&key, other_info.as_bytes()).is_err())
         });
     });
     group.bench_function("wrong_key", |b| {
