@@ -80,7 +80,7 @@ fn args() -> Result<Args> {
     let mut seed = DEFAULT_SEED;
     let mut budget = None;
     let mut over_budget = DEFAULT_OVER_BUDGET;
-    let mut burst = DEFAULT_BURST;
+    let mut burst = None;
     let mut burst_rounds = DEFAULT_BURST_ROUNDS;
     let mut store_iterations = DEFAULT_STORE_ITERATIONS;
     let mut fixtures = PathBuf::from(FIXTURES_DIR);
@@ -101,7 +101,7 @@ fn args() -> Result<Args> {
             "--seed" => seed = parse(&flag, &value)?,
             "--budget" => budget = Some(parse(&flag, &value)?),
             "--over-budget" => over_budget = parse(&flag, &value)?,
-            "--burst" => burst = parse(&flag, &value)?,
+            "--burst" => burst = Some(parse(&flag, &value)?),
             "--burst-rounds" => burst_rounds = parse(&flag, &value)?,
             "--store-iterations" => store_iterations = parse(&flag, &value)?,
             "--fixtures" => fixtures = PathBuf::from(value),
@@ -120,6 +120,9 @@ fn args() -> Result<Args> {
         budget >= max_n && budget <= MAX_CANDIDATE_BUDGET,
         "--budget must be at least the largest N and at most {MAX_CANDIDATE_BUDGET}"
     );
+    // The bounded-trial burst needs every burst session within the budget; a small `--sizes`
+    // list (hence budget) shrinks the default burst instead of failing.
+    let burst = burst.unwrap_or_else(|| DEFAULT_BURST.min(budget));
     ensure!(
         burst > 0 && burst <= budget,
         "--burst must be positive and within the budget"

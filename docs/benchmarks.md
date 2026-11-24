@@ -40,7 +40,7 @@ service container as the `redis` job, and uploads the run directory as the `evid
 artifact (kept 30 days). It is not part of `ci-gate`.
 
 Runner flags (defaults in brackets): `--sizes` [1,2,8,32,64,128], `--iterations` [100],
-`--warmup` [10], `--seed` [1], `--budget` [largest N], `--over-budget` [8], `--burst` [64],
+`--warmup` [10], `--seed` [1], `--budget` [largest N], `--over-budget` [8], `--burst` [64, at most the budget],
 `--burst-rounds` [10], `--store-iterations` [1000], `--fixtures` [lab-server test fixtures].
 
 ## Set-up
