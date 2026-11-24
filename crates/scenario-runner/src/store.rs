@@ -223,3 +223,25 @@ pub async fn run(
     }
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ITERATIONS: u64 = 5;
+    const WARMUP: u64 = 1;
+
+    /// One loop interleaves insert, resolve and claim, so its CPU time belongs to no single
+    /// operation: store rows must not report it as if it did.
+    #[tokio::test]
+    async fn store_rows_leave_cpu_ms_empty() {
+        let rows = run("t", ITERATIONS, WARMUP, None)
+            .await
+            .expect("memory store");
+        assert!(!rows.is_empty());
+        for row in rows {
+            assert_eq!(row.cpu_ms, None, "{}", row.case);
+            assert_eq!(row.requests, ITERATIONS, "{}", row.case);
+        }
+    }
+}

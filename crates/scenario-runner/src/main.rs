@@ -335,5 +335,7 @@ mod tests {
         assert!(parse_args(argv(&["--sizes", "1,32", "--burst", "8"])).is_err());
         assert!(parse_args(argv(&["--sizes", "1,32", "--burst-rounds", "0"])).is_err());
         assert!(parse_args(argv(&["--sizes", "1,32"])).is_ok());
+        // Zero store iterations would silently produce no store rows.
+        assert!(parse_args(argv(&["--store-iterations", "0"])).is_err());
     }
 }
