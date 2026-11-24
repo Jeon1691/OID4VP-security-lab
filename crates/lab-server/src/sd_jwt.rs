@@ -672,7 +672,17 @@ mod tests {
         assert!(
             !processed.payload.contains_key("_sd") && !processed.payload.contains_key("_sd_alg")
         );
-        assert_eq!(processed.disclosed_claim_names, ["given_name", "address"]);
+        let mut paths = processed.disclosed_claim_names.clone();
+        paths.sort_unstable();
+        assert_eq!(
+            paths,
+            [
+                "/address",
+                "/address/street",
+                "/given_name",
+                "/nationalities/0"
+            ]
+        );
         assert_eq!(
             processed.holder_key_thumbprint,
             jose::p256_thumbprint(key(HOLDER_SCALAR).verifying_key())
@@ -716,7 +726,7 @@ mod tests {
             verify(&present(&jwt, &[&name, &stray])),
             Err(ValidationError::UnreferencedDisclosure)
         );
-        for reserved in [SD, ARRAY_DIGEST] {
+        for reserved in [SD, ARRAY_DIGEST, SD_ALG] {
             let bad = name_disclosure(reserved, json!("x"));
             let p = payload(json!({ "_sd": [disclosure_digest(&bad)] }));
             assert_eq!(
@@ -898,7 +908,7 @@ mod tests {
             (
                 KB_HEADER,
                 json!({ "exp": NOW }),
-                ValidationError::KbIatOutOfWindow,
+                ValidationError::KbValidityClaims,
             ),
             (
                 KB_HEADER,
@@ -1005,7 +1015,7 @@ mod tests {
             |p: &str, q: &CredentialQuery<'_>| verify_sd_jwt_vc(p, &trusted(), q, &context());
         let ok = check(&present(&jwt, &[&given]), &query).expect("requested claim only");
         assert_eq!(ok.claims, [("given_name".to_owned(), json!("Alex"))]);
-        assert_eq!(ok.disclosed_claim_names, ["given_name"]);
+        assert_eq!(ok.disclosed_claim_names, ["/given_name"]);
         assert_eq!(ok.vct, TEST_VCT);
         assert_eq!(
             check(&present(&jwt, &[&given, &birth]), &query),
@@ -1051,5 +1061,116 @@ mod tests {
             check(&present(&plain, &[]), &query),
             Err(ValidationError::IssuerTyp)
         );
+    }
+
+    /// Q3: a KB-JWT whose optional `exp` / `nbf` is a valid NumericDate but not satisfied has
+    /// its own error; a non-NumericDate stays malformed.
+    #[test]
+    fn kb_jwt_exp_and_nbf_have_their_own_error() {
+        let jwt = issuer_jwt(&payload(json!({})));
+        let sd_jwt = format!("{jwt}~");
+        let with = |claims: Value| format!("{sd_jwt}{}", kb_jwt(&sd_jwt, KB_HEADER, claims));
+        for claims in [json!({ "exp": NOW }), json!({ "nbf": NOW + 1 })] {
+            assert_eq!(
+                verify(&with(claims.clone())),
+                Err(ValidationError::KbValidityClaims),
+                "{claims}"
+            );
+        }
+        assert!(verify(&with(json!({ "exp": NOW + 1, "nbf": NOW }))).is_ok());
+        assert_eq!(
+            verify(&with(json!({ "nbf": "now" }))),
+            Err(ValidationError::KbJwtMalformed)
+        );
+    }
+
+    /// L2: lab data-minimisation policy covers every Disclosure, nested and array elements
+    /// included: each must lie under a requested claims path. All disclosed paths are listed.
+    #[test]
+    fn disclosures_outside_the_requested_claims_are_rejected_at_any_depth() {
+        let given = name_disclosure("given_name", json!("Alex"));
+        let street = name_disclosure("street", json!("Main St"));
+        let element = disclosure(&json!(["c2FsdA", "DE"]));
+        let jwt = issuer_jwt(&payload(json!({
+            "_sd": [disclosure_digest(&given)],
+            "addr": { "_sd": [disclosure_digest(&street)] },
+            "nats": [{ "...": disclosure_digest(&element) }],
+        })));
+        let check = |disclosures: &[&str], claims: &[&str]| {
+            verify_sd_jwt_vc(
+                &present(&jwt, disclosures),
+                &trusted(),
+                &CredentialQuery {
+                    vct: TEST_VCT,
+                    claims,
+                },
+                &context(),
+            )
+        };
+        assert_eq!(
+            check(&[&given, &street], &["given_name"]),
+            Err(ValidationError::UnrequestedClaimDisclosed),
+            "nested over-disclosure"
+        );
+        assert_eq!(
+            check(&[&given, &element], &["given_name"]),
+            Err(ValidationError::UnrequestedClaimDisclosed),
+            "array-element over-disclosure"
+        );
+        let ok = check(
+            &[&given, &street, &element],
+            &["given_name", "addr", "nats"],
+        )
+        .expect("every disclosure under a requested claim");
+        assert_eq!(
+            ok.disclosed_claim_names,
+            ["/addr/street", "/given_name", "/nats/0"]
+        );
+        assert_eq!(
+            ok.claims[1],
+            ("addr".to_owned(), json!({ "street": "Main St" }))
+        );
+    }
+
+    /// L3: `cnf` and the other SD-JWT VC §2.2.2.3 non-disclosable claims must be permanent: no
+    /// `_sd` or `...` digest anywhere in their subtree, not even a decoy.
+    #[test]
+    fn non_disclosable_claims_must_not_carry_digests() {
+        let decoy = jose::sha256_b64(b"decoy");
+        let holder = jose::p256_jwk_value(key(HOLDER_SCALAR).verifying_key());
+        let mut cnf_with_sd = Value::Object(holder.clone());
+        cnf_with_sd["_sd"] = json!([decoy]);
+        let query = CredentialQuery {
+            vct: TEST_VCT,
+            claims: &[],
+        };
+        let check = |p: &Value| {
+            verify_sd_jwt_vc(
+                &present(&issuer_jwt(p), &[]),
+                &trusted(),
+                &query,
+                &context(),
+            )
+            .map(|_| ())
+        };
+        for extra in [
+            json!({ "cnf": { "jwk": cnf_with_sd, "_sd": [] } }),
+            json!({ "cnf": { "jwk": Value::Object(holder.clone()), "_sd": [decoy] } }),
+            json!({ "status": { "_sd": [decoy] } }),
+            json!({ "status": { "list": [{ "...": decoy }] } }),
+        ] {
+            assert_eq!(
+                check(&payload(extra.clone())),
+                Err(ValidationError::DigestInNonDisclosableClaim),
+                "{extra}"
+            );
+        }
+        // The plain RFC 9901 entry point guards the holder key the same way.
+        let p = payload(json!({ "cnf": { "jwk": Value::Object(holder), "_sd": [decoy] } }));
+        assert_eq!(
+            verify(&present(&issuer_jwt(&p), &[])).map(|_| ()),
+            Err(ValidationError::DigestInNonDisclosableClaim)
+        );
+        assert!(check(&payload(json!({ "status": { "list": [1] } }))).is_ok());
     }
 }

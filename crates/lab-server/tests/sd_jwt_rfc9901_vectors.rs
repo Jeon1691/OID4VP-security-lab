@@ -116,7 +116,15 @@ fn rfc9901_section_5_2_presentation_verifies_and_yields_the_printed_payload() {
     );
     let mut names = processed.disclosed_claim_names;
     names.sort_unstable();
-    assert_eq!(names, ["address", "family_name", "given_name"]);
+    assert_eq!(
+        names,
+        [
+            "/address",
+            "/family_name",
+            "/given_name",
+            "/nationalities/0"
+        ]
+    );
 }
 
 /// RFC 9901 Appendix A.3: an SD-JWT VC (`typ` `dc+sd-jwt`, `vct`, recursive Disclosure of
@@ -147,7 +155,11 @@ fn rfc9901_appendix_a3_sd_jwt_vc_passes_the_lab_profile() {
     );
     assert_eq!(
         verified.disclosed_claim_names,
-        ["age_equal_or_over", "nationalities"]
+        [
+            "/age_equal_or_over",
+            "/age_equal_or_over/18",
+            "/nationalities"
+        ]
     );
 }
 
