@@ -1373,10 +1373,16 @@ async fn new_connections_are_refused_while_shutdown_drains() {
     let shutdown = tokio::spawn(server.shutdown());
     tokio::time::sleep(DRAIN_HEAD_START).await;
     let late = tokio::net::TcpStream::connect(addr).await;
-    assert!(late.is_err(), "listener still accepting connections during the drain");
+    assert!(
+        late.is_err(),
+        "listener still accepting connections during the drain"
+    );
 
     drop(pause);
     shutdown.await.expect("shutdown");
-    let reply = post.await.expect("task").expect("answered during the drain");
+    let reply = post
+        .await
+        .expect("task")
+        .expect("answered during the drain");
     assert_success(reply.status);
 }

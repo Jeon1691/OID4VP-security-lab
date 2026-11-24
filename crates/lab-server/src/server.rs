@@ -564,6 +564,10 @@ async fn serve(
             let _ = connection.await;
         });
     }
+    // Close the listening socket before draining: accepted streams own their sockets and
+    // connection permits, so in-flight requests finish, while new clients are refused at
+    // connect time instead of being queued by the kernel with nobody left to serve them.
+    drop(listener);
     graceful.shutdown().await;
 }
 
