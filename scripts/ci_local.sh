@@ -4,6 +4,9 @@
 #
 # Usage: scripts/ci_local.sh [OUT_DIR] [STAGE...]
 #   STAGE = quality | test | supply-chain   (default: all three, in that order)
+#         | redis                           (opt-in: session-redis against a real server)
+# The redis stage uses REDIS_URL if set (CI service container); otherwise it starts a
+# disposable Redis in Docker and removes it on exit.
 # Every step must run and pass; a step that is skipped or runs zero tests fails the gate.
 set -euo pipefail
 export CARGO_TERM_COLOR=never
@@ -151,15 +154,22 @@ REQUIRED_TESTS=(
   connection_cap_holds_connections_stalled_before_headers
   stalled_header_connection_is_closed_at_the_header_timeout_and_frees_its_slot
   sweep_expires_and_purges_stale_sessions
+  # session-redis (IMP-014): the shared contract suite on MemoryRegistry, and the fail-closed
+  # checks that need no server. The Redis side runs in the redis stage.
+  memory::unique_uri_yields_exactly_one_candidate_among_sessions_sharing_kid
+  memory::bounded_trial_rejects_more_candidates_than_budget
+  memory::concurrent_async_claims_commit_exactly_once
+  memory::sequential_replay_after_consume_is_rejected
+  memory::insert_beyond_pending_capacity_is_rejected
+  memory::consumed_records_are_purged_after_retention
+  unreachable_redis_fails_closed_at_connect
+  connect_rejects_malformed_namespace
 )
 
-stage_test() {
-  step build cargo build --workspace --all-targets --locked
-  step test cargo test --workspace --all-features --locked
-  step doctest cargo test --doc --workspace --locked
-
+# Fails unless every named test ran and passed in this stage's log, and at least one test ran.
+require_tests() {
   local t passed
-  for t in "${REQUIRED_TESTS[@]}"; do
+  for t in "$@"; do
     if ! grep -Eq "^test ${t} \.\.\. ok$" "$LOG"; then
       echo "required_tests=FAIL (${t} did not pass)" | tee -a "$LOG"
       exit 1
@@ -174,6 +184,103 @@ stage_test() {
   echo "required_tests=pass" | tee -a "$LOG"
 }
 
+stage_test() {
+  step build cargo build --workspace --all-targets --locked
+  step test cargo test --workspace --all-features --locked
+  step doctest cargo test --doc --workspace --locked
+  require_tests "${REQUIRED_TESTS[@]}"
+}
+
+# The Redis-backed tests are `#[ignore]`d in the test stage (no server there), so a plain
+# `cargo test` can never report them as passed. This stage runs exactly them (`--ignored`) and
+# requires every one of these names to have passed.
+REDIS_REQUIRED_TESTS=(
+  redis::unique_uri_yields_exactly_one_candidate_among_sessions_sharing_kid
+  redis::unique_kid_yields_exactly_one_candidate_among_sessions_sharing_route
+  redis::bounded_trial_returns_all_candidates_within_budget
+  redis::bounded_trial_rejects_more_candidates_than_budget
+  redis::bounded_trial_budget_counts_only_live_sessions
+  redis::expired_sessions_are_never_candidates
+  redis::consumed_sessions_are_never_candidates
+  redis::unknown_route_token_or_kid_yields_no_candidate
+  redis::unique_strategy_refuses_an_ambiguous_hint
+  redis::unique_uri_checks_route_uniqueness_before_kid
+  redis::unique_kid_checks_kid_uniqueness_before_route
+  redis::concurrent_async_claims_commit_exactly_once
+  redis::dropped_claim_future_commits_nothing
+  redis::sequential_replay_after_consume_is_rejected
+  redis::claim_after_expiry_is_rejected
+  redis::claim_just_before_expiry_succeeds
+  redis::failed_attempt_leaves_session_pending_and_claimable
+  redis::stale_candidate_cannot_claim_a_reinserted_session
+  redis::claim_of_unknown_session_is_rejected
+  redis::expire_and_purge_touch_only_due_sessions
+  redis::consumed_records_are_purged_after_retention
+  redis::insert_beyond_pending_capacity_is_rejected
+  redis::unique_route_policy_rejects_duplicate_route_token
+  redis::insert_rejects_duplicate_id_and_zero_ttl
+  redis::snapshots_are_point_in_time_copies
+  redis::snapshot_round_trips_every_field
+  # STATE-03: two workers (separate connections) racing 2/16/128-way.
+  two_workers_racing_claims_commit_exactly_once
+  # STATE-05: fail closed, no in-memory fallback.
+  redis_killed_mid_run_fails_closed_without_memory_fallback
+  # Key material stays in-process; tampered or undecodable records fail closed.
+  private_keys_never_reach_redis
+  worker_without_the_key_fails_closed
+  swapped_key_reference_fails_closed
+  undecodable_record_fails_closed
+  local_keys_are_dropped_once_sessions_leave_pending
+  redis_matches_memory_registry_on_random_operation_sequences
+)
+
+# Disposable server when REDIS_URL is unset: the multi-arch index digest of redis:8.4.8, bound to
+# loopback on a random host port, no persistence, read-only root filesystem, unprivileged user
+# (the image's `redis`, uid 999), no capabilities. Removed on exit, pass or fail.
+REDIS_IMAGE="redis:8.4.8@sha256:2e431571225bc941481b753c16192d5e71107c2e5dc6691ed3c416bf69550a9b"
+REDIS_UID=999
+# Readiness: up to 50 PINGs 0.2 s apart (10 s); a local server answers within about a second.
+REDIS_READY_TRIES=50
+REDIS_READY_INTERVAL=0.2
+REDIS_CONTAINER=""
+
+redis_teardown() {
+  [[ -z "$REDIS_CONTAINER" ]] || docker rm -f "$REDIS_CONTAINER" >/dev/null 2>&1 || true
+}
+
+redis_start() {
+  local port i
+  REDIS_CONTAINER="$(docker run -d --rm -p 127.0.0.1::6379 --read-only \
+    --user "${REDIS_UID}:${REDIS_UID}" --cap-drop ALL --security-opt no-new-privileges \
+    "$REDIS_IMAGE" redis-server --save '' --appendonly no)" || return 1
+  trap redis_teardown EXIT
+  port="$(docker port "$REDIS_CONTAINER" 6379/tcp | head -n 1)" || return 1
+  port="${port##*:}"
+  for ((i = 0; i < REDIS_READY_TRIES; i++)); do
+    if [[ "$(docker exec "$REDIS_CONTAINER" redis-cli ping 2>/dev/null)" == PONG ]]; then
+      export REDIS_URL="redis://127.0.0.1:${port}/"
+      return 0
+    fi
+    sleep "$REDIS_READY_INTERVAL"
+  done
+  return 1
+}
+
+stage_redis() {
+  # Not through `step`: its pipeline runs the command in a subshell, and REDIS_URL must reach
+  # the cargo step below. The URL itself is not logged.
+  if [[ -n "${REDIS_URL:-}" ]]; then
+    echo "redis_server=pass (REDIS_URL provided)" | tee -a "$LOG"
+  elif redis_start >>"$LOG" 2>&1; then
+    echo "redis_server=pass (disposable ${REDIS_IMAGE})" | tee -a "$LOG"
+  else
+    echo "redis_server=FAIL" | tee -a "$LOG"
+    exit 1
+  fi
+  step redis_test cargo test -p session-redis --all-features --locked -- --ignored
+  require_tests "${REDIS_REQUIRED_TESTS[@]}"
+}
+
 # cargo-audit has its own ignore list; it must stay identical to the reviewed deny.toml baseline.
 # Only entries are compared (deny: `id = "..."`, audit: quoted list items), never comments.
 deny_ids() { grep -Eo 'id = "RUSTSEC-[0-9]{4}-[0-9]{4}"' deny.toml | grep -Eo 'RUSTSEC-[0-9-]+' | sort -u; }
@@ -183,7 +290,7 @@ advisory_baseline_sync() { diff <(deny_ids) <(audit_ids); }
 # Containment: the advisory baseline is accepted only for lab-server's SpruceID tree. The core
 # crates must not reach any of it, directly or transitively (cargo-deny wrappers only cover
 # named crates, so check the resolved graph itself).
-CORE_CRATES=(protocol-model jose-hpke session-core)
+CORE_CRATES=(protocol-model jose-hpke session-core session-redis)
 SPRUCE_TREE_RE='^(openid4vp|josekit|ssi|ssi-[a-z0-9-]+|did-[a-z0-9-]+|rsa|im|sized-chunks|bitmaps|smallstr|serde_cbor|derivative|clear_on_drop|proc-macro-error|chrono) '
 core_containment() {
   local c tree hits=0
@@ -226,7 +333,7 @@ stage_supply_chain() {
 
 for stage in "${STAGES[@]}"; do
   case "$stage" in
-    quality | test | supply-chain) ;;
+    quality | test | supply-chain | redis) ;;
     *) echo "unknown stage: $stage" >&2; exit 2 ;;
   esac
   LOG="$OUT/ci_${stage//-/_}.log"
