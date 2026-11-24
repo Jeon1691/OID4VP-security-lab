@@ -1100,9 +1100,10 @@ async fn wait_parked(server: &LabServer, n: usize) {
 async fn cross_session_replay_on_shared_route_is_rejected() {
     const REUSED_NONCE: &str = "lab-reused-nonce";
     let lab = Lab::start(trial(TRIAL_SIZES[0])).await;
+    let base = lab.base();
     let create = || {
         lab.wallet
-            .create_session(&lab.base(), RouteKind::Shared, Some(REUSED_NONCE))
+            .create_session(&base, RouteKind::Shared, Some(REUSED_NONCE))
     };
     let a = create().await.expect("session a");
     let (jwe, status, _) = lab.respond(&a, &SealOptions::default()).await;

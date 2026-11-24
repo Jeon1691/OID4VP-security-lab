@@ -63,6 +63,14 @@ pub enum Rejection {
     },
     /// The HPKE trial task could not run or panicked (internal error; nothing was claimed).
     TrialAborted,
+    /// This exact response (same `SHA-256` of the compact JWE) was already committed, or is
+    /// being committed, for a different session. Possible on the shared research route when
+    /// sessions share `session_info` (shared key, reused nonce): the #792 observation, refused.
+    CrossSessionReplay,
+    /// The replay guard is full (see `MAX_REMEMBERED_DIGESTS`); refused, fail closed.
+    ReplayGuardFull,
+    /// The server is shutting down past its drain deadline; nothing is committed any more.
+    ShuttingDown,
     /// The atomic claim failed (session-core [`ClaimError`]).
     Claim(ClaimError),
 }

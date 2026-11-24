@@ -2,7 +2,10 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use axum::Router;
@@ -24,13 +27,14 @@ use protocol_model::{
 };
 use serde_json::{Map, Value, json};
 use session_core::{
-    Candidate, IngressHint, InsertError, MemoryRegistry, NewSession, RegistryConfig,
-    ResolutionStrategy, ResponseDigest, RoutePolicy, RouteToken, SessionState, SessionStore,
-    SystemClock,
+    Candidate, Clock as _, DEFAULT_CONSUMED_RETENTION, IngressHint, InsertError, MemoryRegistry,
+    NewSession, RegistryConfig, ResolutionStrategy, ResponseDigest, RoutePolicy, RouteToken,
+    SessionState, SessionStore, SystemClock, Timestamp,
 };
 use sha2::{Digest as _, Sha256};
-use tokio::net::TcpListener;
-use tokio::sync::Semaphore;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{OwnedSemaphorePermit, RwLock, Semaphore, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 
@@ -40,7 +44,55 @@ use crate::evidence::{
     AdmissionError, CommitResult, CryptoResult, EvidenceLog, EvidenceRecord, Rejection,
     ValidationResult,
 };
-use crate::validate::{self, SYNTHETIC_CREDENTIAL_QUERY_ID, ValidatedResponse, ValidationError};
+use crate::validate::{
+    self, MAX_RESEARCH_NONCE_LEN, SYNTHETIC_CREDENTIAL_QUERY_ID, ValidatedResponse, ValidationError,
+};
+
+/// Most response digests the replay guard remembers at once: four times session-core's
+/// default pending cap. An entry exists only for a response that decrypted and validated for
+/// a live session, and lives as long as that session's consumed record would (TTL plus
+/// `DEFAULT_CONSUMED_RETENTION`). About 100 bytes each, so at most a few MiB. When full, new
+/// responses are refused (fail closed) until the sweep frees entries.
+pub const MAX_REMEMBERED_DIGESTS: usize = 4 * session_core::DEFAULT_MAX_PENDING_SESSIONS;
+
+/// Verifier-wide replay guard: digests of responses that validated, with the session they
+/// validated for.
+///
+/// Per-session state alone does not stop cross-session replay on the shared research route:
+/// bounded trial never offers a consumed session as a candidate, so a new session with the
+/// same `session_info` (shared key and route, reused nonce) would accept an old response. A
+/// digest is recorded before the claim, under one lock, so two concurrent POSTs of one JWE for
+/// two sessions cannot both pass; a recorded digest is kept even if its claim then fails
+/// (fail closed: that JWE stays bound to the first session it validated for). The same
+/// session's own retries pass through to the claim, which reports them as replays.
+#[derive(Default)]
+struct ReplayGuard {
+    /// Digest, owning session, and when the entry may be forgotten.
+    seen: HashMap<ResponseDigest, (SessionId, Timestamp)>,
+}
+
+impl ReplayGuard {
+    fn admit(
+        &mut self,
+        digest: ResponseDigest,
+        session: &SessionId,
+        retain_until: Timestamp,
+    ) -> Result<(), Rejection> {
+        match self.seen.get(&digest) {
+            Some((owner, _)) if owner == session => Ok(()),
+            Some(_) => Err(Rejection::CrossSessionReplay),
+            None if self.seen.len() >= MAX_REMEMBERED_DIGESTS => Err(Rejection::ReplayGuardFull),
+            None => {
+                self.seen.insert(digest, (session.clone(), retain_until));
+                Ok(())
+            }
+        }
+    }
+
+    fn forget_before(&mut self, now: Timestamp) {
+        self.seen.retain(|_, (_, until)| *until > now);
+    }
+}
 
 /// Result of one HPKE trial over a resolve's candidates.
 struct Trial {
@@ -148,6 +200,15 @@ struct AppState {
     issued: Mutex<Issued>,
     /// Slots for HPKE trials on the blocking pool.
     decryptions: Arc<Semaphore>,
+    /// Size of `decryptions`, for `LabServer::pause_decryptions`.
+    decryption_slots: u32,
+    /// POSTs waiting for a decryption slot (instrumentation).
+    parked_trials: AtomicUsize,
+    replay_guard: Mutex<ReplayGuard>,
+    /// `true` while commits are allowed. Every claim runs under a read guard; shutdown takes
+    /// the write guard after the drain and sets `false`, so once it returns no request can
+    /// commit, even on a connection task that outlived the serve loop.
+    commits_open: RwLock<bool>,
     evidence: EvidenceLog,
 }
 
@@ -178,6 +239,10 @@ impl AppState {
             let _ = registry.expire_due();
             let _ = registry.purge();
         }
+        self.replay_guard
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .forget_before(SystemClock.now());
         let mut issued = self.issued();
         let Issued { requests, results } = &mut *issued;
         requests.retain(|id, request| {
@@ -197,8 +262,82 @@ pub struct LabServer {
     addr: SocketAddr,
     base_url: String,
     evidence: EvidenceLog,
+    state: Arc<AppState>,
+    shutdown_drain: Duration,
+    stop: oneshot::Sender<()>,
     serve: JoinHandle<std::io::Result<()>>,
     sweep: JoinHandle<()>,
+}
+
+/// Holds every decryption slot until dropped; see [`LabServer::pause_decryptions`].
+#[derive(Debug)]
+pub struct DecryptionPause {
+    _slots: OwnedSemaphorePermit,
+}
+
+/// [`TcpListener`] that accepts at most `slots` connections at once. Each accepted stream
+/// holds a permit until hyper drops it, so connections that never send headers count too.
+struct CappedListener {
+    inner: TcpListener,
+    slots: Arc<Semaphore>,
+}
+
+impl axum::serve::Listener for CappedListener {
+    type Io = CappedStream;
+    type Addr = SocketAddr;
+
+    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+        // The semaphore is never closed, so acquiring only waits.
+        let Ok(permit) = Arc::clone(&self.slots).acquire_owned().await else {
+            return std::future::pending().await;
+        };
+        let (stream, addr) = axum::serve::Listener::accept(&mut self.inner).await;
+        (
+            CappedStream {
+                stream,
+                _permit: permit,
+            },
+            addr,
+        )
+    }
+
+    fn local_addr(&self) -> std::io::Result<Self::Addr> {
+        self.inner.local_addr()
+    }
+}
+
+/// An accepted connection and its slot.
+struct CappedStream {
+    stream: TcpStream,
+    _permit: OwnedSemaphorePermit,
+}
+
+impl AsyncRead for CappedStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.stream).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for CappedStream {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.stream).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.stream).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.stream).poll_shutdown(cx)
+    }
 }
 
 impl LabServer {
@@ -241,6 +380,11 @@ impl LabServer {
             shared,
             issued: Mutex::new(Issued::default()),
             decryptions: Arc::new(Semaphore::new(config.max_concurrent_decryptions)),
+            decryption_slots: u32::try_from(config.max_concurrent_decryptions)
+                .map_err(|_| StartError::ZeroLimit)?,
+            parked_trials: AtomicUsize::new(0),
+            replay_guard: Mutex::new(ReplayGuard::default()),
+            commits_open: RwLock::new(true),
             evidence: evidence.clone(),
         });
         let limits = Arc::new(Limits {
@@ -258,12 +402,26 @@ impl LabServer {
                 sweep_state.sweep();
             }
         });
-        let app = router(state, limits);
-        let serve = tokio::spawn(async move { axum::serve(listener, app).await });
+        let app = router(Arc::clone(&state), limits);
+        let listener = CappedListener {
+            inner: listener,
+            slots: Arc::new(Semaphore::new(config.max_connections)),
+        };
+        let (stop, stopped) = oneshot::channel::<()>();
+        let serve = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let _ = stopped.await;
+                })
+                .await
+        });
         Ok(Self {
             addr,
             base_url,
             evidence,
+            state,
+            shutdown_drain: config.shutdown_drain,
+            stop,
             serve,
             sweep,
         })
@@ -297,19 +455,57 @@ impl LabServer {
         result
     }
 
-    /// Stops serving and sweeping. A serve or sweep task that panicked re-raises its panic, and
-    /// one that exited early panics, so a broken server fails the caller (tests). A sweep panic
-    /// surfaces only here: while running, a dead sweep only means expired sessions linger
-    /// (session-core still checks TTLs lazily).
+    /// Research instrumentation: takes every decryption slot until the returned guard is
+    /// dropped, so POSTs park before HPKE. Lets scenarios and tests place a request at a known
+    /// point (races, shutdown) without timing assumptions.
+    ///
+    /// # Panics
+    /// Never: the semaphore is never closed.
+    pub async fn pause_decryptions(&self) -> DecryptionPause {
+        let permit = Arc::clone(&self.state.decryptions)
+            .acquire_many_owned(self.state.decryption_slots)
+            .await
+            .expect("decryption semaphore is never closed");
+        DecryptionPause { _slots: permit }
+    }
+
+    /// Research instrumentation: POSTs currently waiting for a decryption slot.
+    #[must_use]
+    pub fn parked_trials(&self) -> usize {
+        self.state.parked_trials.load(Ordering::SeqCst)
+    }
+
+    /// Graceful shutdown: stops accepting, lets in-flight requests finish for up to
+    /// [`LabConfig::shutdown_drain`], then closes commits and stops sweeping. Once it returns,
+    /// no request can commit: one still running past the deadline (on a connection task that
+    /// outlives the serve loop) is refused with `Rejection::ShuttingDown`.
+    ///
+    /// A serve or sweep task that panicked re-raises its panic, and one that exited before
+    /// shutdown panics, so a broken server fails the caller (tests). A sweep panic surfaces
+    /// only here: while running, a dead sweep only means expired sessions linger (session-core
+    /// still checks TTLs lazily).
     pub async fn shutdown(self) {
-        self.serve.abort();
-        self.sweep.abort();
-        match self.serve.await {
-            Err(e) if e.is_cancelled() => {}
-            Err(e) => std::panic::resume_unwind(e.into_panic()),
-            Ok(result) => panic!("lab server exited early: {result:?}"),
+        let Self {
+            state,
+            shutdown_drain,
+            stop,
+            mut serve,
+            sweep,
+            ..
+        } = self;
+        let exited_early = serve.is_finished();
+        let _ = stop.send(());
+        let drained = tokio::time::timeout(shutdown_drain, &mut serve).await;
+        *state.commits_open.write().await = false;
+        sweep.abort();
+        match drained {
+            Ok(Ok(result)) if exited_early => panic!("lab server exited early: {result:?}"),
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
+            Ok(Err(_)) => {}
+            Err(_) => serve.abort(),
         }
-        match self.sweep.await {
+        match sweep.await {
             Err(e) if e.is_cancelled() => {}
             Err(e) => std::panic::resume_unwind(e.into_panic()),
             Ok(()) => panic!("sweep task exited early"),
@@ -428,6 +624,11 @@ fn parse_create(
             ("route", Some("shared")) if research => route = RouteKind::Shared,
             ("route", _) => return Err("unsupported route"),
             ("nonce", Some(n)) if research => {
+                // Bounded so a matching presentation always fits the commit cap
+                // (`validate::MAX_COMMITTED_VP_TOKEN_BYTES`, checked at compile time there).
+                if n.len() > MAX_RESEARCH_NONCE_LEN {
+                    return Err("nonce too long");
+                }
                 nonce = Some(NonceWire::new(n).map_err(|_| "invalid nonce")?);
             }
             _ => return Err("unsupported member"),
@@ -668,7 +869,7 @@ async fn respond(
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
     let mut record = EvidenceRecord::new(route.kind, route.strategy);
-    record.rejection = pipeline(&mut record, &state.decryptions, route, headers, body)
+    record.rejection = pipeline(&mut record, state, route, headers, body)
         .await
         .err();
     let response = match &record.rejection {
@@ -705,7 +906,7 @@ fn admission_response(error: AdmissionError) -> Response {
 /// by `decryptions`), claim.
 async fn pipeline(
     record: &mut EvidenceRecord,
-    decryptions: &Arc<Semaphore>,
+    state: &AppState,
     route: Route<'_>,
     headers: &HeaderMap,
     body: Result<Bytes, BytesRejection>,
@@ -732,10 +933,10 @@ async fn pipeline(
     record.candidate_count = candidates.len();
 
     // HPKE is CPU-bound: run it on the blocking pool, at most `decryptions` trials at once.
-    let slot = Arc::clone(decryptions)
-        .acquire_owned()
-        .await
-        .map_err(|_| Rejection::TrialAborted)?;
+    state.parked_trials.fetch_add(1, Ordering::SeqCst);
+    let slot = Arc::clone(&state.decryptions).acquire_owned().await;
+    state.parked_trials.fetch_sub(1, Ordering::SeqCst);
+    let slot = slot.map_err(|_| Rejection::TrialAborted)?;
     let (trial, candidates) = tokio::task::spawn_blocking(move || {
         let _slot = slot;
         (trial(&jwe, &candidates), candidates)
@@ -772,6 +973,21 @@ async fn pipeline(
     };
     let candidate = candidates.get(index).ok_or(Rejection::TrialAborted)?;
     let digest = ResponseDigest::new(Sha256::digest(response.as_bytes()).into());
+    let commits_open = state.commits_open.read().await;
+    if !*commits_open {
+        return Err(Rejection::ShuttingDown);
+    }
+    state
+        .replay_guard
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .admit(
+            digest,
+            candidate.id(),
+            candidate
+                .expires_at()
+                .saturating_add(DEFAULT_CONSUMED_RETENTION),
+        )?;
     match SessionStore::claim(route.registry, candidate, digest, result).await {
         Ok(snapshot) => {
             record.commit_result = CommitResult::Committed;
