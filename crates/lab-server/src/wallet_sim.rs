@@ -67,6 +67,8 @@ pub struct CreatedSession {
     pub request_uri: String,
     /// Where the response goes.
     pub response_uri: String,
+    /// Where the outcome is read; carries the result token (only returned here).
+    pub result_uri: String,
 }
 
 /// The values of a fetched request object the wallet uses.
@@ -113,6 +115,8 @@ pub struct SealOptions {
     pub presentation_nonce: Option<String>,
     /// Presentation `aud` instead of the request's client_id.
     pub presentation_aud: Option<String>,
+    /// Extra string members added to the presentation (the lab accepts none).
+    pub presentation_extra: Vec<(String, String)>,
     /// Protected header `kid`.
     pub kid: KidChoice,
     /// Flip one ciphertext character (still canonical base64url).
@@ -188,21 +192,17 @@ impl WalletSim {
             session_id: field("session_id")?,
             request_uri: field("request_uri")?,
             response_uri: field("response_uri")?,
+            result_uri: field("result_uri")?,
         })
     }
 
-    /// Lab driver: the session's `state`, or `None` if the lab does not know it (404).
+    /// Lab driver: the session's `state` from its `result_uri`, or `None` if the lab does not
+    /// know it (404).
     ///
     /// # Errors
     /// Transport errors or an unexpected answer.
-    pub async fn session_state(
-        &self,
-        base_url: &str,
-        session_id: &str,
-    ) -> Result<Option<String>, WalletError> {
-        let reply = self
-            .get(&format!("{base_url}/lab/v1/sessions/{session_id}/result"))
-            .await?;
+    pub async fn session_state(&self, result_uri: &str) -> Result<Option<String>, WalletError> {
+        let reply = self.get(result_uri).await?;
         match reply.status {
             STATUS_NOT_FOUND => Ok(None),
             STATUS_OK => parse_json(&reply.body)?["state"]
@@ -264,10 +264,13 @@ impl WalletSim {
             &ResponseUriWire::new(pick(&opts.session_info_response_uri, &request.response_uri))
                 .map_err(malformed)?,
         );
-        let presentation = json!({
+        let mut presentation = json!({
             PRESENTATION_NONCE: pick(&opts.presentation_nonce, &request.nonce),
             PRESENTATION_AUD: pick(&opts.presentation_aud, &request.client_id),
         });
+        for (name, value) in &opts.presentation_extra {
+            presentation[name.as_str()] = value.as_str().into();
+        }
         let plaintext = json!({ VP_TOKEN: { SYNTHETIC_CREDENTIAL_QUERY_ID: [presentation] } });
         let kid = match &opts.kid {
             KidChoice::Advertised => request.kid.as_deref(),

@@ -1,6 +1,6 @@
 //! Lab Verifier HTTP server for OpenID4VP 1.1 HPKE-0 `direct_post.jwt` responses (IMP-008
-//! orchestration, IMP-009 HTTP, IMP-010 wallet simulator). Synthetic data, loopback only for
-//! research mode (ADR-005).
+//! orchestration, IMP-009 HTTP, IMP-010 wallet simulator). Synthetic data, loopback only in
+//! every mode (ADR-005); serving a non-loopback address needs an explicit future ADR.
 //!
 //! `tests/spruce_api_smoke.rs` (G0-C) and `tests/ecdh_es_direct_post_jwt_e2e.rs` (G0-D) cover
 //! the pinned SpruceID `openid4vp`; the HPKE-0 path here does not use it.
@@ -9,12 +9,12 @@
 //!
 //! | Method and path | Purpose |
 //! | --- | --- |
-//! | `POST /lab/v1/sessions` | Create a synthetic session; optional JSON `{"route": "unique"\|"shared", "nonce": "..."}` (`shared` and `nonce` research mode only) |
+//! | `POST /lab/v1/sessions` | Create a synthetic session; optional JSON `{"route": "unique"\|"shared", "nonce": "..."}` (`shared` and `nonce` research mode only). Returns `request_uri`, `response_uri` and `result_uri`; the result token in `result_uri` is returned only here |
 //! | `GET /lab/v1/requests/{id}` | Request object: exact `client_id`, `nonce`, `response_uri`, `response_mode=direct_post.jwt`, `client_metadata.jwks` with the HPKE-0 key (`alg` `HPKE-0`, `kid`) |
 //! | `POST /lab/v1/response/{token}` | Unique response_uri (unique-uri strategy) |
 //! | `POST /lab/v1/response/shared` | Shared response_uri, research mode only (404 in hardened mode) |
-//! | `GET /lab/v1/sessions/{id}/result` | `pending` / `consumed` (with the synthetic `vp_token`) / `expired` |
-//! | `GET /health` | Liveness |
+//! | `GET /lab/v1/results/{result_token}` | `pending` / `consumed` (with the synthetic `vp_token`) / `expired`. The request id does not unlock it |
+//! | `GET /health` | Liveness; exempt from the in-flight limit and request timeout |
 //!
 //! The request object is **unsigned** for now. JAR signing (RFC 9101, e.g. through SpruceID's
 //! request signer with the fixture key named by [`DEFAULT_CLIENT_ID`]) is a follow-up and must
@@ -29,8 +29,10 @@
 //!   ([`SharedRouteStrategy`]): `BoundedTrial(budget)` with one key and `kid` shared by every
 //!   session on the route (the OIDF #792 shape), or `UniqueKid` with a key and `kid` per
 //!   session. Shared-route sessions live in a separate `RoutePolicy::Shared` registry, so
-//!   unique-uri sessions keep the hardened guarantees. The server refuses to start research
-//!   mode on a non-loopback address.
+//!   unique-uri sessions keep the hardened guarantees.
+//!
+//! Every mode refuses a non-loopback bind before binding (`IpAddr::is_loopback`: `127.0.0.0/8`
+//! and `::1`; `0.0.0.0`, `::` and IPv4-mapped `::ffff:127.0.0.1` are refused).
 //!
 //! The strategy belongs to the route; a request can never choose it.
 //!
@@ -42,17 +44,34 @@
 //! 3. Exactly one non-empty `response` parameter and nothing else; a plaintext `vp_token`
 //!    (the `direct_post` downgrade found in G0-D) is refused even next to `response` (400).
 //! 4. `jose_hpke::CompactJwe::parse`: structure and header policy, no key.
-//! 5. Ingress hint: route token from the path, `kid` from the protected header.
-//! 6. `resolve` with the route's strategy.
-//! 7. For each candidate: HPKE open with its key and `SessionInfo::from_binding`, then
-//!    synthetic validation. All candidates are tried; with bounded trial, more than one that
-//!    validates is an integrity failure (reject, claim nothing, record it).
-//! 8. `claim` with `SHA-256(compact JWE)` as the response digest.
+//! 5. `kid` required on every route (every lab key is advertised with one; OpenID4VP 1.1 §8.3).
+//! 6. Ingress hint: route token from the path, `kid` from the protected header.
+//! 7. `resolve` with the route's strategy.
+//! 8. For each candidate: HPKE open with its key and `SessionInfo::from_binding`, then
+//!    synthetic validation, on the blocking pool behind
+//!    [`LabConfig::max_concurrent_decryptions`]. All candidates are tried; with bounded trial,
+//!    more than one that validates is an integrity failure (reject, claim nothing, record it).
+//!    Only the first validated result is kept.
+//! 9. `claim` with `SHA-256(compact JWE)` as the response digest.
+//!
+//! Around every route except `/health`: [`LabConfig::max_in_flight_requests`] (503 above it,
+//! no queue) and [`LabConfig::request_timeout`] (408). The defaults are config candidates, not
+//! normative values.
 //!
 //! Steps 1-3 answer with distinct admission errors (they reveal nothing about sessions). Every
 //! failure from step 4 on answers with the single [`GENERIC_REJECTION_BODY`] (400); the real
 //! reason goes only into the [`EvidenceLog`]. A failed decryption or validation never touches
 //! the session, which stays pending.
+//!
+//! # Threat-model notes
+//!
+//! * Research mode only, accepted: the HPKE attempt count of a bounded-trial POST equals the
+//!   live population of the shared route, and unique-kid answers whether a `kid` is pending.
+//!   Neither shows in the HTTP answer, but both show in response timing. Hardened mode has no
+//!   shared route.
+//! * Results are readable only with the result token, so the request id (visible to the
+//!   wallet and anyone who sees the `request_uri`) does not reveal the outcome.
+//! * Consumed records retain only the bounded [`ValidatedResponse`], never decrypted input.
 //!
 //! # Validation level
 //!
@@ -64,12 +83,18 @@
 //!
 //! A task calls `expire_due` and `purge` on every registry each
 //! [`LabConfig::sweep_interval`] (default [`DEFAULT_SWEEP_INTERVAL`]) and drops the request
-//! objects of purged sessions.
+//! objects and result tokens of purged sessions. If the sweep task panics, that surfaces only
+//! in [`LabServer::shutdown`]; until then expired sessions merely linger (session-core still
+//! checks TTLs lazily, so they are never accepted).
 //!
 //! # Features
 //!
-//! `wallet-sim` enables [`wallet_sim`] and with it `jose-hpke/test-support` (sealing). The
-//! default build, including the `lab-server` binary, contains no sealing code.
+//! `wallet-sim` enables `wallet_sim` and with it `jose-hpke/test-support` (sealing). The
+//! default build, including the `lab-server` binary, contains no sealing code; the gate step
+//! `verifier_without_sealing` checks it. Release artifacts must come from a plain
+//! `cargo build -p lab-server` (`--release`): a build that also compiles test targets (e.g.
+//! `cargo build --workspace --all-targets`) unifies the self dev-dependency's `wallet-sim`
+//! feature into the library the binary links.
 
 mod config;
 mod evidence;
@@ -79,7 +104,8 @@ mod validate;
 pub mod wallet_sim;
 
 pub use config::{
-    DEFAULT_CLIENT_ID, DEFAULT_SESSION_TTL, DEFAULT_SWEEP_INTERVAL, LabConfig,
+    DEFAULT_CLIENT_ID, DEFAULT_MAX_CONCURRENT_DECRYPTIONS, DEFAULT_MAX_IN_FLIGHT_REQUESTS,
+    DEFAULT_REQUEST_TIMEOUT, DEFAULT_SESSION_TTL, DEFAULT_SWEEP_INTERVAL, LabConfig,
     MAX_RESPONSE_BODY_BYTES, Mode, RouteKind, SharedRouteStrategy, StartError,
 };
 pub use evidence::{
@@ -87,4 +113,6 @@ pub use evidence::{
     Rejection, ValidationResult,
 };
 pub use server::{GENERIC_REJECTION_BODY, LabServer};
-pub use validate::{SYNTHETIC_CREDENTIAL_QUERY_ID, ValidatedResponse, ValidationError};
+pub use validate::{
+    MAX_COMMITTED_VP_TOKEN_BYTES, SYNTHETIC_CREDENTIAL_QUERY_ID, ValidatedResponse, ValidationError,
+};

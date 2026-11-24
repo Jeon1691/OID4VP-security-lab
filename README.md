@@ -44,9 +44,13 @@ The gate fails if zero tests ran. Logs are stripped of absolute paths before the
 
 ```bash
 cargo run -p lab-server -- --mode hardened --bind 127.0.0.1:8080
-cargo run -p lab-server -- --mode research-trial=8      # shared route, bounded trial, loopback only
-cargo run -p lab-server -- --mode research-kid          # shared route, unique kid, loopback only
+cargo run -p lab-server -- --mode research-trial=8      # shared route, bounded trial
+cargo run -p lab-server -- --mode research-kid          # shared route, unique kid
 ```
+
+Every mode binds loopback only; a non-loopback deployment needs an explicit ADR first.
+Release binaries come from a plain `cargo build -p lab-server --release`: builds that include
+test targets unify the test-only `wallet-sim` feature (sealing) into the library.
 
 Endpoints, modes, the per-POST pipeline and the evidence records are documented in
 `crates/lab-server/src/lib.rs`. Request objects are **unsigned** for now; JAR signing is a
@@ -98,4 +102,4 @@ used here under Apache-2.0.
 ## Policy
 
 No GitHub repository, fork, push, issue, comment or PR is created without prior approval.
-Research-mode (shared URI / bounded trial) routes bind to loopback only.
+The lab server binds to loopback only, in every mode (shared URI / bounded trial included).
