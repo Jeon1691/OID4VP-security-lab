@@ -6,6 +6,13 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Constructors for `SessionStore` backends outside this crate (session-redis): build a
+# `Candidate` / `SessionSnapshot` from an authoritative record and read a candidate's
+# incarnation. Callers of a store never need it; without it only session-core can mint
+# candidates.
+store-backend = []
+
 [dependencies]
 base64 = { workspace = true }
 getrandom = { workspace = true }

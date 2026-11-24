@@ -12,7 +12,7 @@ protocol-model = { workspace = true }
 redis = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-session-core = { workspace = true }
+session-core = { workspace = true, features = ["store-backend"] }
 thiserror = { workspace = true }
 
 [dev-dependencies]

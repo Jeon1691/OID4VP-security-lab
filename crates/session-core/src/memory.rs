@@ -1,4 +1,4 @@
-//! In-process authoritative registry (MVP; Redis follows after G1).
+//! In-process authoritative registry (MVP; the Redis-backed one is crate `session-redis`).
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
