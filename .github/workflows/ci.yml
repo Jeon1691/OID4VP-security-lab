@@ -117,24 +117,25 @@ jobs:
           retention-days: ${{ env.EVIDENCE_RETENTION_DAYS }}
           if-no-files-found: error
 
-  # G5 / IMP-014: session-redis against a real Redis (contract suite, two-worker race, fail
-  # closed). The stage uses REDIS_URL from the service container instead of starting Docker.
+  # G5 / IMP-014: session-redis against a real Redis-compatible server (Valkey): contract
+  # suite, two-worker race, fail closed. The stage uses REDIS_URL from the service container instead of starting Docker.
   redis:
     name: redis
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     services:
       redis:
-        # Multi-arch index digest of redis:8.4.8, the image the local stage uses. The official
-        # image's own `redis` user (uid 999), no capabilities; loopback-only host port.
-        image: redis:8.4.8@sha256:2e431571225bc941481b753c16192d5e71107c2e5dc6691ed3c416bf69550a9b
+        # Valkey 8.1 (BSD-3-Clause, Redis-compatible), multi-arch index digest, the image the
+        # local stage uses. The image's own `valkey` user (uid 999), no capabilities;
+        # loopback-only host port.
+        image: valkey/valkey:8.1.12@sha256:5032c4dd7abe08d6fd9382054608183e2bf1f7e3895ef619b8784698454325f7
         ports:
           - 127.0.0.1:6379:6379
         options: >-
           --user 999:999
           --cap-drop ALL
           --security-opt no-new-privileges
-          --health-cmd "redis-cli ping"
+          --health-cmd "valkey-cli ping"
           --health-interval 2s
           --health-timeout 2s
           --health-retries 15

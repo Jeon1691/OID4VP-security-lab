@@ -36,7 +36,7 @@ scenario-runner and evidence-report follow later.
 make tools        # cargo-deny, cargo-audit, cargo-machete (+ shellcheck, actionlint check)
 make test
 make gate         # all CI stages: quality, test, supply-chain
-make gate-redis   # opt-in redis stage: Redis tests against $REDIS_URL or a disposable Docker Redis
+make gate-redis   # opt-in redis stage: Redis tests against $REDIS_URL or a disposable Valkey (Docker)
 make g0           # upstream reproduction + lab gate + manifest into evidence/g0
 ```
 
@@ -81,8 +81,8 @@ authentication, and KB-JWT holder binding is out of scope for this wave.
 | --- | --- |
 | `rust-quality` | fmt, clippy `-D warnings`, machete, shellcheck, actionlint |
 | `unit` | build, test, doctest, required G0 tests, non-zero test count |
-| `supply-chain` | cargo-deny, advisory baseline sync, core containment, Verifier build without sealing, cargo-audit |
-| `redis` | session-redis against a Redis service container: contract suite, two-worker race, fail closed, required Redis tests |
+| `supply-chain` | cargo-deny, advisory baseline sync, core containment, Verifier build without sealing or session-core `store-backend`, cargo-audit |
+| `redis` | session-redis against a Valkey service container (Redis-compatible, BSD-3-Clause): contract suite, two-worker race, fail closed, required Redis tests |
 | `g0-upstream` | SpruceID CI reproduction at the pinned SHA (main / manual only) |
 | `ci-gate` | Single required check: fails unless every gate job's result is `success` |
 
