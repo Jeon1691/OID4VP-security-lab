@@ -25,6 +25,7 @@ use crate::sd_jwt::{
     self, CredentialQuery, KB_JWT_TYP, KeyBindingContext, MAX_KB_JWT_LEN, SD_JWT_VC_TYP,
     TrustedIssuerKey,
 };
+use crate::server::P256_COORDINATE_BYTES;
 
 /// DCQL Credential Query id of every lab request, and the only `vp_token` member accepted
 /// (OpenID4VP 1.1 §6.1: alphanumeric, `_` or `-`).
@@ -67,12 +68,14 @@ pub const MAX_RESEARCH_NONCE_LEN: usize = 512;
 const KB_PAYLOAD_SKELETON: &str = r#"{"iat":,"aud":"","nonce":"","sd_hash":""}"#;
 /// Digits of the largest `u64` NumericDate.
 const MAX_NUMERIC_DATE_DIGITS: usize = 20;
-/// base64url length of a SHA-256 digest (`sd_hash`): 32 bytes, unpadded.
-const SHA256_B64_LEN: usize = b64_len(32);
+/// Bytes of a SHA-256 digest (FIPS 180-4 §6.2), the `sd_hash` input to base64url.
+const SHA256_DIGEST_BYTES: usize = 32;
+/// base64url length of a SHA-256 digest (`sd_hash`), unpadded.
+const SHA256_B64_LEN: usize = b64_len(SHA256_DIGEST_BYTES);
 /// The KB-JWT protected header the wallet sends.
 const KB_HEADER_SKELETON: &str = r#"{"alg":"ES256","typ":""}"#;
-/// base64url length of an ES256 signature (64 bytes, RFC 7518 §3.4).
-const ES256_SIGNATURE_B64_LEN: usize = b64_len(64);
+/// base64url length of an ES256 signature: `R || S`, one P-256 coordinate each (RFC 7518 §3.4).
+const ES256_SIGNATURE_B64_LEN: usize = b64_len(2 * P256_COORDINATE_BYTES);
 /// JSON string escaping at most doubles a visible-ASCII `client_id` (`"` and `\` become two
 /// bytes; nothing else in `%x20-7E` is escaped). Nonces use only the §5.2 URL-safe set, which
 /// is never escaped.
@@ -174,13 +177,21 @@ pub enum ValidationError {
     /// `cnf.jwk` missing or not an EC P-256 public JWK (§4.1.2; RFC 7800 §3.2).
     #[error("holder key is missing or invalid")]
     HolderKeyInvalid,
-    /// A claim SD-JWT VC §2.2.2.3 forbids in Disclosures came from one.
+    /// A claim SD-JWT VC §2.2.2.3 forbids in Disclosures came from one (for the plain RFC 9901
+    /// entry point: `cnf`).
     #[error("a non-disclosable claim was disclosed")]
     NonDisclosableClaimDisclosed,
+    /// A non-disclosable claim (as above) carries an `_sd` or `...` digest somewhere in its
+    /// subtree, decoys included: it must be permanent (SD-JWT VC §2.2.2.3; lab policy for
+    /// decoys and nested digests).
+    #[error("a non-disclosable claim carries digests")]
+    DigestInNonDisclosableClaim,
     /// `vct` missing or not the requested type (SD-JWT VC §2.2.2.1; OpenID4VP 1.1 B.3.5).
     #[error("credential type does not match the query")]
     VctMismatch,
-    /// A top-level claim was disclosed that the query did not request (OpenID4VP 1.1 §6.4.1).
+    /// A Disclosure (at any depth, array elements included) lies outside every requested
+    /// claim. Lab data-minimisation policy: OpenID4VP 1.1 §6.4.1 restricts what the Wallet
+    /// sends but sets no Verifier MUST.
     #[error("an unrequested claim was disclosed")]
     UnrequestedClaimDisclosed,
     /// A requested claim is absent (§6.4.1, §8.6).
@@ -202,9 +213,13 @@ pub enum ValidationError {
     /// The KB-JWT signature does not verify with the `cnf` key (§4.3.2, §7.3 step 5c).
     #[error("key binding JWT signature does not verify with the holder key")]
     KbSignature,
-    /// KB-JWT `iat` outside the freshness window, or `exp`/`nbf` not satisfied (§7.3 step 5e).
+    /// KB-JWT `iat` outside the freshness window (§7.3 step 5e).
     #[error("key binding JWT is not fresh")]
     KbIatOutOfWindow,
+    /// KB-JWT optional `exp` / `nbf` present and valid NumericDates, but not satisfied now
+    /// (§7.3 step 5h; RFC 7519 §4.1.4, §4.1.5).
+    #[error("key binding JWT exp or nbf is not satisfied")]
+    KbValidityClaims,
     /// KB-JWT `nonce` differs from the session nonce (OpenID4VP 1.1 B.3.6, §14.2.2).
     #[error("key binding JWT nonce does not match the session")]
     KbNonceMismatch,
@@ -221,7 +236,9 @@ pub enum ValidationError {
 
 /// What a validated response commits. Bounded: the requested claims (fixed names, each value
 /// at most `MAX_COMMITTED_CLAIM_BYTES` serialized), the requested `vct`, a 43-character
-/// thumbprint and disclosed names drawn from the requested ones. Never the presentation.
+/// thumbprint and JSON Pointers that all point into the requested claims (at most
+/// `MAX_DISCLOSURES` of them, each bounded by the size of the claim it points into).
+/// Never the presentation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedResponse {
     /// The credential type (= the requested `vct`).
@@ -230,7 +247,8 @@ pub struct ValidatedResponse {
     pub holder_key_thumbprint: String,
     /// The requested claims, in query order.
     pub claims: Vec<(String, Value)>,
-    /// Top-level claims that came from Disclosures, sorted.
+    /// RFC 6901 JSON Pointers of every claim that came from a Disclosure (nested properties and
+    /// array elements included), sorted.
     pub disclosed_claim_names: Vec<String>,
 }
 

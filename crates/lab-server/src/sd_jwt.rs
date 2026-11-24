@@ -21,8 +21,10 @@
 //!
 //! [`verify_sd_jwt_vc`] adds the SD-JWT VC and DCQL checks: `typ` `dc+sd-jwt` (SD-JWT VC
 //! §2.2.1), `vct` equal to the requested type (§2.2.2.1; OpenID4VP 1.1 B.3.5 `vct_values`), the
-//! claims SD-JWT VC §2.2.2.3 forbids in Disclosures never disclosed, and exactly the requested
-//! claims (OpenID4VP 1.1 §6.4.1, §8.6) disclosed at the top level, each bounded in size.
+//! claims SD-JWT VC §2.2.2.3 forbids in Disclosures never disclosed and free of any `_sd` /
+//! `...` digest, every requested claim present (OpenID4VP 1.1 §6.4.1, §8.6) and bounded in size,
+//! and, as lab data-minimisation policy (not a spec MUST), no Disclosure at any depth outside
+//! the requested claims. `_sd_alg` is a reserved Disclosure claim name alongside `_sd` / `...`.
 //!
 //! Crypto is RustCrypto `p256` (ECDSA P-256) and `sha2`; nothing is hand-rolled.
 
@@ -175,7 +177,8 @@ pub struct ProcessedSdJwt {
     pub payload: Map<String, Value>,
     /// RFC 7638 thumbprint of the holder key (`cnf.jwk`) that signed the KB-JWT.
     pub holder_key_thumbprint: String,
-    /// Names of the top-level claims that came from Disclosures, in processing order.
+    /// RFC 6901 JSON Pointer of every claim that came from a Disclosure (object properties
+    /// and array elements, at any depth), in processing order.
     pub disclosed_claim_names: Vec<String>,
 }
 
@@ -187,7 +190,9 @@ pub fn disclosure_digest(disclosure: &str) -> String {
 
 /// Verifies an SD-JWT+KB (RFC 9901 §7.1 and §7.3, Key Binding required) whose issuer JWT has
 /// header `typ` = `issuer_typ`, signed by `issuer`, bound to `kb`. Checks run in the order of
-/// the module table; the first failure is returned.
+/// the module table; the first failure is returned. The holder key's `cnf` claim must be
+/// permanent: neither disclosed nor carrying digests (lab policy for the claim Key Binding is
+/// verified with, RFC 9901 §4.1.2).
 ///
 /// # Errors
 /// The first [`ValidationError`].
@@ -196,6 +201,18 @@ pub fn verify_sd_jwt_kb(
     issuer: &TrustedIssuerKey,
     issuer_typ: &str,
     kb: &KeyBindingContext<'_>,
+) -> Result<ProcessedSdJwt, ValidationError> {
+    verify_with_permanent(presentation, issuer, issuer_typ, kb, &[CNF])
+}
+
+/// [`verify_sd_jwt_kb`] where the top-level claims `permanent` must neither come from a
+/// Disclosure nor carry an `_sd` / `...` digest anywhere in their subtree (decoys included).
+fn verify_with_permanent(
+    presentation: &str,
+    issuer: &TrustedIssuerKey,
+    issuer_typ: &str,
+    kb: &KeyBindingContext<'_>,
+    permanent: &[&str],
 ) -> Result<ProcessedSdJwt, ValidationError> {
     use ValidationError as E;
     if presentation.len() > MAX_PRESENTATION_LEN {
@@ -240,15 +257,31 @@ pub fn verify_sd_jwt_kb(
         Some(_) => return Err(E::SdAlgUnsupported),
     }
 
+    if permanent
+        .iter()
+        .filter_map(|name| payload.get(*name))
+        .any(carries_digests)
+    {
+        return Err(E::DigestInNonDisclosableClaim);
+    }
+
     // §7.1 steps 3-5: Disclosures and embedded digests.
     let mut state = Processing {
         disclosures: decode_disclosures(&disclosures)?,
         seen: HashSet::new(),
+        path: Vec::new(),
+        disclosed: Vec::new(),
     };
-    let mut disclosed_claim_names = Vec::new();
-    state.object(&mut payload, 0, Some(&mut disclosed_claim_names))?;
+    state.object(&mut payload, 0)?;
     if state.disclosures.values().any(Option::is_some) {
         return Err(E::UnreferencedDisclosure);
+    }
+    let disclosed_claim_names = state.disclosed;
+    if disclosed_claim_names
+        .iter()
+        .any(|pointer| permanent.contains(&top_level_name(pointer).as_str()))
+    {
+        return Err(E::NonDisclosableClaimDisclosed);
     }
 
     // §7.1 step 6: validity of the processed payload.
@@ -273,10 +306,13 @@ pub fn verify_sd_jwt_kb(
     })
 }
 
-/// [`verify_sd_jwt_kb`] with `typ` `dc+sd-jwt`, then the SD-JWT VC and DCQL checks (module
-/// docs). The result holds only `query`'s claims, each at most
-/// [`MAX_COMMITTED_CLAIM_BYTES`] serialized, plus evidence (holder key thumbprint, `vct`, names
-/// of the disclosed claims); never the presentation itself.
+/// [`verify_sd_jwt_kb`] with `typ` `dc+sd-jwt` and every SD-JWT VC §2.2.2.3 non-disclosable
+/// claim permanent, then the SD-JWT VC and DCQL checks (module docs). Lab data-minimisation
+/// policy, stricter than OpenID4VP 1.1 §6.4.1 (which only binds the Wallet): every
+/// Disclosure, nested and array elements included, must lie under a requested claim. The
+/// result holds only `query`'s claims, each at most [`MAX_COMMITTED_CLAIM_BYTES`] serialized,
+/// plus evidence (holder key thumbprint, `vct`, JSON Pointers of the disclosed claims, which
+/// all point into the size-checked claims); never the presentation itself.
 ///
 /// # Errors
 /// The first [`ValidationError`].
@@ -287,20 +323,20 @@ pub fn verify_sd_jwt_vc(
     kb: &KeyBindingContext<'_>,
 ) -> Result<ValidatedResponse, ValidationError> {
     use ValidationError as E;
-    let processed = verify_sd_jwt_kb(presentation, issuer, SD_JWT_VC_TYP, kb)?;
-    let disclosed = &processed.disclosed_claim_names;
-    if disclosed
-        .iter()
-        .any(|name| NON_DISCLOSABLE_CLAIMS.contains(&name.as_str()))
-    {
-        return Err(E::NonDisclosableClaimDisclosed);
-    }
+    let processed = verify_with_permanent(
+        presentation,
+        issuer,
+        SD_JWT_VC_TYP,
+        kb,
+        &NON_DISCLOSABLE_CLAIMS,
+    )?;
     if processed.payload.get(VCT).and_then(Value::as_str) != Some(query.vct) {
         return Err(E::VctMismatch);
     }
-    if disclosed
+    if processed
+        .disclosed_claim_names
         .iter()
-        .any(|name| !query.claims.contains(&name.as_str()))
+        .any(|pointer| !query.claims.contains(&top_level_name(pointer).as_str()))
     {
         return Err(E::UnrequestedClaimDisclosed);
     }
@@ -351,7 +387,8 @@ fn decode_disclosures(
             Value::Array(items) => match <[Value; 3]>::try_from(items) {
                 Ok([Value::String(_salt), Value::String(name), value]) => {
                     // §7.1 step 3c.ii.2.
-                    if name == SD || name == ARRAY_DIGEST {
+                    // `_sd_alg` too: only the issuer sets it, at the top level (§4.1.1).
+                    if name == SD || name == ARRAY_DIGEST || name == SD_ALG {
                         return Err(E::ReservedClaimName);
                     }
                     Disclosed::Property { name, value }
@@ -380,24 +417,44 @@ struct Processing {
     disclosures: HashMap<String, Option<Disclosed>>,
     /// Every embedded digest met so far, decoys included (step 4).
     seen: HashSet<String>,
+    /// RFC 6901 reference tokens (escaped) of the value being processed.
+    path: Vec<String>,
+    /// JSON Pointers of the claims that came from Disclosures.
+    disclosed: Vec<String>,
 }
 
 impl Processing {
     fn value(&mut self, value: &mut Value, depth: usize) -> Result<(), ValidationError> {
         match value {
-            Value::Object(object) => self.object(object, depth, None),
+            Value::Object(object) => self.object(object, depth),
             Value::Array(items) => self.array(items, depth),
             _ => Ok(()),
         }
     }
 
+    /// Processes `value` as the child `token` of the current path, recording its pointer if
+    /// it came from a Disclosure.
+    fn child(
+        &mut self,
+        token: String,
+        value: &mut Value,
+        depth: usize,
+        disclosed: bool,
+    ) -> Result<(), ValidationError> {
+        self.path.push(token);
+        if disclosed {
+            self.disclosed.push(json_pointer(&self.path));
+        }
+        let result = self.value(value, depth);
+        self.path.pop();
+        result
+    }
+
     /// An object: its permanently disclosed members first, then each `_sd` digest (step 3c.ii).
-    /// `top_level` collects the names inserted at the top level.
     fn object(
         &mut self,
         object: &mut Map<String, Value>,
         depth: usize,
-        mut top_level: Option<&mut Vec<String>>,
     ) -> Result<(), ValidationError> {
         use ValidationError as E;
         // `...` is only an array-element digest (§4.1 item 7, §4.2.4.2); `_sd_alg` only at the
@@ -411,8 +468,8 @@ impl Processing {
             Some(Value::Array(digests)) => digests,
             Some(_) => return Err(E::PayloadMalformed),
         };
-        for member in object.values_mut() {
-            self.value(member, depth + 1)?;
+        for (name, member) in object.iter_mut() {
+            self.child(pointer_token(name), member, depth + 1, false)?;
         }
         for digest in digests {
             let Value::String(digest) = digest else {
@@ -425,10 +482,7 @@ impl Processing {
                     if object.contains_key(&name) {
                         return Err(E::ClaimNameCollision);
                     }
-                    self.value(&mut value, depth + 1)?;
-                    if let Some(names) = top_level.as_deref_mut() {
-                        names.push(name.clone());
-                    }
+                    self.child(pointer_token(&name), &mut value, depth + 1, true)?;
                     object.insert(name, value);
                 }
             }
@@ -456,14 +510,15 @@ impl Processing {
             };
             match digest {
                 None => {
-                    self.value(&mut item, depth + 1)?;
+                    self.child(out.len().to_string(), &mut item, depth + 1, false)?;
                     out.push(item);
                 }
                 Some(digest) => match self.take(digest)? {
                     None => {}
                     Some(Disclosed::Property { .. }) => return Err(E::DisclosureMalformed),
                     Some(Disclosed::Element(mut value)) => {
-                        self.value(&mut value, depth + 1)?;
+                        // The index in the processed array (step 3d drops undisclosed ones).
+                        self.child(out.len().to_string(), &mut value, depth + 1, true)?;
                         out.push(value);
                     }
                 },
@@ -481,6 +536,42 @@ impl Processing {
         }
         Ok(disclosure)
     }
+}
+
+/// Whether `value` holds an `_sd` or `...` member anywhere (RFC 9901 §4.2.4.1, §4.2.4.2).
+fn carries_digests(value: &Value) -> bool {
+    match value {
+        Value::Object(object) => {
+            object.contains_key(SD)
+                || object.contains_key(ARRAY_DIGEST)
+                || object.values().any(carries_digests)
+        }
+        Value::Array(items) => items.iter().any(carries_digests),
+        _ => false,
+    }
+}
+
+/// RFC 6901 §3 reference token for a member name: `~` as `~0`, `/` as `~1`.
+fn pointer_token(name: &str) -> String {
+    name.replace('~', "~0").replace('/', "~1")
+}
+
+/// The JSON Pointer (RFC 6901 §3) of `path`.
+fn json_pointer(path: &[String]) -> String {
+    path.iter().fold(String::new(), |mut pointer, token| {
+        pointer.push('/');
+        pointer.push_str(token);
+        pointer
+    })
+}
+
+/// The unescaped top-level member name a JSON Pointer starts with (RFC 6901 §4).
+fn top_level_name(pointer: &str) -> String {
+    let token = pointer
+        .strip_prefix('/')
+        .and_then(|rest| rest.split('/').next())
+        .unwrap_or_default();
+    token.replace("~1", "/").replace("~0", "~")
 }
 
 /// `exp` / `nbf` of `claims`, if present (RFC 7519 §4.1.4, §4.1.5): `Some(true)` if both hold
@@ -528,7 +619,7 @@ fn verify_key_binding(
     }
     // Optional registered claims must still be valid if present (§7.3 step 5h, RFC 7519).
     if !time_claims_hold(claims, kb.now).ok_or(E::KbJwtMalformed)? {
-        return Err(E::KbIatOutOfWindow);
+        return Err(E::KbValidityClaims);
     }
     // `nonce` is a string and `aud` a single string (§4.3).
     if string(NONCE).ok_or(E::KbJwtMalformed)? != kb.nonce {

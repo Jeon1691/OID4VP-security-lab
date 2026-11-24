@@ -4,7 +4,8 @@
     "url": "https://www.rfc-editor.org/rfc/rfc9901.txt",
     "sha256_of_document": "fd4cb79184162fa7ef95f4f63abab8ee6d03c9a04c19b8f83758946464b284eb",
     "retrieved": "2026-11-24",
-    "extraction": "line breaks and indentation inside the printed base64url strings removed; nothing else changed"
+    "extraction": "base64url strings unchanged except for line breaks; restructured into a lab JSON schema",
+    "license": "IETF Code Components: Copyright (c) 2025 IETF Trust and the persons identified as authors of the code. All rights reserved. Revised BSD License; full text in the repository NOTICE file."
   },
   "section_4_2_3": {
     "disclosure": "WyJfMjZiYzRMVC1hYzZxMktJNmNCVzVlcyIsICJmYW1pbHlfbmFtZSIsICJNw7ZiaXVzIl0",

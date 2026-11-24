@@ -88,14 +88,16 @@ checks, without ssi or openid4vp in its build (RustCrypto `p256` / `sha2`):
   within 300 s (60 s future skew), `nonce` and `aud` byte-equal to the session's `nonce` and
   `client_id`, `sd_hash` over the presentation up to the last `~` (§4.3, §7.3; OpenID4VP 1.1
   B.3.6, §14.2.2);
-- the SD-JWT VC / DCQL profile: `vct`, claims SD-JWT VC forbids in Disclosures never
-  disclosed, exactly the requested claims (draft-ietf-oauth-sd-jwt-vc-27 §2.2; OpenID4VP 1.1
-  §6.4.1, §8.6).
+- the SD-JWT VC / DCQL profile: `vct`, claims SD-JWT VC forbids in Disclosures (`cnf`,
+  `status`, ...) never disclosed and free of `_sd` / `...` digests, every requested claim
+  present (draft-ietf-oauth-sd-jwt-vc-27 §2.2; OpenID4VP 1.1 §6.4.1, §8.6);
+- lab data-minimisation policy (stricter than the spec, which only restricts the Wallet): no
+  Disclosure at any depth, array elements included, outside the requested claims.
 
 All JSON is parsed with duplicate members refused at any depth, and every size and count is
 bounded before any crypto. The consumed session keeps only the requested claims (each at most
-256 bytes), the `vct`, the holder key's RFC 7638 thumbprint and the disclosed claim names,
-never the presentation. Every failure answers the generic 400; the failing check is recorded
+256 bytes), the `vct`, the holder key's RFC 7638 thumbprint and the JSON Pointers of all
+disclosed claims, never the presentation; none of these go into the evidence log. Every failure answers the generic 400; the failing check is recorded
 as evidence. HPKE decryption alone is never holder authentication. Out of scope: issuer trust
 beyond one configured key, status/revocation, Wallet attestation, mdoc.
 
@@ -150,10 +152,10 @@ used here under Apache-2.0.
 
 `crates/lab-server/tests/fixtures/lab_issuer.jwk` / `lab_issuer.pub.jwk` are a synthetic P-256
 issuer key pair generated for this repository (test use only).
-`crates/lab-server/tests/fixtures/rfc9901_examples.json` quotes examples from RFC 9901
-(Copyright (c) 2025 IETF Trust and the persons identified as the document authors; subject to
-BCP 78 and the IETF Trust's Legal Provisions Relating to IETF Documents), unchanged except
-for line breaks, for interoperability testing.
+`crates/lab-server/tests/fixtures/rfc9901_examples.json` holds examples extracted from RFC
+9901, treated as IETF Code Components (Copyright (c) 2025 IETF Trust and the persons
+identified as authors of the code; Revised BSD License, full text in [NOTICE](NOTICE)). The
+base64url strings are unchanged except for line breaks; restructured into a lab JSON schema.
 
 ## Policy
 
