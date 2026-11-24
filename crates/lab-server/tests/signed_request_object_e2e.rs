@@ -23,11 +23,11 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use jose_hpke::SessionInfo;
 use lab_server::wallet_sim::{
-    CreatedSession, RequestRejection, SealOptions, WalletError, WalletSim,
+    CreatedSession, RequestRejection, SealOptions, SyntheticIssuer, WalletError, WalletSim,
 };
 use lab_server::{
     DEFAULT_CLIENT_ID, DEFAULT_SESSION_TTL, LabConfig, LabServer, Mode, RequestSigningKey,
-    RouteKind, SharedRouteStrategy, StartError,
+    RouteKind, SharedRouteStrategy, StartError, TrustedIssuerKey,
 };
 use openid4vp::verifier::request_signer::{P256Signer, RequestSigner as _};
 use protocol_model::{ClientIdWire, NonceWire, RequestBinding, ResponseUriWire};
@@ -37,6 +37,9 @@ use session_core::CandidateBudget;
 /// Synthetic SpruceID fixture key (spruceid/openid4vp@c57a8958 `tests/examples/verifier.jwk`);
 /// its did:key is `DEFAULT_CLIENT_ID`.
 const FIXTURE_JWK: &str = include_str!("fixtures/spruce_verifier.jwk");
+/// Synthetic lab SD-JWT VC issuer (private for the wallet simulator, public for the Verifier).
+const ISSUER_JWK: &str = include_str!("fixtures/lab_issuer.jwk");
+const ISSUER_PUBLIC_JWK: &str = include_str!("fixtures/lab_issuer.pub.jwk");
 /// did:key verification method of the fixture key (did:key Method v0.7 §3.1: the fragment is
 /// the multibase key itself).
 const VERIFIER_DID_VM: &str = "did:key:zDnaeaDj3YpPR4JXos2kCCNPS86hdELeN5PZh97KGkoFzUtGn#zDnaeaDj3YpPR4JXos2kCCNPS86hdELeN5PZh97KGkoFzUtGn";
@@ -97,6 +100,14 @@ fn fixture_key() -> RequestSigningKey {
     RequestSigningKey::from_jwk(FIXTURE_JWK).expect("fixture JWK is a P-256 private key")
 }
 
+fn trusted_issuer() -> TrustedIssuerKey {
+    TrustedIssuerKey::from_jwk(ISSUER_PUBLIC_JWK).expect("fixture issuer key")
+}
+
+fn issuer() -> SyntheticIssuer {
+    SyntheticIssuer::from_jwk(ISSUER_JWK).expect("fixture issuer")
+}
+
 fn wrong_key_jwk() -> String {
     p256_spruce::SecretKey::from_slice(&[WRONG_KEY_BYTE; P256_SCALAR_BYTES])
         .expect("valid scalar")
@@ -124,13 +135,13 @@ struct Lab {
 
 impl Lab {
     async fn start(mode: Mode) -> Self {
-        Self::start_with(LabConfig::new(mode, fixture_key())).await
+        Self::start_with(LabConfig::new(mode, fixture_key(), trusted_issuer())).await
     }
 
     async fn start_with(config: LabConfig) -> Self {
         Self {
             server: LabServer::start(config).await.expect("lab server starts"),
-            wallet: WalletSim::new().expect("wallet simulator builds"),
+            wallet: WalletSim::new(&issuer()).expect("wallet simulator builds"),
         }
     }
 
@@ -451,14 +462,14 @@ async fn wallet_refuses_request_signed_with_wrong_key() {
 
     let mut wrong_public: Value = serde_json::from_str(&wrong_key_jwk()).expect("JWK");
     wrong_public.as_object_mut().expect("object").remove("d");
-    let pinned = WalletSim::with_pinned_verifier_key(&wrong_public.to_string())
+    let pinned = WalletSim::with_pinned_verifier_key(&wrong_public.to_string(), &issuer())
         .expect("pinned wallet builds");
     assert_rejected(
         pinned.fetch_request(&session).await,
         RequestRejection::Signature,
     );
-    let pinned_right =
-        WalletSim::with_pinned_verifier_key(&fixture_public_jwk()).expect("pinned wallet builds");
+    let pinned_right = WalletSim::with_pinned_verifier_key(&fixture_public_jwk(), &issuer())
+        .expect("pinned wallet builds");
     pinned_right
         .fetch_request(&session)
         .await
@@ -612,10 +623,10 @@ fn request_signing_key_is_loaded_from_config_and_never_printed() {
 async fn start_refuses_did_key_client_id_that_is_not_the_signing_keys() {
     let wrong = RequestSigningKey::from_jwk(&wrong_key_jwk()).expect("second synthetic key");
     assert!(matches!(
-        LabServer::start(LabConfig::new(Mode::Hardened, wrong)).await,
+        LabServer::start(LabConfig::new(Mode::Hardened, wrong, trusted_issuer())).await,
         Err(StartError::ClientIdKeyMismatch)
     ));
-    let mut config = LabConfig::new(Mode::Hardened, fixture_key());
+    let mut config = LabConfig::new(Mode::Hardened, fixture_key(), trusted_issuer());
     config.client_id = ClientIdWire::new(MALFORMED_DID_KEY_CLIENT_ID).expect("wire client_id");
     assert!(matches!(
         LabServer::start(config).await,
@@ -634,6 +645,7 @@ async fn start_accepts_the_did_key_of_any_signing_key() {
     let mut config = LabConfig::new(
         Mode::Hardened,
         RequestSigningKey::from_jwk(&jwk).expect("second synthetic key"),
+        trusted_issuer(),
     );
     config.client_id =
         ClientIdWire::new(format!("decentralized_identifier:{did}")).expect("wire client_id");
@@ -653,7 +665,7 @@ async fn start_accepts_the_did_key_of_any_signing_key() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn start_refuses_client_id_prefixes_the_lab_cannot_sign_for() {
     for client_id in UNSIGNABLE_CLIENT_IDS {
-        let mut config = LabConfig::new(Mode::Hardened, fixture_key());
+        let mut config = LabConfig::new(Mode::Hardened, fixture_key(), trusted_issuer());
         config.client_id = ClientIdWire::new(client_id).expect("wire client_id");
         assert!(
             matches!(
@@ -663,13 +675,14 @@ async fn start_refuses_client_id_prefixes_the_lab_cannot_sign_for() {
             "{client_id}"
         );
     }
-    let mut config = LabConfig::new(Mode::Hardened, fixture_key());
+    let mut config = LabConfig::new(Mode::Hardened, fixture_key(), trusted_issuer());
     config.client_id = ClientIdWire::new(PRE_REGISTERED_CLIENT_ID).expect("wire client_id");
     let lab = Lab::start_with(config).await;
     let session = lab.session(RouteKind::Unique).await;
     let jwt = lab.raw_request(&session).await;
     assert!(decode_json(segments(&jwt)[JWS_HEADER]).get("kid").is_none());
-    let pinned = WalletSim::with_pinned_verifier_key(&fixture_public_jwk()).expect("pinned");
+    let pinned =
+        WalletSim::with_pinned_verifier_key(&fixture_public_jwk(), &issuer()).expect("pinned");
     pinned
         .fetch_request(&session)
         .await
