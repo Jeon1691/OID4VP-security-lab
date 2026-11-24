@@ -47,6 +47,9 @@ pub enum Rejection {
     Admission(AdmissionError),
     /// [`jose_hpke::CompactJwe::parse`] refused the JWE (structure or header policy).
     JweParse(jose_hpke::Error),
+    /// The JWE protected header has no `kid`. Every lab key is advertised with one and
+    /// OpenID4VP 1.1 §8.3 ties the JWE `kid` to the chosen JWK, so every route requires it.
+    MissingKid,
     /// No candidate session (session-core [`ResolveError`]).
     Resolve(ResolveError),
     /// No candidate decrypted.
@@ -58,6 +61,8 @@ pub enum Rejection {
         /// Candidates that validated.
         validated: usize,
     },
+    /// The HPKE trial task could not run or panicked (internal error; nothing was claimed).
+    TrialAborted,
     /// The atomic claim failed (session-core [`ClaimError`]).
     Claim(ClaimError),
 }

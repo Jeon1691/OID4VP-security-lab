@@ -5,7 +5,9 @@
 //! ```
 //!
 //! `LAB_MODE` / `LAB_BIND` are used when the flag is absent. Defaults: hardened on
-//! `127.0.0.1:0`. Research modes refuse non-loopback addresses.
+//! `127.0.0.1:0`. Every mode refuses non-loopback addresses (lab policy; anything else needs an
+//! explicit future ADR). Build release artifacts with a plain `cargo build -p lab-server`, so
+//! the test-only `wallet-sim` feature is not unified in.
 
 use std::process::ExitCode;
 

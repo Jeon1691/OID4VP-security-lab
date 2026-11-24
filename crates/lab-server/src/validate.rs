@@ -1,15 +1,18 @@
 //! Synthetic presentation validation (Evidence level 2).
 //!
 //! The decrypted payload must be a JSON object whose `vp_token` answers the lab's single DCQL
-//! credential query with exactly one synthetic presentation, a JSON object carrying `nonce` and
-//! `aud` byte-equal to the session's stored `nonce` and `client_id`.
+//! credential query with exactly one synthetic presentation: a JSON object with exactly the
+//! members `nonce` and `aud`, byte-equal to the session's stored `nonce` and `client_id`. The
+//! serialized `vp_token` is capped at [`MAX_COMMITTED_VP_TOKEN_BYTES`], and only the bounded
+//! [`ValidatedResponse`] (copies of the session's own wire values) is committed, so a consumed
+//! record never retains attacker-sized data for its TTL plus retention window.
 //!
 //! This is a stand-in for holder binding, not holder authentication: there is no signature
 //! and no key-binding JWT. It exists so that a response which merely *decrypts* (HPKE alone
 //! authenticates nothing about the holder) is still checked against the session it is about to
 //! consume. Real SD-JWT KB-JWT / mdoc DeviceAuth validation is out of scope for this wave.
 
-use protocol_model::RequestBinding;
+use protocol_model::{ClientIdWire, NonceWire, RequestBinding};
 use serde_json::Value;
 
 /// DCQL credential query id of every lab request, and the only `vp_token` member accepted.
@@ -19,6 +22,17 @@ pub(crate) const VP_TOKEN: &str = "vp_token";
 /// Synthetic presentation members bound to the session.
 pub(crate) const PRESENTATION_NONCE: &str = "nonce";
 pub(crate) const PRESENTATION_AUD: &str = "aud";
+/// The only members of a synthetic presentation.
+const PRESENTATION_MEMBERS: [&str; 2] = [PRESENTATION_NONCE, PRESENTATION_AUD];
+
+/// Largest accepted serialized `vp_token`, in bytes (lab policy).
+///
+/// A valid synthetic `vp_token` is the query id plus two short strings (a 22-character nonce
+/// and the `client_id`), well under 300 bytes; 4 KiB leaves room for long configured client
+/// ids. The cap bounds validation work on the decrypted `vp_token`; together with the bounded
+/// [`ValidatedResponse`] it keeps consumed records small (at most 4096 pending sessions per
+/// registry by default).
+pub const MAX_COMMITTED_VP_TOKEN_BYTES: usize = 4096;
 
 /// Why a decrypted payload was not accepted. Internal evidence only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -29,12 +43,18 @@ pub enum ValidationError {
     /// No `vp_token` object member.
     #[error("payload has no vp_token object")]
     MissingVpToken,
+    /// The serialized `vp_token` exceeds [`MAX_COMMITTED_VP_TOKEN_BYTES`].
+    #[error("vp_token exceeds the size limit")]
+    VpTokenTooLarge,
     /// `vp_token` does not answer exactly the lab's credential query.
     #[error("vp_token does not answer exactly the requested credential query")]
     QueryMismatch,
     /// The query answer is not an array of exactly one JSON-object presentation.
     #[error("presentation has the wrong shape")]
     PresentationShape,
+    /// The presentation has a member other than `nonce` and `aud`.
+    #[error("presentation has an unexpected member")]
+    UnexpectedPresentationMember,
     /// Presentation `nonce` differs from the session's nonce.
     #[error("presentation nonce does not match the session")]
     NonceMismatch,
@@ -46,11 +66,27 @@ pub enum ValidationError {
     UnsupportedMode,
 }
 
-/// What a validated response commits: the synthetic `vp_token`.
+/// What a validated response commits. Bounded: it holds copies of the session's own wire
+/// values (which the presentation matched byte for byte), never decrypted input.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedResponse {
-    /// The `vp_token` exactly as decrypted.
-    pub vp_token: Value,
+    /// The presentation's `nonce` (= the session nonce).
+    pub nonce: NonceWire,
+    /// The presentation's `aud` (= the session `client_id`).
+    pub audience: ClientIdWire,
+}
+
+impl ValidatedResponse {
+    /// The committed synthetic `vp_token`, re-serialized from the bounded fields.
+    #[must_use]
+    pub fn vp_token(&self) -> Value {
+        serde_json::json!({
+            SYNTHETIC_CREDENTIAL_QUERY_ID: [{
+                PRESENTATION_NONCE: self.nonce.as_str(),
+                PRESENTATION_AUD: self.audience.as_str(),
+            }]
+        })
+    }
 }
 
 /// Validates `plaintext` against the session's stored `binding`.
@@ -71,6 +107,9 @@ pub(crate) fn validate(
         .get(VP_TOKEN)
         .filter(|v| v.is_object())
         .ok_or(ValidationError::MissingVpToken)?;
+    if vp_token.to_string().len() > MAX_COMMITTED_VP_TOKEN_BYTES {
+        return Err(ValidationError::VpTokenTooLarge);
+    }
     let answers = vp_token
         .as_object()
         .filter(|m| m.len() == 1)
@@ -80,6 +119,12 @@ pub(crate) fn validate(
         Some([Value::Object(p)]) => p,
         _ => return Err(ValidationError::PresentationShape),
     };
+    if presentation
+        .keys()
+        .any(|k| !PRESENTATION_MEMBERS.contains(&k.as_str()))
+    {
+        return Err(ValidationError::UnexpectedPresentationMember);
+    }
     let field = |name| presentation.get(name).and_then(Value::as_str);
     if field(PRESENTATION_NONCE) != Some(nonce.as_str()) {
         return Err(ValidationError::NonceMismatch);
@@ -88,6 +133,7 @@ pub(crate) fn validate(
         return Err(ValidationError::AudienceMismatch);
     }
     Ok(ValidatedResponse {
-        vp_token: vp_token.clone(),
+        nonce: nonce.clone(),
+        audience: client_id.clone(),
     })
 }
