@@ -11,6 +11,10 @@ publish.workspace = true
 # jose-hpke's sender-side `test-support`, so the default (Verifier) build never contains
 # sealing code. Tests enable it through the self dev-dependency below.
 wallet-sim = ["dep:reqwest", "jose-hpke/test-support"]
+# Research instrumentation (`LabServer::pause_decryptions` / `parked_trials`): an in-process
+# lever that halts decryption, for deterministic race and shutdown scenarios. Never in the
+# default (Verifier) build; tests enable it through the self dev-dependency.
+lab-instrumentation = []
 
 [dependencies]
 axum = { workspace = true }
@@ -34,7 +38,7 @@ base64 = { workspace = true }
 form_urlencoded = { workspace = true }
 josekit = { workspace = true }
 # Self dev-dependency: integration tests drive the server with the wallet simulator.
-lab-server = { path = ".", features = ["wallet-sim"] }
+lab-server = { path = ".", features = ["wallet-sim", "lab-instrumentation"] }
 openid4vp = { workspace = true }
 p256-spruce = { workspace = true }
 reqwest = { workspace = true }
