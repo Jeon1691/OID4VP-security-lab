@@ -155,6 +155,12 @@ REQUIRED_TESTS=(
   connection_cap_holds_connections_stalled_before_headers
   stalled_header_connection_is_closed_at_the_header_timeout_and_frees_its_slot
   sweep_expires_and_purges_stale_sessions
+  # OIDF OpenID4VP #792 scenarios (G7; docs/interop/issue-792-reproduction.md).
+  issue_792_shared_uri_and_kid_leave_nothing_outside_the_ciphertext_to_correlate_on
+  issue_792_cleartext_state_beside_the_jwe_is_refused_before_decryption
+  issue_792_workarounds_compared_on_one_population
+  issue_792_kid_of_another_session_on_the_unique_kid_route_fails_closed
+  issue_792_trial_opens_the_session_the_sender_bound_and_holder_binding_decides
   # lab-server holder binding (Evidence level 3): SD-JWT VC + KB-JWT (OpenID4VP 1.1 B.3;
   # RFC 9901 §7.1/§7.3; draft-ietf-oauth-sd-jwt-vc-27), over HTTP and against RFC 9901 vectors.
   request_object_dcql_query_requests_the_sd_jwt_vc_and_its_claims
