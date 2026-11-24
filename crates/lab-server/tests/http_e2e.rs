@@ -17,12 +17,15 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use jose_hpke::Error as JweError;
-use lab_server::wallet_sim::{CreatedSession, KidChoice, SealOptions, WalletSim};
+use lab_server::wallet_sim::{
+    CreatedSession, KidChoice, PresentationTamper, SealOptions, SyntheticIssuer, WalletSim,
+};
 use lab_server::{
     AdmissionError, CommitResult, CryptoResult, EvidenceRecord, GENERIC_REJECTION_BODY, LabConfig,
     LabServer, MAX_RESPONSE_BODY_BYTES, Mode, Rejection, RequestSigningKey, RouteKind,
-    SharedRouteStrategy, StartError, ValidationError, ValidationResult,
+    SharedRouteStrategy, StartError, TrustedIssuerKey, ValidationError, ValidationResult,
 };
+use serde_json::json;
 use session_core::{CandidateBudget, ClaimError, ResolutionStrategy, ResolveError};
 
 /// Media type of a `direct_post.jwt` POST body (OpenID4VP 1.1 §8.2).
@@ -56,20 +59,27 @@ const SATURATION_DEADLINE: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// Request Timeout (RFC 9110 §15.5.9), answered for a body that never arrives.
 const REQUEST_TIMEOUT_STATUS: &str = "HTTP/1.1 408";
-/// Presentation member the lab never defines, and a value that pushes the vp_token past
-/// `MAX_COMMITTED_VP_TOKEN_BYTES`.
-const EXTRA_MEMBER: &str = "extra";
-const OVERSIZE_FILLER: usize = lab_server::MAX_COMMITTED_VP_TOKEN_BYTES + 1;
+/// A presentation one byte over `MAX_PRESENTATION_LEN`.
+const OVERSIZE_PRESENTATION: usize = lab_server::MAX_PRESENTATION_LEN + 1;
 
 /// Synthetic SpruceID fixture key that signs every request object (its did:key is the default
 /// `client_id`). Loaded through config, never compiled into the library.
 const FIXTURE_JWK: &str = include_str!("fixtures/spruce_verifier.jwk");
+/// Synthetic lab SD-JWT VC issuer: the private key for the wallet simulator, the public key
+/// for the Verifier's trust configuration.
+const ISSUER_JWK: &str = include_str!("fixtures/lab_issuer.jwk");
+const ISSUER_PUBLIC_JWK: &str = include_str!("fixtures/lab_issuer.pub.jwk");
 
 fn lab_config(mode: Mode) -> LabConfig {
     LabConfig::new(
         mode,
         RequestSigningKey::from_jwk(FIXTURE_JWK).expect("fixture signing key"),
+        TrustedIssuerKey::from_jwk(ISSUER_PUBLIC_JWK).expect("fixture issuer key"),
     )
+}
+
+fn issuer() -> SyntheticIssuer {
+    SyntheticIssuer::from_jwk(ISSUER_JWK).expect("fixture issuer")
 }
 
 struct Lab {
@@ -87,7 +97,7 @@ impl Lab {
         assert!(server.local_addr().ip().is_loopback());
         Self {
             server,
-            wallet: WalletSim::new().expect("wallet simulator builds"),
+            wallet: WalletSim::new(&issuer()).expect("wallet simulator builds"),
         }
     }
 
@@ -672,10 +682,10 @@ async fn invalid_jwe_does_not_consume_the_session() {
     assert_eq!(record.commit_result, CommitResult::NotRun);
     lab.assert_pending(&session).await;
 
-    // Decrypts (right session_info) but the presentation carries another nonce: HPKE alone is
-    // never accepted as holder authentication.
+    // Decrypts (right session_info) but the KB-JWT carries another nonce: HPKE alone is never
+    // accepted as holder authentication.
     let wrong_presentation = SealOptions {
-        presentation_nonce: Some("another-nonce".to_owned()),
+        presentation: PresentationTamper::KbNonce("another-nonce".to_owned()),
         ..SealOptions::default()
     };
     let (_, status, body) = lab.respond(&session, &wrong_presentation).await;
@@ -684,23 +694,23 @@ async fn invalid_jwe_does_not_consume_the_session() {
     assert_eq!(record.crypto_result, CryptoResult::Opened { opened: 1 });
     assert_eq!(
         record.validation_result,
-        ValidationResult::Failed(ValidationError::NonceMismatch)
+        ValidationResult::Failed(ValidationError::KbNonceMismatch)
     );
     assert_eq!(
         record.rejection,
-        Some(Rejection::Validation(ValidationError::NonceMismatch))
+        Some(Rejection::Validation(ValidationError::KbNonceMismatch))
     );
     lab.assert_pending(&session).await;
 
     let wrong_aud = SealOptions {
-        presentation_aud: Some(FOREIGN_CLIENT_ID.to_owned()),
+        presentation: PresentationTamper::KbAudience(FOREIGN_CLIENT_ID.to_owned()),
         ..SealOptions::default()
     };
     let (_, status, body) = lab.respond(&session, &wrong_aud).await;
     assert_generic(status, &body);
     assert_eq!(
         lab.record().rejection,
-        Some(Rejection::Validation(ValidationError::AudienceMismatch))
+        Some(Rejection::Validation(ValidationError::KbAudienceMismatch))
     );
     lab.assert_pending(&session).await;
 
@@ -763,7 +773,7 @@ async fn generic_rejection_bodies_are_byte_identical() {
 
     // Validate.
     let opts = SealOptions {
-        presentation_nonce: Some("another-nonce".to_owned()),
+        presentation: PresentationTamper::KbNonce("another-nonce".to_owned()),
         ..SealOptions::default()
     };
     let (_, status, body) = lab.respond(&session, &opts).await;
@@ -910,25 +920,46 @@ async fn sweep_expires_and_purges_stale_sessions() {
     lab.shutdown().await;
 }
 
-/// M1: the synthetic presentation carries only `nonce` and `aud`, and the committed vp_token is
-/// size-capped; neither an extra member nor an oversized one is committed or consumes.
+/// M1: the `vp_token` answers exactly the one Credential Query with exactly one string
+/// presentation (OpenID4VP 1.1 §8.1, B.3.6), and presentations are size- and count-capped
+/// before any crypto; none of these is committed or consumes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn presentation_with_extra_or_oversized_members_is_rejected_and_does_not_consume() {
+async fn malformed_or_oversized_vp_token_is_rejected_and_does_not_consume() {
     let lab = Lab::start(Mode::Hardened).await;
     let session = lab.session(RouteKind::Unique).await;
+    let id = lab_server::SYNTHETIC_CREDENTIAL_QUERY_ID;
+    let too_many = format!("a.b.c~{}", "AA~".repeat(lab_server::MAX_DISCLOSURES + 1));
     let cases = [
         (
-            "x".to_owned(),
-            ValidationError::UnexpectedPresentationMember,
+            json!({ id: ["x".repeat(OVERSIZE_PRESENTATION)] }),
+            ValidationError::PresentationTooLarge,
         ),
         (
-            "x".repeat(OVERSIZE_FILLER),
-            ValidationError::VpTokenTooLarge,
+            json!({ id: [too_many] }),
+            ValidationError::TooManyDisclosures,
         ),
+        (
+            json!({ id: ["a~", "b~"] }),
+            ValidationError::PresentationShape,
+        ),
+        (
+            json!({ id: [{ "nonce": "x" }] }),
+            ValidationError::PresentationShape,
+        ),
+        (json!({ id: "a~" }), ValidationError::PresentationShape),
+        (
+            json!({ "other-query": ["a~"] }),
+            ValidationError::QueryMismatch,
+        ),
+        (
+            json!({ id: ["a~"], "other-query": ["a~"] }),
+            ValidationError::QueryMismatch,
+        ),
+        (json!([]), ValidationError::MissingVpToken),
     ];
-    for (value, want) in cases {
+    for (vp_token, want) in cases {
         let opts = SealOptions {
-            presentation_extra: vec![(EXTRA_MEMBER.to_owned(), value)],
+            vp_token: Some(vp_token),
             ..SealOptions::default()
         };
         let (_, status, body) = lab.respond(&session, &opts).await;
@@ -1109,8 +1140,8 @@ async fn cross_session_replay_on_shared_route_is_rejected() {
 }
 
 /// Review M2: a caller-chosen research nonce is capped so that, with the longest allowed
-/// client_id (all characters needing JSON escapes), a matching presentation still fits under
-/// MAX_COMMITTED_VP_TOKEN_BYTES and commits; longer nonces and client ids are refused up front.
+/// client_id (all characters needing JSON escapes), an honest KB-JWT still fits under
+/// MAX_KB_JWT_LEN and commits; longer nonces and client ids are refused up front.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn research_nonce_length_is_capped_so_the_presentation_always_fits() {
     let mut config = lab_config(trial(TRIAL_SIZES[0]));
@@ -1122,7 +1153,8 @@ async fn research_nonce_length_is_capped_so_the_presentation_always_fits() {
     // trusts the Verifier's pinned public key instead (pre-registered client, §5.9.2).
     let mut public: serde_json::Value = serde_json::from_str(FIXTURE_JWK).expect("fixture JSON");
     public.as_object_mut().expect("JWK object").remove("d");
-    lab.wallet = WalletSim::with_pinned_verifier_key(&public.to_string()).expect("pinned wallet");
+    lab.wallet =
+        WalletSim::with_pinned_verifier_key(&public.to_string(), &issuer()).expect("pinned wallet");
     let longest = "n".repeat(lab_server::MAX_RESEARCH_NONCE_LEN);
     let session = lab
         .wallet
