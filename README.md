@@ -14,14 +14,15 @@ evidence.
 | `crates/protocol-model` | Versioned wire model, exact `RequestBinding` bytes (IMP-003) |
 | `crates/jose-hpke` | JOSE HPKE-0 integrated encryption + Session Info (IMP-004..006) |
 | `crates/session-core` | Session resolution strategies, atomic registry (IMP-007/011/012) |
+| `crates/session-redis` | Redis-backed `SessionStore`: Lua compare-and-set, keys kept in-process, fail closed (G5, IMP-014) |
 | `crates/lab-server` | axum lab Verifier for HPKE-0 `direct_post.jwt` (IMP-008..010), wallet simulator (`wallet-sim` feature); G0-C API smoke test, G0-D ECDH-ES loopback e2e |
 | `scripts/` | Gate stages (shared by local and CI), upstream reproduction, evidence manifest |
 | `.github/workflows/` | `ci.yml` PR/main gate, `security.yml` daily advisory scan |
 | `evidence/g0/` | G0 run logs, upstream lockfile, advisory baseline, manifest |
 | `upstream/` | Pinned SpruceID checkout (git-ignored, recreated by `make g0-upstream`) |
 
-The MVP is limited to these four packages (Notion 06 §6). Redis, scenario-runner and
-evidence-report are split out after G0/G1.
+The MVP was limited to four packages (Notion 06 §6); `session-redis` is split out after G0/G1.
+scenario-runner and evidence-report follow later.
 
 ## Pins
 
@@ -35,6 +36,7 @@ evidence-report are split out after G0/G1.
 make tools        # cargo-deny, cargo-audit, cargo-machete (+ shellcheck, actionlint check)
 make test
 make gate         # all CI stages: quality, test, supply-chain
+make gate-redis   # opt-in redis stage: Redis tests against $REDIS_URL or a disposable Docker Redis
 make g0           # upstream reproduction + lab gate + manifest into evidence/g0
 ```
 
@@ -80,6 +82,7 @@ authentication, and KB-JWT holder binding is out of scope for this wave.
 | `rust-quality` | fmt, clippy `-D warnings`, machete, shellcheck, actionlint |
 | `unit` | build, test, doctest, required G0 tests, non-zero test count |
 | `supply-chain` | cargo-deny, advisory baseline sync, core containment, Verifier build without sealing, cargo-audit |
+| `redis` | session-redis against a Redis service container: contract suite, two-worker race, fail closed, required Redis tests |
 | `g0-upstream` | SpruceID CI reproduction at the pinned SHA (main / manual only) |
 | `ci-gate` | Single required check: fails unless every gate job's result is `success` |
 
@@ -96,11 +99,12 @@ listed with reasons in `deny.toml` (mirrored in `.cargo/audit.toml`; the gate ch
 lists match). Unfiltered evidence is in `evidence/g0/advisories_baseline.txt`. Any new
 advisory fails the gate.
 
-The gate step `core_containment` checks the resolved graph of `jose-hpke`, `session-core` and
-`protocol-model`, and fails if any crate from that tree (`openid4vp`, `josekit`, `ssi*`, `did-*`,
-`rsa`, or a crate in the baseline) shows up there, directly or transitively. `deny.toml [bans]`
-additionally rejects direct `openid4vp`/`ssi` dependencies outside `lab-server`. The HPKE-0 path
-(`hpke` 0.15 → `p256` 0.14 → `crypto-bigint` 0.7) has no advisories.
+The gate step `core_containment` checks the resolved graph of `jose-hpke`, `session-core`,
+`session-redis` and `protocol-model`, and fails if any crate from that tree (`openid4vp`,
+`josekit`, `ssi*`, `did-*`, `rsa`, or a crate in the baseline) shows up there, directly or
+transitively. `deny.toml [bans]` additionally rejects direct `openid4vp`/`ssi` dependencies
+outside `lab-server`. The HPKE-0 path (`hpke` 0.15 → `p256` 0.14 → `crypto-bigint` 0.7)
+has no advisories.
 
 ## License
 

@@ -1,4 +1,4 @@
-.PHONY: check test gate g0-upstream manifest g0 tools
+.PHONY: check test gate gate-redis g0-upstream manifest g0 tools
 
 EVIDENCE ?= evidence/local
 
@@ -13,6 +13,10 @@ test:
 ## Full PR gate, same stages as CI (quality, test, supply-chain)
 gate:
 	scripts/ci_local.sh $(EVIDENCE)
+
+## Opt-in redis stage (not part of `gate`): needs $REDIS_URL or Docker
+gate-redis:
+	scripts/ci_local.sh $(EVIDENCE) redis
 
 ## G0-A/B: reproduce upstream SpruceID CI at the pinned SHA
 g0-upstream:
