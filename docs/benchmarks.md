@@ -50,7 +50,7 @@ Runner flags (defaults in brackets): `--sizes` [1,2,8,32,64,128], `--iterations`
 
 A run must exercise every invariant, so the runner refuses arguments that would leave one out:
 the largest N must exceed `--over-budget`, `--burst` must exceed the limits-on in-flight cap
-(8), and `--burst-rounds` must be positive.
+(8), and `--burst-rounds` and `--store-iterations` must be positive.
 
 ## Set-up
 
