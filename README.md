@@ -15,16 +15,22 @@ evidence.
 | `crates/jose-hpke` | JOSE HPKE-0 integrated encryption + Session Info (IMP-004..006) |
 | `crates/session-core` | Session resolution strategies, atomic registry (IMP-007/011/012) |
 | `crates/session-redis` | Redis-backed `SessionStore`: Lua compare-and-set, keys kept in-process, fail closed (G5, IMP-014) |
+| `crates/evidence-report` | G6 benchmark rows → JSON / CSV / Markdown summary (IMP-016) |
+| `crates/scenario-runner` | G6 benchmark driver: in-process lab-server over loopback HTTP with the wallet simulator, store timings, criterion micro-benches (IMP-015) |
 | `crates/lab-server` | axum lab Verifier for HPKE-0 `direct_post.jwt` (IMP-008..010) with SD-JWT VC + KB-JWT holder binding (Evidence level 3), wallet simulator and synthetic issuer (`wallet-sim` feature); G0-C API smoke test, G0-D ECDH-ES loopback e2e |
 | `docs/interop/` | G7: OIDF #792 reproduction map (`issue-792-reproduction.md`), OIDF conformance-suite plan and INTEROP-02 outline (`oidf-conformance-plan.md`) |
 | `scripts/` | Gate stages (shared by local and CI), upstream reproduction, evidence manifest |
-| `.github/workflows/` | `ci.yml` PR/main gate, `security.yml` daily advisory scan |
+| `.github/workflows/` | `ci.yml` PR/main gate, `security.yml` daily advisory scan, `bench.yml` manual G6 benchmark |
+| `docs/benchmarks.md` | G6 methodology, metrics, invariants, caveats, how to reproduce |
 | `evidence/g0/` | G0 run logs, upstream lockfile, advisory baseline, manifest |
 | `evidence/g5/` | G5 Redis-stage run (Valkey service, 2-worker races, fail-closed) and manifest |
+| `evidence/g6/` | G6 benchmark runs, one directory per run id (`results.csv/json`, `summary.md`, `manifest.json`) |
 | `upstream/` | Pinned SpruceID checkout (git-ignored, recreated by `make g0-upstream`) |
 
-The MVP was limited to four packages (Notion 06 §6); `session-redis` is split out after G0/G1.
-scenario-runner and evidence-report follow later.
+The MVP was limited to four packages (Notion 06 §6); `session-redis` is split out after G0/G1,
+`scenario-runner` and `evidence-report` after the MVP (G6). `scenario-runner` is not a default
+workspace member: it enables lab-server's test-only `wallet-sim` as a normal dependency, so a
+plain `cargo build` stays a Verifier build.
 
 ## Pins
 
@@ -40,6 +46,7 @@ make test
 make gate         # all CI stages: quality, test, supply-chain
 make gate-redis   # opt-in redis stage: Redis tests against $REDIS_URL or a disposable Valkey (Docker)
 make g0           # upstream reproduction + lab gate + manifest into evidence/g0
+make bench        # G6 benchmark into evidence/g6/<run-id> (not a gate; Redis rows with $REDIS_URL)
 ```
 
 The gate fails if zero tests ran. Logs are stripped of absolute paths before they are stored.
@@ -62,7 +69,8 @@ did:key as `--client-id`. `--issuer-key` (or `LAB_ISSUER_KEY`) is required too: 
 
 Every mode binds loopback only; a non-loopback deployment needs an explicit ADR first.
 Release binaries come from a plain `cargo build -p lab-server --release`: builds that include
-test targets unify the test-only `wallet-sim` feature (sealing) into the library.
+test targets, or `scenario-runner` (`--workspace`), unify the test-only `wallet-sim` feature
+(sealing) into the library.
 
 Endpoints, modes, the per-POST pipeline and the evidence records are documented in
 `crates/lab-server/src/lib.rs`. Request objects are signed JWTs (JAR, RFC 9101; OpenID4VP 1.1
@@ -124,6 +132,10 @@ serializes absent `exp`/`nbf` as `null`, which the lab refuses (RFC 7519 §4.1.4
 | `ci-gate` | Single required check: fails unless every gate job's result is `success` |
 
 Each job uploads its logs and `manifest.json` as an `evidence-*` artifact (kept 14 days).
+`bench.yml` (manual `workflow_dispatch` only, not part of `ci-gate`) runs `scripts/bench.sh` on
+Linux with a Valkey service and uploads the run as `evidence-bench`. Benchmark numbers are
+evidence: there is no latency threshold, and only broken protocol invariants (HPKE attempt
+counts) fail it. See `docs/benchmarks.md`.
 `security.yml` re-runs the supply-chain stage daily, because new advisories are published
 without any code change. Actions are pinned to commit SHAs, the token is `contents: read`, and
 `pull_request_target` is not used.
@@ -137,7 +149,7 @@ lists match). Unfiltered evidence is in `evidence/g0/advisories_baseline.txt`. A
 advisory fails the gate.
 
 The gate step `core_containment` checks the resolved graph of `jose-hpke`, `session-core`,
-`session-redis` and `protocol-model`, and fails if any crate from that tree (`openid4vp`,
+`session-redis`, `protocol-model` and `evidence-report`, and fails if any crate from that tree (`openid4vp`,
 `josekit`, `ssi*`, `did-*`, `rsa`, or a crate in the baseline) shows up there, directly or
 transitively. `deny.toml [bans]` additionally rejects direct `openid4vp`/`ssi` dependencies
 outside `lab-server`. The HPKE-0 path (`hpke` 0.15 → `p256` 0.14 → `crypto-bigint` 0.7)
