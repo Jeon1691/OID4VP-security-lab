@@ -1320,11 +1320,13 @@ mod tests {
         assert!((row.rejection_ratio - 7.0 / 8.0).abs() < f64::EPSILON);
     }
 
+    /// A burst is measured as it happens: requests may finish before the cap fills, so no 503
+    /// is required there (the in-flight cap is proven under controlled admission instead).
     #[test]
-    fn burst_with_limits_on_must_shed_load() {
+    fn burst_without_503_is_not_a_violation() {
         let all_ok = vec![OK; N];
         let records: Vec<EvidenceRecord> = (0..N).map(|_| committed(1)).collect();
-        assert!(!burst_violations(Strategy::UniqueUri, N, true, &all_ok, &records).is_empty());
+        assert!(burst_violations(Strategy::UniqueUri, N, true, &all_ok, &records).is_empty());
         assert!(burst_violations(Strategy::UniqueUri, N, false, &all_ok, &records).is_empty());
         let mut shed = all_ok.clone();
         shed[0] = SERVICE_UNAVAILABLE;
@@ -1332,6 +1334,74 @@ mod tests {
         assert!(!burst_violations(Strategy::UniqueUri, N, false, &shed, &records[1..]).is_empty());
         // A 503 that still left an evidence record.
         assert!(!burst_violations(Strategy::UniqueUri, N, true, &shed, &records).is_empty());
+    }
+
+    /// The synthetic lab fixtures, read as the runner reads them.
+    fn fixtures() -> Fixtures {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../lab-server/tests/fixtures");
+        let read = |file: &str| {
+            std::fs::read_to_string(format!("{dir}/{file}")).expect("synthetic fixture")
+        };
+        Fixtures {
+            signing_jwk: read("spruce_verifier.jwk"),
+            issuer_jwk: read("lab_issuer.jwk"),
+            issuer_public_jwk: read("lab_issuer.pub.jwk"),
+        }
+    }
+
+    /// Session lifetime for the expiry test: far shorter than the block it runs, so sessions
+    /// created when the block starts expire long before it ends.
+    const SHORT_TTL: Duration = Duration::from_secs(1);
+    /// The block must outlive several TTLs for the test to mean anything.
+    const TTLS_COVERED: u32 = 2;
+    const EXPIRY_N: usize = 4;
+    const EXPIRY_ITERATIONS: u64 = 10;
+
+    /// Fixtures older than the session TTL would drop out of the candidate set, and a bounded
+    /// trial would then see fewer than N candidates. The pool must be refreshed outside the
+    /// timed requests so that every measured request still sees exactly N.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn bounded_trial_still_sees_n_candidates_when_the_block_outlives_the_session_ttl() {
+        let fixtures = fixtures();
+        let strategy = Strategy::BoundedTrial { budget: EXPIRY_N };
+        let params = Params {
+            sizes: vec![EXPIRY_N],
+            iterations: EXPIRY_ITERATIONS,
+            warmup: 0,
+            budget: EXPIRY_N,
+            over_budget: 1,
+            burst: EXPIRY_N,
+            burst_rounds: 1,
+            session_ttl: SHORT_TTL,
+        };
+        let started = Instant::now();
+        let rows = block(
+            &fixtures,
+            &params,
+            "expiry",
+            strategy,
+            EXPIRY_N,
+            &cases(EXPIRY_N),
+            &mut Schedule::new(1),
+        )
+        .await
+        .expect("block runs");
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= SHORT_TTL * TTLS_COVERED,
+            "inconclusive: the block took {elapsed:?}, raise EXPIRY_ITERATIONS"
+        );
+        for row in &rows {
+            assert!(row.invariant.holds(), "{}: {:?}", row.case, row.invariant);
+            if row.case != "admission" {
+                assert_eq!(
+                    (row.attempts_min, row.attempts_max),
+                    (EXPIRY_N as u64, EXPIRY_N as u64),
+                    "{}",
+                    row.case
+                );
+            }
+        }
     }
 
     #[test]
