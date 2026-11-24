@@ -2600,6 +2600,7 @@ dependencies = [
  "p256 0.14.0",
  "protocol-model",
  "reqwest 0.12.28",
+ "serde",
  "serde_json",
  "session-core",
  "sha2 0.11.1",

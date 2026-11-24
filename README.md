@@ -15,7 +15,7 @@ evidence.
 | `crates/jose-hpke` | JOSE HPKE-0 integrated encryption + Session Info (IMP-004..006) |
 | `crates/session-core` | Session resolution strategies, atomic registry (IMP-007/011/012) |
 | `crates/session-redis` | Redis-backed `SessionStore`: Lua compare-and-set, keys kept in-process, fail closed (G5, IMP-014) |
-| `crates/lab-server` | axum lab Verifier for HPKE-0 `direct_post.jwt` (IMP-008..010), wallet simulator (`wallet-sim` feature); G0-C API smoke test, G0-D ECDH-ES loopback e2e |
+| `crates/lab-server` | axum lab Verifier for HPKE-0 `direct_post.jwt` (IMP-008..010) with SD-JWT VC + KB-JWT holder binding (Evidence level 3), wallet simulator and synthetic issuer (`wallet-sim` feature); G0-C API smoke test, G0-D ECDH-ES loopback e2e |
 | `scripts/` | Gate stages (shared by local and CI), upstream reproduction, evidence manifest |
 | `.github/workflows/` | `ci.yml` PR/main gate, `security.yml` daily advisory scan |
 | `evidence/g0/` | G0 run logs, upstream lockfile, advisory baseline, manifest |
@@ -47,15 +47,17 @@ The gate fails if zero tests ran. Logs are stripped of absolute paths before the
 
 ```bash
 KEY=crates/lab-server/tests/fixtures/spruce_verifier.jwk   # synthetic fixture, explicit opt-in
-cargo run -p lab-server -- --signing-key $KEY --mode hardened --bind 127.0.0.1:8080
-cargo run -p lab-server -- --signing-key $KEY --mode research-trial=8  # shared route, bounded trial
-cargo run -p lab-server -- --signing-key $KEY --mode research-kid      # shared route, unique kid
+ISSUER=crates/lab-server/tests/fixtures/lab_issuer.pub.jwk # synthetic issuer public key
+cargo run -p lab-server -- --signing-key $KEY --issuer-key $ISSUER --mode hardened --bind 127.0.0.1:8080
+cargo run -p lab-server -- --signing-key $KEY --issuer-key $ISSUER --mode research-trial=8  # shared route, bounded trial
+cargo run -p lab-server -- --signing-key $KEY --issuer-key $ISSUER --mode research-kid      # shared route, unique kid
 ```
 
 `--signing-key` (or `LAB_SIGNING_KEY`) is required: the EC P-256 private JWK that signs every
 Request Object. No key is compiled into any build; the fixture above matches the default
 `client_id` (`decentralized_identifier:did:key:zDnaeaDj…`). Another key needs the matching
-did:key as `--client-id`.
+did:key as `--client-id`. `--issuer-key` (or `LAB_ISSUER_KEY`) is required too: the EC P-256
+*public* JWK (no `d`) of the only SD-JWT VC issuer the Verifier trusts.
 
 Every mode binds loopback only; a non-loopback deployment needs an explicit ADR first.
 Release binaries come from a plain `cargo build -p lab-server --release`: builds that include
@@ -69,9 +71,40 @@ expiry). The server refuses to start if a did:key `client_id` is not its key's. 
 the stored `client_id` / `nonce` / `response_uri` (the HPKE `session_info` inputs), which tests
 pin byte-equal on every route. The wallet simulator verifies the signature against the did:key
 of the `client_id` (ssi resolver), refuses expired objects, and uses only the verified payload.
-Presentation validation is synthetic (Evidence level 2):
-`nonce` and `aud` must match the session, HPKE decryption alone is never holder
-authentication, and KB-JWT holder binding is out of scope for this wave.
+
+Presentation validation verifies holder binding with synthetic credentials (Evidence level
+3). The Request Object's `dcql_query` asks for one `dc+sd-jwt` credential (`vct_values`
+`https://credentials.lab.invalid/synthetic-identity/v1`; claims `given_name`, `family_name`,
+`age_over_18`; holder binding required). The decrypted `vp_token` must be
+`{"synthetic-credential": ["<SD-JWT+KB>"]}` (OpenID4VP 1.1 §8.1, B.3.6), and the Verifier
+checks, without ssi or openid4vp in its build (RustCrypto `p256` / `sha2`):
+
+- the issuer JWT: `typ` `dc+sd-jwt`, `alg` ES256 exactly, no `crit`, signature by the
+  configured issuer key, `_sd_alg` `sha-256` only (RFC 9901 §4.1, §7.1 step 2);
+- every Disclosure: canonical base64url, digest referenced exactly once, no duplicate or
+  unreferenced Disclosures or digests, no claim-name collisions, recursive and array-element
+  Disclosures (§4.2, §7.1 steps 3-5), `exp` / `nbf` (§7.1 step 6);
+- the holder key from `cnf.jwk` and the KB-JWT: `typ` `kb+jwt`, ES256 by that key, `iat`
+  within 300 s (60 s future skew), `nonce` and `aud` byte-equal to the session's `nonce` and
+  `client_id`, `sd_hash` over the presentation up to the last `~` (§4.3, §7.3; OpenID4VP 1.1
+  B.3.6, §14.2.2);
+- the SD-JWT VC / DCQL profile: `vct`, claims SD-JWT VC forbids in Disclosures never
+  disclosed, exactly the requested claims (draft-ietf-oauth-sd-jwt-vc-27 §2.2; OpenID4VP 1.1
+  §6.4.1, §8.6).
+
+All JSON is parsed with duplicate members refused at any depth, and every size and count is
+bounded before any crypto. The consumed session keeps only the requested claims (each at most
+256 bytes), the `vct`, the holder key's RFC 7638 thumbprint and the disclosed claim names,
+never the presentation. Every failure answers the generic 400; the failing check is recorded
+as evidence. HPKE decryption alone is never holder authentication. Out of scope: issuer trust
+beyond one configured key, status/revocation, Wallet attestation, mdoc.
+
+Pinned specifications: OpenID4VP 1.1 Editor's draft of 11 November 2026, RFC 9901 (SD-JWT,
+November 2025), draft-ietf-oauth-sd-jwt-vc-27 (16 November 2026). The RFC 9901 §5.2 and
+Appendix A.3 examples are verified as fixtures (`tests/fixtures/rfc9901_examples.json`, with
+URL, document SHA-256 and retrieval date). SpruceID ssi 0.16's SD-JWT code (test-only) is
+used as an independent implementation in both directions; note that its `KbJwtPayload`
+serializes absent `exp`/`nbf` as `null`, which the lab refuses (RFC 7519 §4.1.4).
 
 ## CI
 
@@ -114,6 +147,13 @@ Apache-2.0. See [LICENSE](LICENSE).
 `crates/lab-server/tests/fixtures/spruce_verifier.jwk` is a synthetic test key copied unchanged
 from [spruceid/openid4vp](https://github.com/spruceid/openid4vp) (MIT OR Apache-2.0). It is
 used here under Apache-2.0.
+
+`crates/lab-server/tests/fixtures/lab_issuer.jwk` / `lab_issuer.pub.jwk` are a synthetic P-256
+issuer key pair generated for this repository (test use only).
+`crates/lab-server/tests/fixtures/rfc9901_examples.json` quotes examples from RFC 9901
+(Copyright (c) 2025 IETF Trust and the persons identified as the document authors; subject to
+BCP 78 and the IETF Trust's Legal Provisions Relating to IETF Documents), unchanged except
+for line breaks, for interoperability testing.
 
 ## Policy
 

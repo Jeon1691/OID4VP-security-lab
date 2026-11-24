@@ -10,10 +10,10 @@
 //! | Method and path | Purpose |
 //! | --- | --- |
 //! | `POST /lab/v1/sessions` | Create a synthetic session; optional JSON `{"route": "unique"\|"shared", "nonce": "..."}` (`shared` and `nonce` research mode only). Returns `client_id` (the Authorization Request parameter), `request_uri`, `response_uri` and `result_uri`; the result token in `result_uri` is returned only here |
-//! | `GET /lab/v1/requests/{id}` | Signed Request Object (JAR), body = compact JWS, `Content-Type: application/oauth-authz-req+jwt`. Payload: exact `client_id`, `nonce`, `response_uri`, `response_mode=direct_post.jwt`, `aud`, `client_metadata.jwks` with the HPKE-0 key (`alg` `HPKE-0`, `kid`) |
+//! | `GET /lab/v1/requests/{id}` | Signed Request Object (JAR), body = compact JWS, `Content-Type: application/oauth-authz-req+jwt`. Payload: exact `client_id`, `nonce`, `response_uri`, `response_mode=direct_post.jwt`, `aud`, `dcql_query` (one `dc+sd-jwt` query for [`SYNTHETIC_CREDENTIAL_VCT`] and [`REQUESTED_CLAIMS`]), `client_metadata.jwks` with the HPKE-0 key (`alg` `HPKE-0`, `kid`) |
 //! | `POST /lab/v1/response/{token}` | Unique response_uri (unique-uri strategy) |
 //! | `POST /lab/v1/response/shared` | Shared response_uri, research mode only (404 in hardened mode) |
-//! | `GET /lab/v1/results/{result_token}` | `pending` / `consumed` (with the synthetic `vp_token`) / `expired`. The request id does not unlock it |
+//! | `GET /lab/v1/results/{result_token}` | `pending` / `consumed` (with the committed `credential`: requested claims, `vct`, holder key thumbprint, disclosed claim names) / `expired`. The request id does not unlock it |
 //! | `GET /health` | Liveness; exempt from the in-flight limit and request timeout |
 //!
 //! # Signed Request Objects (JAR)
@@ -78,7 +78,8 @@
 //! 6. Ingress hint: route token from the path, `kid` from the protected header.
 //! 7. `resolve` with the route's strategy.
 //! 8. For each candidate: HPKE open with its key and `SessionInfo::from_binding`, then
-//!    synthetic validation, on the blocking pool behind
+//!    holder-binding validation (SD-JWT VC + KB-JWT against that candidate's `client_id` and
+//!    `nonce`, see below), on the blocking pool behind
 //!    [`LabConfig::max_concurrent_decryptions`]. All candidates are tried; with bounded trial,
 //!    more than one that validates is an integrity failure (reject, claim nothing, record it).
 //!    Only the first validated result is kept.
@@ -127,13 +128,40 @@
 //!   another session, and records `CrossSessionReplay` as evidence of the #792 condition.
 //! * Results are readable only with the result token, so the request id (visible to the
 //!   wallet and anyone who sees the `request_uri`) does not reveal the outcome.
-//! * Consumed records retain only the bounded [`ValidatedResponse`], never decrypted input.
+//! * Consumed records retain only the bounded [`ValidatedResponse`], never decrypted input or
+//!   the presentation.
+//! * Holder binding: a response is accepted only if its KB-JWT is signed by the `cnf` key of
+//!   an SD-JWT VC that the configured issuer signed, over this session's exact `aud`
+//!   (`client_id`) and `nonce` and over exactly the presented SD-JWT (`sd_hash`). A
+//!   presentation captured from one session therefore fails on another session (`nonce`) or
+//!   another Verifier (`aud`), and a Disclosure added, removed or changed after signing fails
+//!   the digest or `sd_hash` check. HPKE decryption authenticates nothing about the holder.
+//! * Not covered (synthetic scope): issuer trust is one configured key (no x5c / Type
+//!   Metadata / trust lists), no status or revocation check, no Wallet attestation, and the
+//!   KB-JWT freshness window ([`KB_JWT_MAX_AGE_SECS`]) is judged on the Verifier's clock.
+//!   Within that window, nonce uniqueness per session (and the replay guard) is what stops a
+//!   replay to the *same* session; a reused research nonce shares the KB-JWT between sessions
+//!   by design (the #792 condition, refused as `Ambiguous` / `CrossSessionReplay`).
+//! * All parsing that precedes signature checks is bounded ([`MAX_PRESENTATION_LEN`],
+//!   [`MAX_DISCLOSURES`], [`MAX_DISCLOSURE_LEN`], [`MAX_SD_DEPTH`]) and strict (canonical
+//!   base64url, no duplicate JSON members at any depth, no `crit`, `alg` exactly ES256).
 //!
 //! # Validation level
 //!
-//! Evidence level 2, synthetic: see [`validate`](crate::ValidationError). Successful HPKE
-//! decryption is never treated as holder authentication; real KB-JWT / holder binding is out
-//! of scope for this wave.
+//! Evidence level 3: holder binding verified with synthetic credentials. The decrypted
+//! `vp_token` must answer the DCQL query with one SD-JWT+KB (OpenID4VP 1.1 §8.1, B.3.6),
+//! checked by [`verify_sd_jwt_vc`] (RFC 9901 §7.1 / §7.3, draft-ietf-oauth-sd-jwt-vc-27;
+//! the check-by-check table with its sources heads `src/sd_jwt.rs`) against
+//! [`LabConfig::trusted_issuer`]. The failing check is recorded as a [`ValidationError`];
+//! every failure answers the same generic error. Successful HPKE decryption alone is never
+//! treated as holder authentication.
+//!
+//! Specifications pinned for this level: OpenID4VP 1.1 Editor's draft of 11 November 2026
+//! (<https://openid.github.io/OpenID4VP/openid-4-verifiable-presentations-1_1-wg-draft.html>),
+//! RFC 9901 (SD-JWT, November 2025), draft-ietf-oauth-sd-jwt-vc-27 (16 November 2026).
+//! `tests/sd_jwt_rfc9901_vectors.rs` verifies the RFC 9901 §5.2 and Appendix A.3 examples;
+//! `tests/holder_binding_e2e.rs` cross-checks against SpruceID ssi 0.16's SD-JWT code in both
+//! directions.
 //!
 //! # Background sweep
 //!
@@ -145,8 +173,9 @@
 //!
 //! # Features
 //!
-//! `wallet-sim` enables `wallet_sim` and with it `jose-hpke/test-support` (sealing) and `ssi`
-//! (did:key resolution and ES256 verification of Request Objects); `lab-instrumentation`
+//! `wallet-sim` enables `wallet_sim` and with it `jose-hpke/test-support` (sealing), `ssi`
+//! (did:key resolution and ES256 verification of Request Objects), the synthetic SD-JWT VC
+//! issuer and the holder-side KB-JWT signing; `lab-instrumentation`
 //! enables the decryption pause lever and `LabServer::stored_binding`. The default build, including the
 //! `lab-server` binary, has neither; the gate step `verifier_without_sealing` checks it. Release artifacts must come from a plain
 //! `cargo build -p lab-server` (`--release`): a build that also compiles test targets (e.g.
@@ -156,6 +185,8 @@
 mod config;
 mod evidence;
 mod jar;
+mod jose;
+mod sd_jwt;
 mod server;
 mod validate;
 #[cfg(feature = "wallet-sim")]
@@ -175,10 +206,16 @@ pub use jar::{
     REQUEST_OBJECT_ALG, REQUEST_OBJECT_AUD, REQUEST_OBJECT_MEDIA_TYPE, REQUEST_OBJECT_TYP,
     RequestSigningKey, SigningKeyError,
 };
+pub use sd_jwt::{
+    CredentialQuery, IssuerKeyError, KB_JWT_MAX_AGE_SECS, KB_JWT_MAX_FUTURE_SKEW_SECS, KB_JWT_TYP,
+    KeyBindingContext, MAX_COMMITTED_CLAIM_BYTES, MAX_DISCLOSURE_LEN, MAX_DISCLOSURES,
+    MAX_ISSUER_JWT_LEN, MAX_KB_JWT_LEN, MAX_PRESENTATION_LEN, MAX_SD_DEPTH, ProcessedSdJwt,
+    SD_JWT_VC_TYP, TrustedIssuerKey, disclosure_digest, verify_sd_jwt_kb, verify_sd_jwt_vc,
+};
 #[cfg(feature = "lab-instrumentation")]
 pub use server::DecryptionPause;
 pub use server::{GENERIC_REJECTION_BODY, LabServer, MAX_REMEMBERED_DIGESTS};
 pub use validate::{
-    MAX_CLIENT_ID_LEN, MAX_COMMITTED_VP_TOKEN_BYTES, MAX_RESEARCH_NONCE_LEN,
-    SYNTHETIC_CREDENTIAL_QUERY_ID, ValidatedResponse, ValidationError,
+    MAX_CLIENT_ID_LEN, MAX_RESEARCH_NONCE_LEN, REQUESTED_CLAIMS, SYNTHETIC_CREDENTIAL_QUERY,
+    SYNTHETIC_CREDENTIAL_QUERY_ID, SYNTHETIC_CREDENTIAL_VCT, ValidatedResponse, ValidationError,
 };

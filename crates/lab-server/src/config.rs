@@ -8,6 +8,7 @@ use protocol_model::ClientIdWire;
 use session_core::{CandidateBudget, ResolutionStrategy};
 
 use crate::jar::{self, RequestSigningKey};
+use crate::sd_jwt::TrustedIssuerKey;
 use crate::validate::MAX_CLIENT_ID_LEN;
 
 /// Default request lifetime: five minutes, the typical request TTL session-core's consumed
@@ -146,6 +147,10 @@ pub struct LabConfig {
     /// must be the key of that did:key: the server derives the did:key from it and refuses to
     /// start otherwise.
     pub request_signing_key: RequestSigningKey,
+    /// The only issuer whose SD-JWT VCs are accepted (RFC 9901 §7.1 step 2c): presentations
+    /// must carry an issuer-signed JWT that verifies with this EC P-256 public key. Comes from
+    /// configuration; no build contains one.
+    pub trusted_issuer: TrustedIssuerKey,
     /// Lifetime of each session from creation.
     pub session_ttl: Duration,
     /// Interval of the background expiry/purge sweep.
@@ -167,17 +172,23 @@ pub struct LabConfig {
 
 impl LabConfig {
     /// `mode` on `127.0.0.1:0` with the default client id, TTL and sweep interval, signing
-    /// request objects with `request_signing_key`.
+    /// request objects with `request_signing_key` and accepting credentials of
+    /// `trusted_issuer` only.
     ///
     /// # Panics
     /// Never: [`DEFAULT_CLIENT_ID`] is a valid `ClientIdWire`.
     #[must_use]
-    pub fn new(mode: Mode, request_signing_key: RequestSigningKey) -> Self {
+    pub fn new(
+        mode: Mode,
+        request_signing_key: RequestSigningKey,
+        trusted_issuer: TrustedIssuerKey,
+    ) -> Self {
         Self {
             mode,
             bind: DEFAULT_BIND,
             client_id: ClientIdWire::new(DEFAULT_CLIENT_ID).expect("constant client_id is valid"),
             request_signing_key,
+            trusted_issuer,
             session_ttl: DEFAULT_SESSION_TTL,
             sweep_interval: DEFAULT_SWEEP_INTERVAL,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
