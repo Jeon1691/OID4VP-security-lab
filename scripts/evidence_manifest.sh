@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Emit a run manifest (Notion 04 · CI §8): source revisions, lockfile hashes, toolchain, host,
-# CI run identity and the per-step results found in OUT_DIR/*.log.
+# Emit a run manifest (Notion 04 · CI §8): source revisions, lockfile hashes, toolchain, host
+# (CPU, core count, memory, kernel), CI run identity and the per-step results found in
+# OUT_DIR/*.log. For a G6 benchmark run (scripts/bench.sh) it also embeds OUT_DIR/run.json, the
+# scenario parameters (run id, seed, iterations, sizes, profile).
 # Contains no secrets, nonces or key material.
 #
 # Usage: scripts/evidence_manifest.sh [OUT_DIR]
@@ -48,6 +50,34 @@ def cpu():
         pass
     return platform.processor() or None
 
+def physical_cpus():
+    if platform.system() == "Darwin":
+        return int(run("sysctl", "-n", "hw.physicalcpu"))
+    try:
+        cores, phys = set(), None
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                key, _, value = line.partition(":")
+                if key.strip() == "physical id":
+                    phys = value.strip()
+                elif key.strip() == "core id":
+                    cores.add((phys, value.strip()))
+        return len(cores) or None
+    except OSError:
+        return None
+
+def memory_bytes():
+    if platform.system() == "Darwin":
+        return int(run("sysctl", "-n", "hw.memsize"))
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    return int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    return None
+
 out = os.environ["M_OUT"]
 steps, tests_passed = {}, {}
 for log in sorted(glob.glob(os.path.join(out, "*.log"))):
@@ -76,11 +106,17 @@ manifest = {
     "rustc_vv": run("rustc", "-Vv").splitlines(),
     "cargo": run("cargo", "-V"),
     "tools": {t: tool(t) for t in ["cargo-deny", "cargo-audit", "cargo-machete"]},
-    "host": {"os": platform.platform(), "machine": platform.machine(), "cpu": cpu()},
+    "host": {"os": platform.platform(), "kernel": platform.release(),
+             "machine": platform.machine(), "cpu": cpu(), "logical_cpus": os.cpu_count(),
+             "physical_cpus": physical_cpus(), "memory_bytes": memory_bytes()},
     "ci": ci,
     "steps": steps,
     "tests_passed": tests_passed,
 }
+bench = os.path.join(out, "run.json")
+if os.path.exists(bench):
+    with open(bench) as f:
+        manifest["bench"] = json.load(f)
 path = os.path.join(out, "manifest.json")
 with open(path, "w") as f:
     json.dump(manifest, f, indent=2)

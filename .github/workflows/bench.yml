@@ -1,0 +1,98 @@
+# G6 benchmark and evidence run (Notion 04 · CI, CI-008; IMP-015/016). Manual dispatch only.
+# Results are evidence uploaded as an artifact, never a gate: there is no latency threshold, the
+# job is not part of ci-gate, and CI VM numbers are noisy and not comparable to other machines.
+# The job fails only when scenario-runner reports a broken protocol invariant (HPKE attempt
+# counts, zero attempts before admission / over budget) or cannot run.
+name: bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      sizes:
+        description: Pending-session counts N, comma-separated
+        required: false
+        default: "1,2,8,32,64,128"
+        type: string
+      iterations:
+        description: Measured requests per case and N
+        required: false
+        default: "100"
+        type: string
+      warmup:
+        description: Unmeasured warm-up requests per case and N
+        required: false
+        default: "10"
+        type: string
+      seed:
+        description: Schedule seed (case order only; keys always come from the OS CSPRNG)
+        required: false
+        default: "1"
+        type: string
+
+# Least privilege: the job reads the repository and uploads an artifact, nothing else.
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  BENCH_OUT: bench-evidence
+  # Benchmark runs are rare and kept for comparison on the same runner class.
+  EVIDENCE_RETENTION_DAYS: 30
+
+jobs:
+  bench:
+    name: bench
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      redis:
+        # Same Valkey image, digest and hardening as the ci.yml redis job.
+        image: valkey/valkey:8.1.12@sha256:5032c4dd7abe08d6fd9382054608183e2bf1f7e3895ef619b8784698454325f7
+        ports:
+          - 127.0.0.1:6379:6379
+        options: >-
+          --user 999:999
+          --cap-drop ALL
+          --security-opt no-new-privileges
+          --health-cmd "valkey-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    env:
+      REDIS_URL: redis://127.0.0.1:6379/
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install && rustc -Vv
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # Inputs reach the script only as environment variables (no expression interpolation in
+      # `run`), and scenario-runner validates each value.
+      - name: Run benchmark (release build)
+        env:
+          INPUT_SIZES: ${{ inputs.sizes }}
+          INPUT_ITERATIONS: ${{ inputs.iterations }}
+          INPUT_WARMUP: ${{ inputs.warmup }}
+          INPUT_SEED: ${{ inputs.seed }}
+          BENCH_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          scripts/bench.sh "$BENCH_OUT" -- \
+            --sizes "$INPUT_SIZES" \
+            --iterations "$INPUT_ITERATIONS" \
+            --warmup "$INPUT_WARMUP" \
+            --seed "$INPUT_SEED"
+      - if: always()
+        run: cat "$BENCH_OUT"/*/summary.md >>"$GITHUB_STEP_SUMMARY" || true
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: evidence-bench
+          path: ${{ env.BENCH_OUT }}
+          retention-days: ${{ env.EVIDENCE_RETENTION_DAYS }}
+          if-no-files-found: error
