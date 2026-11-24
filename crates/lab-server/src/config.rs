@@ -7,6 +7,7 @@ use jose_hpke::MAX_COMPACT_JWE_LEN;
 use protocol_model::ClientIdWire;
 use session_core::{CandidateBudget, ResolutionStrategy};
 
+use crate::jar::RequestSigningKey;
 use crate::validate::MAX_CLIENT_ID_LEN;
 
 /// Default request lifetime: five minutes, the typical request TTL session-core's consumed
@@ -80,8 +81,9 @@ pub const MAX_RESPONSE_BODY_BYTES: usize = MAX_COMPACT_JWE_LEN + FORM_OVERHEAD_B
 /// Synthetic Verifier `client_id` (OpenID4VP 1.1 §5.9.3 `decentralized_identifier` prefix).
 ///
 /// The did:key of the SpruceID fixture key G0-C/G0-D already sign Request Objects with
-/// (`tests/fixtures/spruce_verifier.jwk`), so adding JAR signing later does not change the
-/// stored wire value.
+/// (`tests/fixtures/spruce_verifier.jwk`). A server using this `client_id` must be given that
+/// key as [`LabConfig::request_signing_key`], or wallets resolving the did:key refuse its
+/// request objects; the key itself is never compiled in.
 pub const DEFAULT_CLIENT_ID: &str =
     "decentralized_identifier:did:key:zDnaeaDj3YpPR4JXos2kCCNPS86hdELeN5PZh97KGkoFzUtGn";
 
@@ -139,6 +141,9 @@ pub struct LabConfig {
     pub bind: SocketAddr,
     /// `client_id` of every request object.
     pub client_id: ClientIdWire,
+    /// Signs every request object (JAR). For a `decentralized_identifier:did:key:` client id it
+    /// must be the key of that did:key; the server cannot check this, wallets do.
+    pub request_signing_key: RequestSigningKey,
     /// Lifetime of each session from creation.
     pub session_ttl: Duration,
     /// Interval of the background expiry/purge sweep.
@@ -159,16 +164,18 @@ pub struct LabConfig {
 }
 
 impl LabConfig {
-    /// `mode` on `127.0.0.1:0` with the default client id, TTL and sweep interval.
+    /// `mode` on `127.0.0.1:0` with the default client id, TTL and sweep interval, signing
+    /// request objects with `request_signing_key`.
     ///
     /// # Panics
     /// Never: [`DEFAULT_CLIENT_ID`] is a valid `ClientIdWire`.
     #[must_use]
-    pub fn new(mode: Mode) -> Self {
+    pub fn new(mode: Mode, request_signing_key: RequestSigningKey) -> Self {
         Self {
             mode,
             bind: DEFAULT_BIND,
             client_id: ClientIdWire::new(DEFAULT_CLIENT_ID).expect("constant client_id is valid"),
+            request_signing_key,
             session_ttl: DEFAULT_SESSION_TTL,
             sweep_interval: DEFAULT_SWEEP_INTERVAL,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,

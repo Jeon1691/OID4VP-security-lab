@@ -49,6 +49,7 @@ use crate::evidence::{
     AdmissionError, CommitResult, CryptoResult, EvidenceLog, EvidenceRecord, Rejection,
     ValidationResult,
 };
+use crate::jar::{REQUEST_OBJECT_AUD, REQUEST_OBJECT_MEDIA_TYPE, RequestSigner};
 use crate::validate::{
     self, MAX_RESEARCH_NONCE_LEN, SYNTHETIC_CREDENTIAL_QUERY_ID, ValidatedResponse, ValidationError,
 };
@@ -140,12 +141,12 @@ const SESSION_ID_BYTES: usize = 16;
 const KID_BYTES: usize = 16;
 
 /// JWK members for the advertised HPKE-0 key (RFC 7517 / RFC 7518 §6.2, draft-22 §5.1).
-const JWK_KTY_EC: &str = "EC";
-const JWK_CRV_P256: &str = "P-256";
+pub(crate) const JWK_KTY_EC: &str = "EC";
+pub(crate) const JWK_CRV_P256: &str = "P-256";
 const JWK_USE_ENC: &str = "enc";
 /// SEC1 uncompressed point: `0x04 || x || y` with 32-byte P-256 coordinates (SEC1 §2.3.3).
-const SEC1_UNCOMPRESSED_TAG: u8 = 0x04;
-const P256_COORDINATE_BYTES: usize = 32;
+pub(crate) const SEC1_UNCOMPRESSED_TAG: u8 = 0x04;
+pub(crate) const P256_COORDINATE_BYTES: usize = 32;
 /// OpenID4VP `response_type` of every lab request (§5.2).
 const RESPONSE_TYPE_VP_TOKEN: &str = "vp_token";
 /// DCQL `format` of the synthetic credential query; deliberately not a registered format.
@@ -193,6 +194,8 @@ struct Limits {
 struct AppState {
     mode: Mode,
     client_id: ClientIdWire,
+    /// Signs each request object once, at issue time.
+    signer: RequestSigner,
     session_ttl: Duration,
     base_url: String,
     /// Unique-uri sessions; `RoutePolicy::UniquePerSession`, in every mode.
@@ -394,9 +397,11 @@ impl LabServer {
             }
         };
         let evidence = EvidenceLog::default();
+        let signer = RequestSigner::new(config.request_signing_key, &config.client_id);
         let state = Arc::new(AppState {
             mode: config.mode,
             client_id: config.client_id,
+            signer,
             session_ttl: config.session_ttl,
             base_url: base_url.clone(),
             unique: registry(RoutePolicy::UniquePerSession),
@@ -488,6 +493,19 @@ impl LabServer {
             .await
             .expect("decryption semaphore is never closed");
         DecryptionPause { _slots: permit }
+    }
+
+    /// Research instrumentation (`lab-instrumentation` feature only): the `RequestBinding` the
+    /// registry holds for `session_id` (pending or consumed), i.e. the values
+    /// `SessionInfo::from_binding` decrypts with. Lets tests compare them with the signed
+    /// request object byte for byte.
+    #[cfg(feature = "lab-instrumentation")]
+    #[must_use]
+    pub fn stored_binding(&self, session_id: &str) -> Option<RequestBinding> {
+        let id = SessionId::new(session_id).ok()?;
+        let route = self.state.issued().requests.get(&id)?.route;
+        let snapshot = self.state.registry(route)?.snapshot(&id).ok()??;
+        Some(snapshot.binding().clone())
     }
 
     /// Research instrumentation (`lab-instrumentation` feature only): POSTs currently waiting
@@ -737,7 +755,11 @@ async fn issue(
         nonce,
         response_uri,
     };
-    let request_object = request_object(&binding, &key, &kid).to_string();
+    // Signed here, once, over the binding that is then moved into the registry; `request_uri`
+    // serves these bytes unchanged (no path re-signs or edits them).
+    let request_object = state
+        .signer
+        .sign(request_object(&binding, &key, &kid).to_string().as_bytes());
     let response_uri = match &binding {
         RequestBinding::DirectPostJwt { response_uri, .. } => response_uri.as_str().to_owned(),
         RequestBinding::DcApiJwt { .. } => return Err(fail()),
@@ -765,8 +787,11 @@ async fn issue(
         RouteKind::Unique => "unique",
         RouteKind::Shared => "shared",
     };
+    // `client_id` is what the Authorization Request carries next to `request_uri`; the Request
+    // Object's `client_id` must equal it (OpenID4VP 1.1 §5.10.1).
     let created = json!({
         "session_id": id.as_str(),
+        "client_id": state.client_id.as_str(),
         "request_uri": request_uri,
         "response_uri": response_uri,
         "result_uri": result_uri,
@@ -785,9 +810,9 @@ async fn issue(
     Ok(created)
 }
 
-/// The (unsigned) request object for `binding`: exactly the stored wire values, plus the
-/// HPKE-0 public key in `client_metadata.jwks`. JAR signing is a follow-up and must sign these
-/// same values.
+/// The request object payload for `binding`: exactly the stored wire values, the HPKE-0 public
+/// key in `client_metadata.jwks`, and `aud` (OpenID4VP 1.1 §5.8, Static Discovery). No `iss`:
+/// it MAY be present and Wallets MUST ignore it (§5). Signed by `RequestSigner::sign`.
 fn request_object(binding: &RequestBinding, key: &RecipientPrivateKey, kid: &KeyId) -> Value {
     let RequestBinding::DirectPostJwt {
         client_id,
@@ -811,6 +836,7 @@ fn request_object(binding: &RequestBinding, key: &RecipientPrivateKey, kid: &Key
     jwk.insert("alg".into(), ALG_HPKE_0.into());
     jwk.insert("kid".into(), kid.as_str().into());
     json!({
+        "aud": REQUEST_OBJECT_AUD,
         "client_id": client_id.as_str(),
         "response_type": RESPONSE_TYPE_VP_TOKEN,
         "response_mode": EncryptedResponseMode::DirectPostJwt.as_str(),
@@ -833,7 +859,14 @@ async fn get_request(State(state): State<Arc<AppState>>, Path(id): Path<String>)
         .get(&id)
         .map(|r| r.request_object.clone());
     match object {
-        Some(object) => json_response(StatusCode::OK, object),
+        // OpenID4VP 1.1 §5.10.1: the body is the Request Object itself, as
+        // `application/oauth-authz-req+jwt` (RFC 9101 §5.2.3).
+        Some(object) => (
+            StatusCode::OK,
+            [(CONTENT_TYPE, REQUEST_OBJECT_MEDIA_TYPE)],
+            object,
+        )
+            .into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }

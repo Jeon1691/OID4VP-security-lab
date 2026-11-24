@@ -9,17 +9,42 @@
 //!
 //! | Method and path | Purpose |
 //! | --- | --- |
-//! | `POST /lab/v1/sessions` | Create a synthetic session; optional JSON `{"route": "unique"\|"shared", "nonce": "..."}` (`shared` and `nonce` research mode only). Returns `request_uri`, `response_uri` and `result_uri`; the result token in `result_uri` is returned only here |
-//! | `GET /lab/v1/requests/{id}` | Request object: exact `client_id`, `nonce`, `response_uri`, `response_mode=direct_post.jwt`, `client_metadata.jwks` with the HPKE-0 key (`alg` `HPKE-0`, `kid`) |
+//! | `POST /lab/v1/sessions` | Create a synthetic session; optional JSON `{"route": "unique"\|"shared", "nonce": "..."}` (`shared` and `nonce` research mode only). Returns `client_id` (the Authorization Request parameter), `request_uri`, `response_uri` and `result_uri`; the result token in `result_uri` is returned only here |
+//! | `GET /lab/v1/requests/{id}` | Signed Request Object (JAR), body = compact JWS, `Content-Type: application/oauth-authz-req+jwt`. Payload: exact `client_id`, `nonce`, `response_uri`, `response_mode=direct_post.jwt`, `aud`, `client_metadata.jwks` with the HPKE-0 key (`alg` `HPKE-0`, `kid`) |
 //! | `POST /lab/v1/response/{token}` | Unique response_uri (unique-uri strategy) |
 //! | `POST /lab/v1/response/shared` | Shared response_uri, research mode only (404 in hardened mode) |
 //! | `GET /lab/v1/results/{result_token}` | `pending` / `consumed` (with the synthetic `vp_token`) / `expired`. The request id does not unlock it |
 //! | `GET /health` | Liveness; exempt from the in-flight limit and request timeout |
 //!
-//! The request object is **unsigned** for now. JAR signing (RFC 9101, e.g. through SpruceID's
-//! request signer with the fixture key named by [`DEFAULT_CLIENT_ID`]) is a follow-up and must
-//! sign exactly the stored wire values; it must not change `client_id`, `nonce` or
-//! `response_uri`, because they are the HPKE `session_info` inputs.
+//! # Signed Request Objects (JAR)
+//!
+//! Request objects are signed JWTs (RFC 9101) as OpenID4VP 1.1 profiles them:
+//!
+//! * `request_uri` is fetched with `GET` (no `request_uri_method`, §5.1), and the answer is the
+//!   Request Object itself as `application/oauth-authz-req+jwt` (§5.10.1; RFC 9101 §5.2,
+//!   §5.2.3).
+//! * Header: `alg` `ES256` (RFC 7518 §3.4), `typ` `oauth-authz-req+jwt` (§5: Verifiers MUST
+//!   send it; RFC 9101 §10.8), and for a `decentralized_identifier:did:key:` client id `kid` =
+//!   its verification method `did:key:<id>#<id>` (§5.9.3: the key comes from the DID Document
+//!   and is identified by `kid`).
+//! * Payload: `client_id` identical to the Authorization Request's (§5.10.1; RFC 9101 §6.3),
+//!   `aud` `https://self-issued.me/v2` (§5.8, Static Discovery: the lab has no Wallet
+//!   metadata), no `iss` (§5: MAY, and Wallets MUST ignore it).
+//!
+//! Each object is signed once, when its session is issued, over the JSON built from the
+//! session's `RequestBinding`, which is then moved into the registry; `GET` serves those stored
+//! bytes. So the signed `client_id` / `nonce` / `response_uri` are byte-for-byte the values the
+//! registry holds and `SessionInfo::from_binding` decrypts with, and no code path can change
+//! them after signing (`tests/signed_request_object_e2e.rs` checks this on every route).
+//!
+//! The key is [`LabConfig::request_signing_key`] ([`RequestSigningKey::from_jwk`]); the lab
+//! ships none. For [`DEFAULT_CLIENT_ID`] it is the synthetic SpruceID fixture
+//! `tests/fixtures/spruce_verifier.jwk`, which tests load and the binary takes only as an
+//! explicit `--signing-key` path, so no default or release build contains a private key. The
+//! server cannot check that the key matches a did:key client id; wallets do. ES256 is computed
+//! with RustCrypto `p256` 0.14 rather than SpruceID's `P256Signer` (that would put `openid4vp`,
+//! reqwest and the ssi advisory tree into the Verifier build); a test pins the signature
+//! byte-identical to `P256Signer`'s.
 //!
 //! # Modes
 //!
@@ -115,8 +140,9 @@
 //!
 //! # Features
 //!
-//! `wallet-sim` enables `wallet_sim` and with it `jose-hpke/test-support` (sealing);
-//! `lab-instrumentation` enables the decryption pause lever. The default build, including the
+//! `wallet-sim` enables `wallet_sim` and with it `jose-hpke/test-support` (sealing) and `ssi`
+//! (did:key resolution and ES256 verification of Request Objects); `lab-instrumentation`
+//! enables the decryption pause lever and `LabServer::stored_binding`. The default build, including the
 //! `lab-server` binary, has neither; the gate step `verifier_without_sealing` checks it. Release artifacts must come from a plain
 //! `cargo build -p lab-server` (`--release`): a build that also compiles test targets (e.g.
 //! `cargo build --workspace --all-targets`) unifies the self dev-dependency's `wallet-sim`
@@ -124,6 +150,7 @@
 
 mod config;
 mod evidence;
+mod jar;
 mod server;
 mod validate;
 #[cfg(feature = "wallet-sim")]
@@ -138,6 +165,10 @@ pub use config::{
 pub use evidence::{
     AdmissionError, CommitResult, CryptoResult, EvidenceLog, EvidenceRecord, MAX_EVIDENCE_RECORDS,
     Rejection, ValidationResult,
+};
+pub use jar::{
+    REQUEST_OBJECT_ALG, REQUEST_OBJECT_AUD, REQUEST_OBJECT_MEDIA_TYPE, REQUEST_OBJECT_TYP,
+    RequestSigningKey, SigningKeyError,
 };
 #[cfg(feature = "lab-instrumentation")]
 pub use server::DecryptionPause;

@@ -10,7 +10,9 @@ publish.workspace = true
 # Wallet simulator (IMP-010): fetches request objects and seals HPKE-0 responses. Enables
 # jose-hpke's sender-side `test-support`, so the default (Verifier) build never contains
 # sealing code. Tests enable it through the self dev-dependency below.
-wallet-sim = ["dep:reqwest", "jose-hpke/test-support"]
+# It also verifies signed Request Objects with ssi (did:key resolution, ES256), which is
+# therefore never in the default build either.
+wallet-sim = ["dep:reqwest", "dep:ssi", "jose-hpke/test-support"]
 # Research instrumentation (`LabServer::pause_decryptions` / `parked_trials`): an in-process
 # lever that halts decryption, for deterministic race and shutdown scenarios. Never in the
 # default (Verifier) build; tests enable it through the self dev-dependency.
@@ -24,11 +26,13 @@ getrandom = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
 jose-hpke = { workspace = true }
+p256 = { workspace = true }
 protocol-model = { workspace = true }
 reqwest = { workspace = true, optional = true }
 serde_json = { workspace = true }
 session-core = { workspace = true }
 sha2 = { workspace = true }
+ssi = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
 

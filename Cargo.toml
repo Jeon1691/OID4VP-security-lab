@@ -54,6 +54,13 @@ thiserror = "2.0.21"
 hyper = { version = "1.12.0", default-features = false, features = ["http1", "server"] }
 hyper-util = { version = "0.1.21", default-features = false, features = ["server-graceful", "service", "tokio"] }
 
+# lab-server Request Object signing (JAR, ES256). Same 0.14 line hpke already uses (p256 0.14 ->
+# crypto-bigint 0.7, no advisories); `ecdsa` adds the RustCrypto ecdsa 0.17 / rfc6979 /
+# signature crates. SpruceID's `P256Signer` is not used in the Verifier build: it would pull
+# openid4vp (and with it reqwest, ssi and the advisory baseline) into the shipped binary, and its
+# p256 0.13 line signs over crypto-bigint 0.5 (RUSTSEC-2026-0387). Tests pin byte equality.
+p256 = { version = "0.14.0", default-features = false, features = ["ecdsa"] }
+
 # SHA-256 for the lab-server response digest (session-core `ResponseDigest`). Same 0.11 line
 # hpke's HKDF already pulls in, so no new crate enters the tree; `oid` is not needed.
 sha2 = { version = "0.11.1", default-features = false }
