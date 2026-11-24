@@ -10,8 +10,9 @@ use lab_server::wallet_sim::{
     PresentationTamper, RequestObject, SealOptions, SyntheticIssuer, WalletSim,
 };
 use lab_server::{
-    CommitResult, DEFAULT_MAX_IN_FLIGHT_REQUESTS, EvidenceRecord, LabConfig, LabServer, Mode,
-    Rejection, RequestSigningKey, RouteKind, SharedRouteStrategy, TrustedIssuerKey,
+    CommitResult, CryptoResult, DEFAULT_MAX_IN_FLIGHT_REQUESTS, EvidenceRecord, LabConfig,
+    LabServer, Mode, Rejection, RequestSigningKey, RouteKind, SharedRouteStrategy,
+    TrustedIssuerKey, ValidationResult,
 };
 use session_core::{CandidateBudget, ResolveError};
 use tokio::task::JoinSet;
@@ -31,8 +32,9 @@ const ADMISSION_CONTENT_TYPE: &str = "application/json";
 /// KB-JWT `nonce` of the wrong-nonce case: valid nonce syntax, never issued by the lab.
 const FOREIGN_NONCE: &str = "g6-foreign-nonce";
 /// Burst "limits on": an in-flight cap of an eighth of the default burst (64) and two
-/// decryption slots, so the burst must shed load (503) and queue trials.
-const LIMITED_IN_FLIGHT: usize = 8;
+/// decryption slots, so the burst must shed load (503) and queue trials. A burst must be larger
+/// than the cap (checked when the arguments are parsed).
+pub const LIMITED_IN_FLIGHT: usize = 8;
 const LIMITED_DECRYPTIONS: usize = 2;
 /// Longest violation text kept per row; the first violation is enough to start debugging.
 const MAX_VIOLATION_NOTE: usize = 240;
@@ -173,15 +175,26 @@ impl Case {
                 "200, committed, attempts == 1"
             }
             (Self::Valid(_), Strategy::BoundedTrial { .. }) => {
-                "200, committed, attempts <= N, attempts == N when last"
+                "200, committed, attempts == N at every position"
             }
-            (Self::InvalidCiphertext | Self::WrongNonce, _) => {
-                "400, not committed, attempts <= max for strategy"
+            (Self::InvalidCiphertext, Strategy::UniqueUri | Strategy::UniqueKid) => {
+                "400, not committed, none opened (Decrypt), attempts == 1"
+            }
+            (Self::InvalidCiphertext, Strategy::BoundedTrial { .. }) => {
+                "400, not committed, none opened (Decrypt), attempts == N"
+            }
+            (Self::WrongNonce, Strategy::UniqueUri | Strategy::UniqueKid) => {
+                "400, not committed, validation failed, attempts == 1"
+            }
+            (Self::WrongNonce, Strategy::BoundedTrial { .. }) => {
+                "400, not committed, validation failed, attempts == N"
             }
             (Self::Replay, Strategy::UniqueUri | Strategy::UniqueKid) => {
-                "400, not committed, attempts == 0"
+                "400, not committed, refused at resolve, attempts == 0"
             }
-            (Self::Replay, Strategy::BoundedTrial { .. }) => "400, not committed, attempts <= N",
+            (Self::Replay, Strategy::BoundedTrial { .. }) => {
+                "400, not committed, none opened (Decrypt), attempts == N"
+            }
             (Self::Admission, _) => "415, admission rejection, attempts == 0",
             (Self::OverBudget, _) => "400, budget exceeded, attempts == 0",
         }
@@ -351,44 +364,61 @@ fn check(strategy: Strategy, n: usize, case: Case, sample: &Sample) -> Result<()
     if attempts > 0 && record.trial_time.is_zero() {
         return fail("trial ran but no trial time was recorded");
     }
+    // Every case below that reaches the trial runs with N sessions pending, and the lab tries
+    // every candidate (no early exit): one attempt for a unique strategy, N for bounded trial,
+    // whatever the correct session's position. Attempt counts are exact, not bounds.
+    let full = strategy.max_attempts(n);
+    let decrypt_failed = record.crypto_result == CryptoResult::NoneOpened
+        && record.rejection == Some(Rejection::Decrypt);
     match case {
-        Case::Valid(position) => {
+        Case::Valid(_) => {
             if sample.status != OK || !committed {
-                return fail("valid response not committed");
-            }
-            match strategy {
-                Strategy::UniqueUri | Strategy::UniqueKid if attempts != 1 => {
-                    fail("unique strategy must make exactly one attempt")
-                }
-                Strategy::BoundedTrial { .. } if attempts > n => fail("attempts exceed N"),
-                Strategy::BoundedTrial { .. }
-                    if position.index(n) == n.saturating_sub(1) && attempts != n =>
-                {
-                    fail("correct session last: attempts must equal N")
-                }
-                _ => Ok(()),
+                fail("valid response not committed")
+            } else if attempts != full {
+                fail("valid response must try every candidate (1 unique, N bounded)")
+            } else {
+                Ok(())
             }
         }
-        Case::InvalidCiphertext | Case::WrongNonce => {
+        Case::InvalidCiphertext => {
             if sample.status != BAD_REQUEST || committed {
                 fail("invalid response accepted")
-            } else if attempts > strategy.max_attempts(n) {
-                fail("attempts exceed the strategy maximum")
+            } else if !decrypt_failed {
+                fail("tampered ciphertext must fail decryption for every candidate")
+            } else if attempts != full {
+                fail("invalid response must try every candidate")
+            } else {
+                Ok(())
+            }
+        }
+        Case::WrongNonce => {
+            if sample.status != BAD_REQUEST || committed {
+                fail("wrong-nonce response accepted")
+            } else if !matches!(record.validation_result, ValidationResult::Failed(_))
+                || !matches!(record.rejection, Some(Rejection::Validation(_)))
+            {
+                fail("wrong KB-JWT nonce must open and then fail validation")
+            } else if attempts != full {
+                fail("wrong-nonce response must try every candidate")
             } else {
                 Ok(())
             }
         }
         Case::Replay => {
-            let max = match strategy {
-                Strategy::UniqueUri | Strategy::UniqueKid => 0,
-                Strategy::BoundedTrial { .. } => n,
-            };
             if sample.status != BAD_REQUEST || committed {
-                fail("replay accepted")
-            } else if attempts > max {
-                fail("replay made too many attempts")
-            } else {
-                Ok(())
+                return fail("replay accepted");
+            }
+            match strategy {
+                Strategy::UniqueUri | Strategy::UniqueKid
+                    if attempts != 0
+                        || !matches!(record.rejection, Some(Rejection::Resolve(_))) =>
+                {
+                    fail("unique-strategy replay must be refused at resolve, before any attempt")
+                }
+                Strategy::BoundedTrial { .. } if !decrypt_failed || attempts != n => {
+                    fail("bounded-trial replay must try the N pending sessions and open none")
+                }
+                _ => Ok(()),
             }
         }
         Case::Admission => {
@@ -428,12 +458,18 @@ struct Acc {
     status_4xx: u64,
     status_503: u64,
     committed: u64,
+    /// Measured requests that left an evidence record (a 503 leaves none): the denominator
+    /// of `attempts_mean`.
+    recorded: u64,
     attempts_min: u64,
     attempts_max: u64,
     attempts_sum: u64,
     candidates_max: u64,
     busy: Duration,
+    /// Violations among measured requests.
     violations: u64,
+    warm_up_requests: u64,
+    warm_up_violations: u64,
     first_violation: Option<String>,
 }
 
@@ -451,20 +487,38 @@ impl Acc {
             status_4xx: 0,
             status_503: 0,
             committed: 0,
+            recorded: 0,
             attempts_min: u64::MAX,
             attempts_max: 0,
             attempts_sum: 0,
             candidates_max: 0,
             busy: Duration::ZERO,
             violations: 0,
+            warm_up_requests: 0,
+            warm_up_violations: 0,
             first_violation: None,
         }
     }
 
-    fn violation(&mut self, note: String) {
-        self.violations += 1;
+    fn keep_first(&mut self, note: &str) {
         if self.first_violation.is_none() {
             self.first_violation = Some(note.chars().take(MAX_VIOLATION_NOTE).collect());
+        }
+    }
+
+    /// A violation by a measured request.
+    fn violation(&mut self, note: String) {
+        self.violations += 1;
+        self.keep_first(&note);
+    }
+
+    /// `requests` unmeasured warm-up requests and the violations they produced. Warm-up
+    /// requests are checked like measured ones but add no samples.
+    fn warm_up(&mut self, requests: u64, violations: Vec<String>) {
+        self.warm_up_requests += requests;
+        for note in violations {
+            self.warm_up_violations += 1;
+            self.keep_first(&format!("warm-up: {note}"));
         }
     }
 
@@ -480,6 +534,7 @@ impl Acc {
             self.status_4xx += 1;
         }
         if let Some(record) = &sample.record {
+            self.recorded += 1;
             let attempts = u(record.hpke_attempts);
             self.attempts_min = self.attempts_min.min(attempts);
             self.attempts_max = self.attempts_max.max(attempts);
@@ -495,13 +550,14 @@ impl Acc {
     }
 
     fn row(self, head: RowHead<'_>, wall: Duration, cpu: Option<Duration>, rule: &str) -> Row {
-        let recorded = self.requests.max(1);
+        let requests = self.requests.max(1);
+        let recorded = self.recorded.max(1);
         let invariant = match (rule.is_empty(), self.first_violation) {
             (true, _) => Invariant::NotApplicable,
             (false, None) => Invariant::Pass(rule.to_owned()),
             (false, Some(first)) => Invariant::Fail(format!(
-                "{} of {} requests broke \"{rule}\"; first: {first}",
-                self.violations, self.requests
+                "{} of {} measured and {} of {} warm-up requests broke \"{rule}\"; first: {first}",
+                self.violations, self.requests, self.warm_up_violations, self.warm_up_requests
             )),
         };
         let wall = wall.as_secs_f64();
@@ -533,7 +589,7 @@ impl Acc {
             } else {
                 0.0
             },
-            rejection_ratio: (self.requests - self.status_2xx) as f64 / recorded as f64,
+            rejection_ratio: (self.requests - self.status_2xx) as f64 / requests as f64,
             cpu_ms: cpu.map(|c| c.as_secs_f64() * MILLIS_PER_SECOND),
             rss_kib: Usage::sample().map(|u| u.rss_kib),
             invariant,
@@ -582,8 +638,18 @@ fn cases(n: usize) -> Vec<Case> {
     out
 }
 
-/// Runs every case of one strategy × N block on a fresh server; cases run in seeded order,
-/// each warm-up then measured iterations back to back. Rows come back in `block_cases` order.
+/// A unit of a block's schedule: the interleaved valid positions, or one other case.
+#[derive(Clone, Copy)]
+enum Unit {
+    Valid,
+    Other(usize),
+}
+
+/// Runs every case of one strategy × N block on a fresh server. The units run in seeded order.
+/// The valid positions (first / middle / last) are interleaved request by request, in a fresh
+/// seeded order each round, so drift (frequency, caches, allocator) spreads evenly over the
+/// positions their latencies are compared across. Every other case runs its warm-up and then
+/// its measured iterations back to back. Rows come back in `block_cases` order.
 async fn block(
     fixtures: &Fixtures,
     params: &Params,
@@ -596,37 +662,81 @@ async fn block(
     let lab = Lab::start(fixtures, strategy, fixtures.config(strategy.mode()?)?).await?;
     let mut pool = Vec::with_capacity(n);
     lab.fill(&mut pool, n).await?;
-    let mut order: Vec<usize> = (0..block_cases.len()).collect();
-    schedule.shuffle(&mut order);
-    let mut rows: Vec<(usize, Row)> = Vec::with_capacity(order.len());
-    for slot in order {
-        let case = block_cases[slot];
-        let mut acc = Acc::new();
-        for _ in 0..params.warmup {
-            let sample = lab.run(case, &mut pool, n).await?;
-            if let Err(e) = check(strategy, n, case, &sample) {
-                acc.violation(format!("warm-up: {e}"));
+    let valid: Vec<usize> = (0..block_cases.len())
+        .filter(|&slot| matches!(block_cases[slot], Case::Valid(_)))
+        .collect();
+    let mut units: Vec<Unit> = (0..block_cases.len())
+        .filter(|slot| !valid.contains(slot))
+        .map(Unit::Other)
+        .collect();
+    if !valid.is_empty() {
+        units.push(Unit::Valid);
+    }
+    schedule.shuffle(&mut units);
+    let head = |case: Case| RowHead {
+        run_id,
+        scenario: "http",
+        strategy,
+        pending: n,
+        case: case.name(),
+        limits: "default",
+    };
+    let mut rows: Vec<(usize, Row)> = Vec::with_capacity(block_cases.len());
+    for unit in units {
+        match unit {
+            Unit::Valid => {
+                let mut accs: Vec<Acc> = valid.iter().map(|_| Acc::new()).collect();
+                for round in 0..params.warmup + params.iterations {
+                    let measured = round >= params.warmup;
+                    let mut order: Vec<usize> = (0..valid.len()).collect();
+                    schedule.shuffle(&mut order);
+                    for i in order {
+                        let case = block_cases[valid[i]];
+                        let sample = lab.run(case, &mut pool, n).await?;
+                        let verdict = check(strategy, n, case, &sample);
+                        let acc = &mut accs[i];
+                        if measured {
+                            if let Err(e) = verdict {
+                                acc.violation(e);
+                            }
+                            acc.add(&sample);
+                        } else {
+                            acc.warm_up(1, verdict.err().into_iter().collect());
+                        }
+                    }
+                }
+                // Interleaved positions share one loop, so their CPU time is not attributable
+                // to one position: `cpu_ms` stays empty for these rows.
+                for (i, acc) in accs.into_iter().enumerate() {
+                    let case = block_cases[valid[i]];
+                    let busy = acc.busy;
+                    rows.push((
+                        valid[i],
+                        acc.row(head(case), busy, None, case.rule(strategy)),
+                    ));
+                }
+            }
+            Unit::Other(slot) => {
+                let case = block_cases[slot];
+                let mut acc = Acc::new();
+                for _ in 0..params.warmup {
+                    let sample = lab.run(case, &mut pool, n).await?;
+                    let verdict = check(strategy, n, case, &sample);
+                    acc.warm_up(1, verdict.err().into_iter().collect());
+                }
+                let before = Usage::sample();
+                for _ in 0..params.iterations {
+                    let sample = lab.run(case, &mut pool, n).await?;
+                    if let Err(e) = check(strategy, n, case, &sample) {
+                        acc.violation(e);
+                    }
+                    acc.add(&sample);
+                }
+                let cpu = cpu_since(before);
+                let busy = acc.busy;
+                rows.push((slot, acc.row(head(case), busy, cpu, case.rule(strategy))));
             }
         }
-        let before = Usage::sample();
-        for _ in 0..params.iterations {
-            let sample = lab.run(case, &mut pool, n).await?;
-            if let Err(e) = check(strategy, n, case, &sample) {
-                acc.violation(e);
-            }
-            acc.add(&sample);
-        }
-        let cpu = cpu_since(before);
-        let busy = acc.busy;
-        let head = RowHead {
-            run_id,
-            scenario: "http",
-            strategy,
-            pending: n,
-            case: case.name(),
-            limits: "default",
-        };
-        rows.push((slot, acc.row(head, busy, cpu, case.rule(strategy))));
     }
     lab.shutdown().await;
     rows.sort_by_key(|(slot, _)| *slot);
@@ -738,6 +848,11 @@ fn burst_violations(
     if !limited && admitted != statuses.len() {
         violations.push("503 with limits off".to_owned());
     }
+    // A burst larger than the in-flight cap must be shed; a round without any 503 would leave
+    // the limits-on invariant unexercised.
+    if limited && admitted == statuses.len() {
+        violations.push("limits on, but no request was shed (no 503)".to_owned());
+    }
     violations
 }
 
@@ -809,9 +924,7 @@ async fn burst(
             .map(|(_, p)| p)
             .collect();
         if !measured {
-            for v in violations {
-                acc.violation(format!("warm-up: {v}"));
-            }
+            acc.warm_up(u(answers.len()), violations);
             continue;
         }
         wall += round_wall;
@@ -822,6 +935,10 @@ async fn burst(
         for v in violations {
             acc.violation(v);
         }
+        // Records arrive in completion order and answers in join order, so a record is not
+        // paired with its own answer. That is fine because only totals are used (attempt
+        // min/max/mean, commits, trial-time histogram), and `burst_violations` has already
+        // checked that the counts match.
         let mut by_index = records.into_iter();
         for (_, latency, status) in &answers {
             let record = if *status == SERVICE_UNAVAILABLE {
@@ -846,7 +963,8 @@ async fn burst(
         limits: if limited { "on" } else { "off" },
     };
     let rule = if limited {
-        "every admitted request commits within the attempt bound; 503s leave no evidence"
+        "every round sheds load (>= 1 503, none with evidence); every admitted request commits \
+         within the attempt bound"
     } else {
         "no 503; every request commits within the attempt bound"
     };
@@ -855,7 +973,7 @@ async fn burst(
 
 #[cfg(test)]
 mod tests {
-    use lab_server::{AdmissionError, CryptoResult, ValidationError, ValidationResult};
+    use lab_server::{AdmissionError, ValidationError};
     use session_core::ResolutionStrategy;
 
     use super::*;
@@ -1130,8 +1248,25 @@ mod tests {
             panic!("row must fail");
         };
         assert!(detail.contains("1 of 2 measured"), "{detail}");
+        assert!(detail.contains("0 of 0 warm-up"), "{detail}");
         let clean = Acc::new().row(head(), Duration::ZERO, None, "rule");
         assert!(clean.invariant.holds());
+        // A warm-up violation alone also fails the row, counted separately.
+        let mut warm = Acc::new();
+        warm.warm_up(3, vec!["no evidence record".to_owned()]);
+        warm.add(&sample(OK, Some(committed(N))));
+        let Invariant::Fail(detail) = warm.row(head(), Duration::ZERO, None, "rule").invariant
+        else {
+            panic!("a warm-up violation must fail the row");
+        };
+        assert!(
+            detail.contains("0 of 1 measured and 1 of 3 warm-up"),
+            "{detail}"
+        );
+        assert!(
+            detail.contains("first: warm-up: no evidence record"),
+            "{detail}"
+        );
     }
 
     #[test]

@@ -130,7 +130,19 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args> {
         burst > 0 && burst <= budget,
         "--burst must be positive and within the budget"
     );
-    ensure!(over_budget > 0, "--over-budget must be positive");
+    // A run must exercise every invariant: an over-budget N, and a burst the limited in-flight
+    // cap has to shed in every measured round.
+    ensure!(
+        over_budget > 0 && max_n > over_budget,
+        "--over-budget must be positive and below the largest N ({max_n}), or no over-budget \
+         request is measured"
+    );
+    ensure!(
+        burst > http::LIMITED_IN_FLIGHT,
+        "--burst must exceed the limited in-flight cap ({}), or the limits-on burst sheds nothing",
+        http::LIMITED_IN_FLIGHT
+    );
+    ensure!(burst_rounds > 0, "--burst-rounds must be positive");
     let run_id = match run_id {
         Some(id) => id,
         None => format!(
@@ -248,6 +260,17 @@ async fn run() -> Result<u8> {
     Ok(exit_code(&rows))
 }
 
+#[tokio::main]
+async fn main() -> ExitCode {
+    match run().await {
+        Ok(code) => ExitCode::from(code),
+        Err(e) => {
+            eprintln!("scenario-runner: {e:#}");
+            ExitCode::from(EXIT_BROKEN_RUN)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use evidence_report::{Invariant, Row};
@@ -311,16 +334,5 @@ mod tests {
         assert!(parse_args(argv(&["--sizes", "1,32", "--burst", "8"])).is_err());
         assert!(parse_args(argv(&["--sizes", "1,32", "--burst-rounds", "0"])).is_err());
         assert!(parse_args(argv(&["--sizes", "1,32"])).is_ok());
-    }
-}
-
-#[tokio::main]
-async fn main() -> ExitCode {
-    match run().await {
-        Ok(code) => ExitCode::from(code),
-        Err(e) => {
-            eprintln!("scenario-runner: {e:#}");
-            ExitCode::from(EXIT_BROKEN_RUN)
-        }
     }
 }
