@@ -143,6 +143,10 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args> {
         http::LIMITED_IN_FLIGHT
     );
     ensure!(burst_rounds > 0, "--burst-rounds must be positive");
+    ensure!(
+        store_iterations > 0,
+        "--store-iterations must be positive, or the run has no store rows"
+    );
     let run_id = match run_id {
         Some(id) => id,
         None => format!(
