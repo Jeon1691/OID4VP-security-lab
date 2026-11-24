@@ -11,7 +11,10 @@
 //! - The JWS is made once at issue time and served unchanged; any later change to the payload
 //!   is detected by the wallet.
 //! - The wallet takes binding values only from a payload it verified, and refuses a tampered
-//!   payload, a wrong key, a wrong `typ`, `alg: none`, a foreign `client_id` and a wrong `aud`.
+//!   payload, a wrong key, a wrong `typ`, `alg: none`, a foreign `client_id`, a wrong `aud`, an
+//!   expired object, a wrong media type, `crit`, a bad `kid` and an attacker's own did:key.
+//! - The server refuses to start with a did:key `client_id` that is not its signing key's, or a
+//!   Client Identifier Prefix it cannot sign for.
 //!
 //! The signing key is the synthetic SpruceID fixture (`fixtures/spruce_verifier.jwk`), loaded
 //! here through the lab's config; it is never compiled into the library or binary.
@@ -23,8 +26,8 @@ use lab_server::wallet_sim::{
     CreatedSession, RequestRejection, SealOptions, WalletError, WalletSim,
 };
 use lab_server::{
-    DEFAULT_CLIENT_ID, LabConfig, LabServer, Mode, RequestSigningKey, RouteKind,
-    SharedRouteStrategy,
+    DEFAULT_CLIENT_ID, DEFAULT_SESSION_TTL, LabConfig, LabServer, Mode, RequestSigningKey,
+    RouteKind, SharedRouteStrategy, StartError,
 };
 use openid4vp::verifier::request_signer::{P256Signer, RequestSigner as _};
 use protocol_model::{ClientIdWire, NonceWire, RequestBinding, ResponseUriWire};
@@ -65,6 +68,30 @@ const FOREIGN_AUD: &str = "https://wallet.example";
 const PLAIN_JWT_TYP: &str = "JWT";
 /// Unsecured JWS algorithm (RFC 7518 §3.6).
 const ALG_NONE: &str = "none";
+/// A media type that is a JWT but not a Request Object (RFC 7519 §10.3.1).
+const PLAIN_JWT_MEDIA_TYPE: &str = "application/jwt";
+/// Client ids whose prefix needs trust material the lab cannot produce (OpenID4VP 1.1 §5.9.3):
+/// `redirect_uri` requests cannot be signed, other DID methods need a `kid` the lab cannot
+/// derive, and the x509 / attestation / federation prefixes need certificates or statements.
+const UNSIGNABLE_CLIENT_IDS: [&str; 7] = [
+    "redirect_uri:http://127.0.0.1/cb",
+    "decentralized_identifier:did:web:verifier.example",
+    "x509_san_dns:verifier.example",
+    "x509_hash:Uvo3HtuIxuhC92rShpgqcT3YXwrqRxWEviRiA0OZszk",
+    "verifier_attestation:verifier.example",
+    "openid_federation:https://verifier.example",
+    "origin:https://verifier.example",
+];
+/// A pre-registered client id (no Client Identifier Prefix, OpenID4VP 1.1 §5.9.2).
+const PRE_REGISTERED_CLIENT_ID: &str = "lab-pre-registered-verifier";
+/// A did:key client id whose method-specific id is not a multibase P-256 key.
+const MALFORMED_DID_KEY_CLIENT_ID: &str = "decentralized_identifier:did:key:zNotAKey";
+/// A did:key DID URL whose method-specific id does not decode to a key.
+const UNRESOLVABLE_KID: &str = "did:key:zNotAKey#zNotAKey";
+/// A JOSE header extension no wallet understands (RFC 7515 §4.1.11).
+const UNKNOWN_CRIT: &str = "urn:lab:unknown";
+/// Seconds subtracted from now for an already-expired `exp`.
+const EXPIRED_BY_SECS: u64 = 1;
 
 fn fixture_key() -> RequestSigningKey {
     RequestSigningKey::from_jwk(FIXTURE_JWK).expect("fixture JWK is a P-256 private key")
@@ -143,16 +170,39 @@ fn encode_json(value: &Value) -> String {
 }
 
 fn spruce_signer() -> P256Signer {
-    let secret = p256_spruce::SecretKey::from_jwk_str(FIXTURE_JWK).expect("fixture JWK parses");
+    spruce_signer_for(FIXTURE_JWK)
+}
+
+fn spruce_signer_for(jwk: &str) -> P256Signer {
+    let secret = p256_spruce::SecretKey::from_jwk_str(jwk).expect("JWK parses");
     P256Signer::new(secret.into()).expect("P-256 signer")
 }
 
 /// A compact JWS over `header` and `payload`, signed by SpruceID's `P256Signer` with the
 /// fixture key: a validly signed object the lab never issued.
 async fn spruce_signed(header: &Value, payload: &Value) -> String {
+    spruce_signed_with(&spruce_signer(), header, payload).await
+}
+
+async fn spruce_signed_with(signer: &P256Signer, header: &Value, payload: &Value) -> String {
     let input = format!("{}.{}", encode_json(header), encode_json(payload));
-    let signature = spruce_signer().sign(input.as_bytes()).await;
+    let signature = signer.sign(input.as_bytes()).await;
     format!("{input}.{}", URL_SAFE_NO_PAD.encode(signature))
+}
+
+/// did:key DID URL of `jwk`'s public key, computed by ssi (independent of the lab).
+fn ssi_did_key_url(jwk: &str) -> String {
+    let jwk: ssi::JWK = serde_json::from_str(jwk).expect("ssi parses the JWK");
+    ssi::dids::DIDKey::generate_url(&jwk.to_public())
+        .expect("did:key of a P-256 key")
+        .to_string()
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after 1970")
+        .as_secs()
 }
 
 fn jar_header() -> Value {
@@ -380,21 +430,21 @@ async fn wallet_refuses_tampered_request_payload() {
     lab.server.shutdown().await;
 }
 
-/// A Verifier signing with a key that is not the `client_id`'s did:key key, and a wallet
+/// An object naming the fixture's did:key `kid` but signed with another key, and a wallet
 /// pinning another key than the signer's, both fail on the signature.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn wallet_refuses_request_signed_with_wrong_key() {
-    let wrong = RequestSigningKey::from_jwk(&wrong_key_jwk()).expect("second synthetic key");
-    let lab = Lab::start_with(LabConfig::new(Mode::Hardened, wrong)).await;
-    let session = lab.session(RouteKind::Unique).await;
-    assert_rejected(
-        lab.wallet.fetch_request(&session).await,
-        RequestRejection::Signature,
-    );
-    lab.server.shutdown().await;
-
     let lab = Lab::start(Mode::Hardened).await;
     let session = lab.session(RouteKind::Unique).await;
+    let jwt = lab.raw_request(&session).await;
+    let payload = decode_json(segments(&jwt)[JWS_PAYLOAD]);
+    let forged =
+        spruce_signed_with(&spruce_signer_for(&wrong_key_jwk()), &jar_header(), &payload).await;
+    assert_rejected(
+        lab.wallet.verify_request(&forged, &session.client_id).await,
+        RequestRejection::Signature,
+    );
+
     let mut wrong_public: Value = serde_json::from_str(&wrong_key_jwk()).expect("JWK");
     wrong_public.as_object_mut().expect("object").remove("d");
     let pinned = WalletSim::with_pinned_verifier_key(&wrong_public.to_string())
@@ -549,4 +599,241 @@ fn request_signing_key_is_loaded_from_config_and_never_printed() {
     let mut other_curve: Value = serde_json::from_str(FIXTURE_JWK).expect("JSON");
     other_curve["crv"] = "P-384".into();
     assert!(RequestSigningKey::from_jwk(&other_curve.to_string()).is_err());
+}
+
+/// L1: a `decentralized_identifier:did:key:` client id must be the did:key of the signing key;
+/// the server derives it from the key and refuses to start on a mismatch (another key's DID, or
+/// a malformed one).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn start_refuses_did_key_client_id_that_is_not_the_signing_keys() {
+    let wrong = RequestSigningKey::from_jwk(&wrong_key_jwk()).expect("second synthetic key");
+    assert!(matches!(
+        LabServer::start(LabConfig::new(Mode::Hardened, wrong)).await,
+        Err(StartError::ClientIdKeyMismatch)
+    ));
+    let mut config = LabConfig::new(Mode::Hardened, fixture_key());
+    config.client_id = ClientIdWire::new(MALFORMED_DID_KEY_CLIENT_ID).expect("wire client_id");
+    assert!(matches!(
+        LabServer::start(config).await,
+        Err(StartError::ClientIdKeyMismatch)
+    ));
+}
+
+/// L1: any P-256 key works with its own did:key (derived by the lab, cross-checked against
+/// ssi's did:key generation); the header `kid` is that DID's verification method and the
+/// did:key wallet verifies the request end to end.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn start_accepts_the_did_key_of_any_signing_key() {
+    let jwk = wrong_key_jwk();
+    let kid = ssi_did_key_url(&jwk);
+    let (did, _) = kid.split_once('#').expect("DID URL");
+    let mut config = LabConfig::new(
+        Mode::Hardened,
+        RequestSigningKey::from_jwk(&jwk).expect("second synthetic key"),
+    );
+    config.client_id =
+        ClientIdWire::new(format!("decentralized_identifier:{did}")).expect("wire client_id");
+    let lab = Lab::start_with(config).await;
+    let session = lab.session(RouteKind::Unique).await;
+    let jwt = lab.raw_request(&session).await;
+    assert_eq!(decode_json(segments(&jwt)[JWS_HEADER])["kid"], kid.as_str());
+    lab.wallet
+        .fetch_request(&session)
+        .await
+        .expect("did:key wallet verifies the second key's request");
+    lab.server.shutdown().await;
+}
+
+/// L1: Client Identifier Prefixes the lab cannot sign for correctly are refused at start;
+/// a pre-registered client id (no prefix) is allowed and gets no `kid`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn start_refuses_client_id_prefixes_the_lab_cannot_sign_for() {
+    for client_id in UNSIGNABLE_CLIENT_IDS {
+        let mut config = LabConfig::new(Mode::Hardened, fixture_key());
+        config.client_id = ClientIdWire::new(client_id).expect("wire client_id");
+        assert!(
+            matches!(
+                LabServer::start(config).await,
+                Err(StartError::UnsupportedClientIdPrefix)
+            ),
+            "{client_id}"
+        );
+    }
+    let mut config = LabConfig::new(Mode::Hardened, fixture_key());
+    config.client_id = ClientIdWire::new(PRE_REGISTERED_CLIENT_ID).expect("wire client_id");
+    let lab = Lab::start_with(config).await;
+    let session = lab.session(RouteKind::Unique).await;
+    let jwt = lab.raw_request(&session).await;
+    assert!(decode_json(segments(&jwt)[JWS_HEADER]).get("kid").is_none());
+    let pinned = WalletSim::with_pinned_verifier_key(&fixture_public_jwk()).expect("pinned");
+    pinned
+        .fetch_request(&session)
+        .await
+        .expect("pinned wallet verifies a pre-registered client's request");
+    lab.server.shutdown().await;
+}
+
+/// L2: the Request Object carries `iat` and `exp` (RFC 7519 §4.1.6 / §4.1.4) with `exp` the
+/// session's expiry, rounded up to the second so it never ends before the session does.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn request_object_carries_iat_and_exp_of_the_session_ttl() {
+    let lab = Lab::start(Mode::Hardened).await;
+    let before = now_secs();
+    let session = lab.session(RouteKind::Unique).await;
+    let after = now_secs();
+    let payload = decode_json(segments(&lab.raw_request(&session).await)[JWS_PAYLOAD]);
+    let iat = payload["iat"].as_u64().expect("iat is a NumericDate");
+    let exp = payload["exp"].as_u64().expect("exp is a NumericDate");
+    assert!((before..=after).contains(&iat), "iat {iat} in [{before}, {after}]");
+    let ttl = DEFAULT_SESSION_TTL.as_secs();
+    assert!((ttl..=ttl + 1).contains(&(exp - iat)), "exp - iat = {}", exp - iat);
+    lab.server.shutdown().await;
+}
+
+/// L2: an expired Request Object (`exp` not after now, RFC 7519 §4.1.4), or one without a
+/// numeric `exp`, is refused even when validly signed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn wallet_refuses_expired_or_exp_less_request() {
+    let lab = Lab::start(Mode::Hardened).await;
+    let session = lab.session(RouteKind::Unique).await;
+    let payload = decode_json(segments(&lab.raw_request(&session).await)[JWS_PAYLOAD]);
+
+    let mut expired = payload.clone();
+    expired["exp"] = (now_secs() - EXPIRED_BY_SECS).into();
+    let expired = spruce_signed(&jar_header(), &expired).await;
+    assert_rejected(
+        lab.wallet.verify_request(&expired, &session.client_id).await,
+        RequestRejection::Expired,
+    );
+    let mut missing = payload.clone();
+    missing.as_object_mut().expect("object").remove("exp");
+    let missing = spruce_signed(&jar_header(), &missing).await;
+    assert_rejected(
+        lab.wallet.verify_request(&missing, &session.client_id).await,
+        RequestRejection::Expired,
+    );
+    let mut textual = payload.clone();
+    textual["exp"] = "tomorrow".into();
+    let textual = spruce_signed(&jar_header(), &textual).await;
+    assert_rejected(
+        lab.wallet.verify_request(&textual, &session.client_id).await,
+        RequestRejection::Expired,
+    );
+    let fresh = spruce_signed(&jar_header(), &payload).await;
+    lab.wallet
+        .verify_request(&fresh, &session.client_id)
+        .await
+        .expect("unexpired control verifies");
+    lab.server.shutdown().await;
+}
+
+/// L4: a correctly signed Request Object served as `application/jwt` (not
+/// `application/oauth-authz-req+jwt`, OpenID4VP 1.1 §5.10.1) is refused before parsing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn wallet_refuses_request_served_with_wrong_content_type() {
+    let lab = Lab::start(Mode::Hardened).await;
+    let session = lab.session(RouteKind::Unique).await;
+    let jwt = lab.raw_request(&session).await;
+
+    let stub = axum::Router::new().route(
+        "/request",
+        axum::routing::get(move || async move {
+            (
+                [(axum::http::header::CONTENT_TYPE, PLAIN_JWT_MEDIA_TYPE)],
+                jwt,
+            )
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("loopback bind");
+    let addr = listener.local_addr().expect("stub address");
+    let serve = tokio::spawn(async move { axum::serve(listener, stub).await });
+    let relabelled = CreatedSession {
+        request_uri: format!("http://{addr}/request"),
+        ..session.clone()
+    };
+    assert_rejected(
+        lab.wallet.fetch_request(&relabelled).await,
+        RequestRejection::ContentType,
+    );
+    serve.abort();
+    lab.wallet
+        .fetch_request(&session)
+        .await
+        .expect("the lab's own answer verifies");
+    lab.server.shutdown().await;
+}
+
+/// L4: a `crit` header (RFC 7515 §4.1.11, no extension is understood) and a compact
+/// serialization with an extra segment are malformed, even when validly signed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn wallet_refuses_request_with_crit_header_or_extra_segment() {
+    let lab = Lab::start(Mode::Hardened).await;
+    let session = lab.session(RouteKind::Unique).await;
+    let jwt = lab.raw_request(&session).await;
+    let payload = decode_json(segments(&jwt)[JWS_PAYLOAD]);
+
+    let mut header = jar_header();
+    header["crit"] = json!([UNKNOWN_CRIT]);
+    header[UNKNOWN_CRIT] = true.into();
+    let crit = spruce_signed(&header, &payload).await;
+    assert_rejected(
+        lab.wallet.verify_request(&crit, &session.client_id).await,
+        RequestRejection::Malformed,
+    );
+    let four_segments = format!("{jwt}.{}", segments(&jwt)[JWS_SIGNATURE]);
+    assert_rejected(
+        lab.wallet
+            .verify_request(&four_segments, &session.client_id)
+            .await,
+        RequestRejection::Malformed,
+    );
+    lab.server.shutdown().await;
+}
+
+/// L4: with did:key trust the `kid` must be present, a DID URL, and resolve to a key
+/// (OpenID4VP 1.1 §5.9.3); each failure is refused before any signature check.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn wallet_refuses_request_with_missing_or_unresolvable_kid() {
+    let lab = Lab::start(Mode::Hardened).await;
+    let session = lab.session(RouteKind::Unique).await;
+    let payload = decode_json(segments(&lab.raw_request(&session).await)[JWS_PAYLOAD]);
+    let (did, _) = VERIFIER_DID_VM.split_once('#').expect("DID URL");
+
+    let mut header = jar_header();
+    header.as_object_mut().expect("object").remove("kid");
+    let headers = [
+        header.clone(),
+        json!({ "alg": ES256, "typ": JAR_TYP, "kid": did }),
+        json!({ "alg": ES256, "typ": JAR_TYP, "kid": UNRESOLVABLE_KID }),
+    ];
+    for header in headers {
+        let jwt = spruce_signed(&header, &payload).await;
+        assert_rejected(
+            lab.wallet.verify_request(&jwt, &session.client_id).await,
+            RequestRejection::Kid,
+        );
+    }
+    lab.server.shutdown().await;
+}
+
+/// L4: an attacker signs with their own key and names their own did:key as `kid`, so the
+/// signature verifies, but claims the lab's `client_id`: refused, because the signing DID is
+/// not the client_id's (OpenID4VP 1.1 §5.9.3).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn wallet_refuses_attacker_did_key_claiming_the_lab_client_id() {
+    let lab = Lab::start(Mode::Hardened).await;
+    let session = lab.session(RouteKind::Unique).await;
+    let payload = decode_json(segments(&lab.raw_request(&session).await)[JWS_PAYLOAD]);
+    assert_eq!(payload["client_id"], DEFAULT_CLIENT_ID);
+
+    let attacker = wrong_key_jwk();
+    let header = json!({ "alg": ES256, "typ": JAR_TYP, "kid": ssi_did_key_url(&attacker) });
+    let forged = spruce_signed_with(&spruce_signer_for(&attacker), &header, &payload).await;
+    assert_rejected(
+        lab.wallet.verify_request(&forged, &session.client_id).await,
+        RequestRejection::ClientId,
+    );
+    lab.server.shutdown().await;
 }
