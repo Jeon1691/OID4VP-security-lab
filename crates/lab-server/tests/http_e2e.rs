@@ -1252,6 +1252,53 @@ async fn connection_cap_holds_connections_stalled_before_headers() {
     lab.shutdown().await;
 }
 
+/// Header read timeout used by the stalled-header test.
+const SHORT_HEADER_TIMEOUT: Duration = Duration::from_millis(500);
+/// Slack for scheduling jitter on the upper side of the header-timeout assertions.
+const HEADER_TIMEOUT_SLACK: Duration = Duration::from_secs(3);
+/// Bound on how long the test waits for the server to close a stalled connection.
+const STALL_CLOSE_DEADLINE: Duration = Duration::from_secs(10);
+
+/// A client that sends a partial request and stalls is disconnected at about the header read
+/// timeout, and its connection slot frees: with `max_connections = 1` a following request is
+/// served. Not early (the timeout is not a hair trigger), not much later (no indefinite hold).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stalled_header_connection_is_closed_at_the_header_timeout_and_frees_its_slot() {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let mut config = LabConfig::new(Mode::Hardened);
+    config.max_connections = SINGLE_IN_FLIGHT;
+    config.header_read_timeout = SHORT_HEADER_TIMEOUT;
+    let lab = Lab::start_with(config).await;
+
+    let mut stalled = tokio::net::TcpStream::connect(lab.server.local_addr())
+        .await
+        .expect("connect");
+    stalled
+        .write_all(b"GET /health HTTP/1.1\r\nHost: lab\r\nX-Partial: ")
+        .await
+        .expect("send partial headers");
+
+    let started = Instant::now();
+    let mut buf = Vec::new();
+    let closed = tokio::time::timeout(STALL_CLOSE_DEADLINE, stalled.read_to_end(&mut buf)).await;
+    let elapsed = started.elapsed();
+    assert!(closed.is_ok(), "server never closed the stalled connection");
+    assert!(
+        elapsed >= SHORT_HEADER_TIMEOUT / 2
+            && elapsed <= SHORT_HEADER_TIMEOUT + HEADER_TIMEOUT_SLACK,
+        "closed after {elapsed:?}, expected about {SHORT_HEADER_TIMEOUT:?}"
+    );
+
+    let reply = lab
+        .wallet
+        .get(&format!("{}/health", lab.base()))
+        .await
+        .expect("served after the stalled connection's slot freed");
+    assert_eq!(reply.status, OK);
+    lab.shutdown().await;
+}
+
 /// HTTP status of a request cut off by the request timeout (RFC 9110 §15.5.9).
 const HTTP_REQUEST_TIMEOUT: u16 = 408;
 
