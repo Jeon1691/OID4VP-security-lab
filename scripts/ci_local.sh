@@ -216,6 +216,13 @@ REQUIRED_TESTS=(
   memory::candidate_from_another_registry_cannot_claim_its_session
   unreachable_redis_fails_closed_at_connect
   connect_rejects_malformed_namespace
+  # G6 benchmark harness (IMP-015/016): report columns and the reproducible case schedule.
+  tests::csv_rows_have_as_many_fields_as_the_header
+  tests::json_carries_every_column_and_nulls_for_missing_values
+  tests::summary_lists_failed_invariants
+  stats::tests::schedule_is_a_reproducible_permutation
+  stats::tests::percentiles_are_in_microseconds
+  http::tests::positions_dedupe_for_small_n
 )
 
 # Fails unless every named test ran and passed in this stage's log, and at least one test ran.
@@ -353,8 +360,9 @@ advisory_baseline_sync() { diff <(deny_ids) <(audit_ids); }
 
 # Containment: the advisory baseline is accepted only for lab-server's SpruceID tree. The core
 # crates must not reach any of it, directly or transitively (cargo-deny wrappers only cover
-# named crates, so check the resolved graph itself).
-CORE_CRATES=(protocol-model jose-hpke session-core session-redis)
+# named crates, so check the resolved graph itself). evidence-report (G6) is a plain library and
+# held to the same rule; scenario-runner is not, it drives lab-server's wallet simulator (ssi).
+CORE_CRATES=(protocol-model jose-hpke session-core session-redis evidence-report)
 SPRUCE_TREE_RE='^(openid4vp|josekit|ssi|ssi-[a-z0-9-]+|did-[a-z0-9-]+|rsa|im|sized-chunks|bitmaps|smallstr|serde_cbor|derivative|clear_on_drop|proc-macro-error|chrono) '
 core_containment() {
   local c tree hits=0

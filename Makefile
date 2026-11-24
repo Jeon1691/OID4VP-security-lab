@@ -1,4 +1,4 @@
-.PHONY: check test gate gate-redis g0-upstream manifest g0 tools
+.PHONY: check test gate gate-redis bench g0-upstream manifest g0 tools
 
 EVIDENCE ?= evidence/local
 
@@ -17,6 +17,10 @@ gate:
 ## Opt-in redis stage (not part of `gate`): needs $REDIS_URL or Docker
 gate-redis:
 	scripts/ci_local.sh $(EVIDENCE) redis
+
+## G6 benchmark (not a gate stage): evidence/g6/<run-id>/, Redis rows when $REDIS_URL is set
+bench:
+	scripts/bench.sh evidence/g6
 
 ## G0-A/B: reproduce upstream SpruceID CI at the pinned SHA
 g0-upstream:
