@@ -11,8 +11,10 @@
 //! `MemoryRegistry` waits on its lock instead of failing like the upstream `try_lock` store.
 
 use std::collections::HashSet;
+use std::io::{Read as _, Write as _};
 use std::net::SocketAddr;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use jose_hpke::Error as JweError;
 use lab_server::wallet_sim::{CreatedSession, KidChoice, SealOptions, WalletSim};
@@ -33,6 +35,7 @@ const BAD_REQUEST: u16 = 400;
 const NOT_FOUND: u16 = 404;
 const PAYLOAD_TOO_LARGE: u16 = 413;
 const UNSUPPORTED_MEDIA_TYPE: u16 = 415;
+const SERVICE_UNAVAILABLE: u16 = 503;
 /// Session counts for the shared-route scenarios (plan HTTP-04 / session-core resolution).
 const TRIAL_SIZES: [usize; 3] = [2, 8, 32];
 /// Concurrent duplicate POSTs (plan STATE-02).
@@ -45,6 +48,18 @@ const FOREIGN_CLIENT_ID: &str = "decentralized_identifier:did:key:zDnaeForeignSy
 const SHORT_TTL: Duration = Duration::from_millis(50);
 const FAST_SWEEP: Duration = Duration::from_millis(20);
 const EXPIRY_WAIT: Duration = Duration::from_millis(400);
+/// Load-limit test: one request in flight, a short timeout, and a deadline for observing the
+/// saturated state.
+const SINGLE_IN_FLIGHT: usize = 1;
+const SHORT_REQUEST_TIMEOUT: Duration = Duration::from_millis(500);
+const SATURATION_DEADLINE: Duration = Duration::from_secs(5);
+const POLL_INTERVAL: Duration = Duration::from_millis(10);
+/// Request Timeout (RFC 9110 §15.5.9), answered for a body that never arrives.
+const REQUEST_TIMEOUT_STATUS: &str = "HTTP/1.1 408";
+/// Presentation member the lab never defines, and a value that pushes the vp_token past
+/// `MAX_COMMITTED_VP_TOKEN_BYTES`.
+const EXTRA_MEMBER: &str = "extra";
+const OVERSIZE_FILLER: usize = lab_server::MAX_COMMITTED_VP_TOKEN_BYTES + 1;
 
 struct Lab {
     server: LabServer,
@@ -86,7 +101,7 @@ impl Lab {
 
     async fn state(&self, session: &CreatedSession) -> Option<String> {
         self.wallet
-            .session_state(&self.base(), &session.session_id)
+            .session_state(&session.result_uri)
             .await
             .expect("result endpoint answers")
     }
@@ -278,10 +293,7 @@ async fn unique_kid_on_shared_route_yields_one_candidate_and_one_attempt() {
     let (_, status, body) = lab.respond(other, &opts).await;
     assert_generic(status, &body);
     let record = lab.record();
-    assert_eq!(
-        record.rejection,
-        Some(Rejection::Resolve(ResolveError::MissingKid))
-    );
+    assert_eq!(record.rejection, Some(Rejection::MissingKid));
     assert_eq!(record.hpke_attempts, 0);
     lab.assert_pending(other).await;
     lab.shutdown().await;
@@ -304,7 +316,6 @@ async fn bounded_trial_succeeds_with_right_session_last_within_budget() {
             ResolutionStrategy::BoundedTrial(CandidateBudget::new(n).expect("budget"))
         );
         assert_eq!(record.candidate_count, n);
-        assert!(record.hpke_attempts <= n);
         assert_eq!(
             record.hpke_attempts, n,
             "bounded trial tries every candidate"
@@ -583,12 +594,16 @@ async fn concurrent_identical_posts_consume_exactly_once() {
             .seal(&request, &SealOptions::default())
             .expect("seal");
 
+        // Release every POST at once, so they race through resolve and claim together.
+        let barrier = Arc::new(tokio::sync::Barrier::new(k));
         let mut tasks = Vec::with_capacity(k);
         for _ in 0..k {
             let wallet = lab.wallet.clone();
             let uri = request.response_uri.clone();
             let jwe = jwe.clone();
+            let barrier = Arc::clone(&barrier);
             tasks.push(tokio::spawn(async move {
+                barrier.wait().await;
                 wallet.post_response(&uri, &jwe).await.expect("post")
             }));
         }
@@ -610,6 +625,24 @@ async fn concurrent_identical_posts_consume_exactly_once() {
             .filter(|r| r.commit_result == CommitResult::Committed)
             .count();
         assert_eq!(committed, 1, "k = {k}");
+        let claim_replays = records
+            .iter()
+            .filter(|r| {
+                r.rejection
+                    == Some(Rejection::Claim(ClaimError::Replay {
+                        same_response: true,
+                    }))
+            })
+            .count();
+        println!("k = {k}: {claim_replays} losers rejected at claim, the rest at resolve");
+        if k == CONCURRENCY_LEVELS[CONCURRENCY_LEVELS.len() - 1] {
+            // Losers that resolved before the commit reach the atomic claim and lose there; with
+            // 128 simultaneous POSTs and HPKE between resolve and claim, some always do.
+            assert!(
+                claim_replays >= 1,
+                "no loser reached the claim: {records:?}"
+            );
+        }
         for r in records
             .iter()
             .filter(|r| r.commit_result != CommitResult::Committed)
@@ -815,32 +848,51 @@ async fn hardened_mode_has_no_shared_route() {
     lab.shutdown().await;
 }
 
-/// Research mode (shared URI / bounded trial) binds to loopback only, checked before binding.
+/// Every mode binds loopback only (lab policy until an ADR allows more), checked before
+/// binding, with `IpAddr::is_loopback` semantics: `127.0.0.0/8` and `::1` pass; the
+/// IPv4-mapped `::ffff:127.0.0.1` is not loopback under that definition and is refused, like
+/// the unspecified addresses and a LAN address.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn research_mode_refuses_non_loopback_bind() {
-    let unspecified: SocketAddr = "0.0.0.0:0".parse().expect("addr");
-    let test_net: SocketAddr = "192.0.2.1:0".parse().expect("addr");
-    for strategy in [
-        SharedRouteStrategy::UniqueKid,
-        SharedRouteStrategy::BoundedTrial(CandidateBudget::new(2).expect("budget")),
-    ] {
-        for bind in [unspecified, test_net] {
-            let mut config = LabConfig::new(research(strategy));
-            config.bind = bind;
+async fn every_mode_binds_loopback_only() {
+    let modes = [
+        Mode::Hardened,
+        research(SharedRouteStrategy::UniqueKid),
+        trial(TRIAL_SIZES[0]),
+    ];
+    let refused = [
+        "0.0.0.0:0",
+        "[::]:0",
+        "192.168.1.10:0",
+        "[::ffff:127.0.0.1]:0",
+    ];
+    // `None` = the host has no IPv6 loopback, so binding `::1` must fail at bind, not policy.
+    let ipv6_available = std::net::TcpListener::bind("[::1]:0").is_ok();
+    for mode in modes {
+        for bind in refused {
+            let mut config = LabConfig::new(mode);
+            config.bind = bind.parse().expect("addr");
             match LabServer::start(config).await {
-                Err(StartError::ResearchRequiresLoopback) => {}
-                Err(other) => panic!("unexpected error for {bind}: {other:?}"),
+                Err(StartError::LoopbackOnly) => {}
+                Err(other) => panic!("{mode:?} {bind}: unexpected error {other:?}"),
                 Ok(server) => {
                     server.shutdown().await;
-                    panic!("research mode bound {bind}");
+                    panic!("{mode:?} bound non-loopback {bind}");
                 }
             }
         }
-    }
-    let mut config = LabConfig::new(Mode::Research(SharedRouteStrategy::UniqueKid));
-    config.bind = "[::1]:0".parse().expect("addr");
-    if let Ok(server) = LabServer::start(config).await {
-        server.shutdown().await;
+        for bind in ["127.0.0.1:0", "[::1]:0"] {
+            let want: SocketAddr = bind.parse().expect("addr");
+            let mut config = LabConfig::new(mode);
+            config.bind = want;
+            match LabServer::start(config).await {
+                Ok(server) => {
+                    assert_eq!(server.local_addr().ip(), want.ip(), "{mode:?}");
+                    server.shutdown().await;
+                }
+                Err(StartError::Bind(_)) if want.is_ipv6() && !ipv6_available => {}
+                Err(other) => panic!("{mode:?} {bind}: loopback refused: {other:?}"),
+            }
+        }
     }
 }
 
@@ -876,5 +928,150 @@ async fn sweep_expires_and_purges_stale_sessions() {
         lab.record().rejection,
         Some(Rejection::Resolve(_))
     ));
+    lab.shutdown().await;
+}
+
+/// M1: the synthetic presentation carries only `nonce` and `aud`, and the committed vp_token is
+/// size-capped; neither an extra member nor an oversized one is committed or consumes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn presentation_with_extra_or_oversized_members_is_rejected_and_does_not_consume() {
+    let lab = Lab::start(Mode::Hardened).await;
+    let session = lab.session(RouteKind::Unique).await;
+    let cases = [
+        (
+            "x".to_owned(),
+            ValidationError::UnexpectedPresentationMember,
+        ),
+        (
+            "x".repeat(OVERSIZE_FILLER),
+            ValidationError::VpTokenTooLarge,
+        ),
+    ];
+    for (value, want) in cases {
+        let opts = SealOptions {
+            presentation_extra: vec![(EXTRA_MEMBER.to_owned(), value)],
+            ..SealOptions::default()
+        };
+        let (_, status, body) = lab.respond(&session, &opts).await;
+        assert_generic(status, &body);
+        let record = lab.record();
+        assert_eq!(record.crypto_result, CryptoResult::Opened { opened: 1 });
+        assert_eq!(record.rejection, Some(Rejection::Validation(want)));
+        lab.assert_pending(&session).await;
+    }
+    let (_, status, _) = lab.respond(&session, &SealOptions::default()).await;
+    assert_success(status);
+    assert_committed(&lab.record(), &session);
+    lab.shutdown().await;
+}
+
+/// M2: results are served only under the result token returned at session creation; the
+/// session id that appears in the request_uri unlocks nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn results_are_served_only_by_result_token() {
+    let lab = Lab::start(Mode::Hardened).await;
+    let session = lab.session(RouteKind::Unique).await;
+    assert!(
+        !session.result_uri.contains(&session.session_id),
+        "result token is not derived from the session id"
+    );
+    assert!(
+        session
+            .result_uri
+            .starts_with(&format!("{}/lab/v1/results/", lab.base()))
+    );
+    lab.assert_pending(&session).await;
+    for guess in [
+        format!("{}/lab/v1/results/{}", lab.base(), session.session_id),
+        format!(
+            "{}/lab/v1/sessions/{}/result",
+            lab.base(),
+            session.session_id
+        ),
+    ] {
+        let reply = lab.wallet.get(&guess).await.expect("get");
+        assert_eq!(reply.status, NOT_FOUND, "{guess}");
+    }
+    lab.shutdown().await;
+}
+
+/// L5: every route requires a `kid` (the lab always advertises one, OpenID4VP 1.1 §8.3);
+/// without it the response is refused before any HPKE attempt.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn jwe_without_kid_is_rejected_on_every_route() {
+    let opts = SealOptions {
+        kid: KidChoice::Omit,
+        ..SealOptions::default()
+    };
+    for (mode, route) in [
+        (Mode::Hardened, RouteKind::Unique),
+        (research(SharedRouteStrategy::UniqueKid), RouteKind::Shared),
+        (trial(TRIAL_SIZES[0]), RouteKind::Shared),
+    ] {
+        let lab = Lab::start(mode).await;
+        let session = lab.session(route).await;
+        let (_, status, body) = lab.respond(&session, &opts).await;
+        assert_generic(status, &body);
+        let record = lab.record();
+        assert_eq!(record.rejection, Some(Rejection::MissingKid), "{mode:?}");
+        assert_eq!(record.hpke_attempts, 0, "{mode:?}");
+        assert_eq!(record.candidate_count, 0, "{mode:?}");
+        lab.assert_pending(&session).await;
+        lab.shutdown().await;
+    }
+}
+
+/// L3: the in-flight limit sheds load with 503 (except `/health`, which stays responsive), and
+/// a request whose body never arrives is answered 408 at the request timeout, freeing its slot.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn request_limit_sheds_load_and_times_out_stalled_bodies() {
+    let mut config = LabConfig::new(Mode::Hardened);
+    config.max_in_flight_requests = SINGLE_IN_FLIGHT;
+    config.request_timeout = SHORT_REQUEST_TIMEOUT;
+    let lab = Lab::start_with(config).await;
+
+    // Headers announce a body that is never sent: the request holds the only slot.
+    let mut stalled = std::net::TcpStream::connect(lab.server.local_addr()).expect("connect");
+    stalled
+        .write_all(
+            b"POST /lab/v1/sessions HTTP/1.1\r\nHost: lab\r\n\
+              Content-Type: application/json\r\nContent-Length: 64\r\n\r\n",
+        )
+        .expect("write headers");
+
+    let deadline = Instant::now() + SATURATION_DEADLINE;
+    loop {
+        match lab
+            .wallet
+            .create_session(&lab.base(), RouteKind::Unique, None)
+            .await
+        {
+            Err(lab_server::wallet_sim::WalletError::Status(SERVICE_UNAVAILABLE)) => break,
+            Ok(_) => {}
+            Err(other) => panic!("unexpected: {other:?}"),
+        }
+        assert!(Instant::now() < deadline, "limit never engaged");
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+    let health = format!("{}/health", lab.base());
+    assert_eq!(lab.wallet.get(&health).await.expect("health").status, OK);
+
+    let answer = tokio::task::spawn_blocking(move || {
+        stalled
+            .set_read_timeout(Some(SATURATION_DEADLINE))
+            .expect("read timeout");
+        let mut buf = [0u8; 64];
+        let n = stalled.read(&mut buf).expect("stalled request is answered");
+        String::from_utf8_lossy(&buf[..n]).into_owned()
+    })
+    .await
+    .expect("reader");
+    assert!(answer.starts_with(REQUEST_TIMEOUT_STATUS), "{answer}");
+
+    // The slot is free again.
+    lab.wallet
+        .create_session(&lab.base(), RouteKind::Unique, None)
+        .await
+        .expect("accepted after the stalled request timed out");
     lab.shutdown().await;
 }
