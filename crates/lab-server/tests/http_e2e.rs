@@ -1252,6 +1252,11 @@ async fn connection_cap_holds_connections_stalled_before_headers() {
     lab.shutdown().await;
 }
 
+/// Connection cap of the stalled-header test: one slot, so a second connection is served only
+/// after the stalled one is closed.
+const STALL_TEST_MAX_CONNECTIONS: usize = 1;
+/// The server must not close before this fraction of the header timeout has elapsed.
+const HEADER_TIMEOUT_LOWER_BOUND_DIVISOR: u32 = 2;
 /// Header read timeout used by the stalled-header test.
 const SHORT_HEADER_TIMEOUT: Duration = Duration::from_millis(500);
 /// Slack for scheduling jitter on the upper side of the header-timeout assertions.
@@ -1267,7 +1272,7 @@ async fn stalled_header_connection_is_closed_at_the_header_timeout_and_frees_its
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
     let mut config = LabConfig::new(Mode::Hardened);
-    config.max_connections = SINGLE_IN_FLIGHT;
+    config.max_connections = STALL_TEST_MAX_CONNECTIONS;
     config.header_read_timeout = SHORT_HEADER_TIMEOUT;
     let lab = Lab::start_with(config).await;
 
@@ -1285,7 +1290,7 @@ async fn stalled_header_connection_is_closed_at_the_header_timeout_and_frees_its
     let elapsed = started.elapsed();
     assert!(closed.is_ok(), "server never closed the stalled connection");
     assert!(
-        elapsed >= SHORT_HEADER_TIMEOUT / 2
+        elapsed >= SHORT_HEADER_TIMEOUT / HEADER_TIMEOUT_LOWER_BOUND_DIVISOR
             && elapsed <= SHORT_HEADER_TIMEOUT + HEADER_TIMEOUT_SLACK,
         "closed after {elapsed:?}, expected about {SHORT_HEADER_TIMEOUT:?}"
     );

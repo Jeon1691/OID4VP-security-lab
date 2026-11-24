@@ -272,7 +272,7 @@ pub struct LabServer {
     state: Arc<AppState>,
     shutdown_drain: Duration,
     stop: oneshot::Sender<()>,
-    serve: JoinHandle<std::io::Result<()>>,
+    serve: JoinHandle<()>,
     sweep: JoinHandle<()>,
 }
 
@@ -292,9 +292,10 @@ struct CappedListener {
 }
 
 impl CappedListener {
-    /// Waits for a free slot, then for a connection. Accept errors (typically descriptor
-    /// exhaustion or a connection reset before accept) are retried after
-    /// [`ACCEPT_ERROR_BACKOFF`], as `axum::serve` does.
+    /// Waits for a free slot, then for a connection. Connection-level errors (aborted, reset
+    /// or refused before accept) concern one peer and are retried at once; any other error
+    /// (typically descriptor exhaustion) is retried after [`ACCEPT_ERROR_BACKOFF`], as
+    /// `axum::serve` does.
     async fn accept(&self) -> CappedStream {
         // The semaphore is never closed, so acquiring only waits.
         let Ok(permit) = Arc::clone(&self.slots).acquire_owned().await else {
@@ -308,13 +309,24 @@ impl CappedListener {
                         _permit: permit,
                     };
                 }
+                Err(e) if is_connection_error(&e) => {}
                 Err(_) => tokio::time::sleep(ACCEPT_ERROR_BACKOFF).await,
             }
         }
     }
 }
 
-/// Pause after a failed `accept` so a persistent error (descriptor exhaustion) does not spin.
+/// Whether an `accept` error only concerns the one connection that failed.
+fn is_connection_error(e: &std::io::Error) -> bool {
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::ConnectionRefused
+    )
+}
+
+/// Pause after a non-connection `accept` error so a persistent error (descriptor exhaustion) does not spin.
 const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_secs(1);
 
 /// An accepted connection and its slot.
@@ -456,11 +468,11 @@ impl LabServer {
     /// Runs until the serve loop ends.
     ///
     /// # Errors
-    /// The serve loop's I/O error, or a panic of it as `std::io::Error`.
+    /// A panic of the serve loop, as `std::io::Error`.
     pub async fn wait(self) -> std::io::Result<()> {
-        let result = self.serve.await.map_err(std::io::Error::other)?;
+        self.serve.await.map_err(std::io::Error::other)?;
         self.sweep.abort();
-        result
+        Ok(())
     }
 
     /// Research instrumentation (`lab-instrumentation` feature only): takes every decryption
@@ -510,8 +522,8 @@ impl LabServer {
         *state.commits_open.write().await = false;
         sweep.abort();
         match drained {
-            Ok(Ok(result)) if exited_early => panic!("lab server exited early: {result:?}"),
-            Ok(Ok(_)) => {}
+            Ok(Ok(())) if exited_early => panic!("lab server exited early"),
+            Ok(Ok(())) => {}
             Ok(Err(e)) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
             Ok(Err(_)) => {}
             Err(_) => serve.abort(),
@@ -533,7 +545,7 @@ async fn serve(
     app: Router,
     header_read_timeout: Duration,
     stopped: oneshot::Receiver<()>,
-) -> std::io::Result<()> {
+) {
     let graceful = GracefulShutdown::new();
     let mut http = http1::Builder::new();
     http.timer(TokioTimer::new())
@@ -553,7 +565,6 @@ async fn serve(
         });
     }
     graceful.shutdown().await;
-    Ok(())
 }
 
 fn registry(route_policy: RoutePolicy) -> Registry {
