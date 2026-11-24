@@ -144,7 +144,7 @@ REQUIRED_TESTS=(
   generic_rejection_bodies_are_byte_identical
   hardened_mode_has_no_shared_route
   every_mode_binds_loopback_only
-  presentation_with_extra_or_oversized_members_is_rejected_and_does_not_consume
+  malformed_or_oversized_vp_token_is_rejected_and_does_not_consume
   results_are_served_only_by_result_token
   jwe_without_kid_is_rejected_on_every_route
   request_limit_sheds_load_and_times_out_stalled_bodies
@@ -154,6 +154,47 @@ REQUIRED_TESTS=(
   connection_cap_holds_connections_stalled_before_headers
   stalled_header_connection_is_closed_at_the_header_timeout_and_frees_its_slot
   sweep_expires_and_purges_stale_sessions
+  # lab-server holder binding (Evidence level 3): SD-JWT VC + KB-JWT (OpenID4VP 1.1 B.3;
+  # RFC 9901 §7.1/§7.3; draft-ietf-oauth-sd-jwt-vc-27), over HTTP and against RFC 9901 vectors.
+  request_object_dcql_query_requests_the_sd_jwt_vc_and_its_claims
+  honest_sd_jwt_kb_presentation_commits_only_the_requested_claims
+  kb_jwt_with_wrong_aud_is_rejected
+  kb_jwt_with_wrong_nonce_is_rejected
+  kb_jwt_with_stale_iat_is_rejected
+  kb_jwt_with_future_iat_is_rejected
+  kb_jwt_with_wrong_sd_hash_is_rejected
+  kb_jwt_signed_by_a_non_cnf_key_is_rejected
+  kb_jwt_with_alg_none_is_rejected
+  presentation_without_kb_jwt_is_rejected
+  disclosure_altered_in_transit_is_rejected
+  unreferenced_disclosure_is_rejected
+  duplicate_disclosure_is_rejected
+  withheld_requested_claim_is_rejected
+  unrequested_disclosed_claim_is_rejected
+  credential_signed_by_an_untrusted_issuer_is_rejected
+  issuer_jwt_with_alg_none_is_rejected
+  valid_kb_jwt_replayed_to_another_session_fails_the_nonce_binding
+  valid_kb_jwt_replayed_to_another_verifier_fails_the_audience_binding
+  sd_jwt_kb_built_with_ssi_is_accepted_by_the_lab_verifier
+  ssi_kb_jwt_payload_with_null_exp_is_rejected_as_malformed
+  lab_wallet_presentation_verifies_with_ssi
+  trusted_issuer_key_config_accepts_only_p256_public_jwks
+  rfc9901_fixture_provenance_is_pinned
+  rfc9901_disclosure_digests_match_the_printed_hashes
+  rfc9901_section_5_2_presentation_verifies_and_yields_the_printed_payload
+  rfc9901_appendix_a3_sd_jwt_vc_passes_the_lab_profile
+  rfc9901_examples_fail_closed_on_wrong_binding_issuer_or_profile
+  rfc9901_presentation_edits_are_rejected
+  sd_jwt::tests::object_array_and_recursive_disclosures_are_reconstructed_and_decoys_dropped
+  sd_jwt::tests::duplicate_digest_and_claim_name_collision_are_rejected
+  sd_jwt::tests::duplicate_unreferenced_and_reserved_disclosures_are_rejected
+  sd_jwt::tests::disclosure_shape_must_match_where_its_digest_is_found
+  sd_jwt::tests::sd_alg_and_payload_structure_are_strict
+  sd_jwt::tests::issuer_jwt_policy_and_validity_are_enforced
+  sd_jwt::tests::key_binding_jwt_claims_and_header_are_enforced
+  sd_jwt::tests::sizes_and_counts_are_bounded_before_any_crypto
+  sd_jwt::tests::sd_jwt_vc_profile_enforces_vct_and_exactly_the_requested_claims
+  jose::tests::strict_json_refuses_duplicate_members_at_any_depth
   # session-redis (IMP-014): the shared contract suite on MemoryRegistry, and the fail-closed
   # checks that need no server. The Redis side runs in the redis stage.
   memory::unique_uri_yields_exactly_one_candidate_among_sessions_sharing_kid
