@@ -162,6 +162,7 @@ REQUIRED_TESTS=(
   memory::sequential_replay_after_consume_is_rejected
   memory::insert_beyond_pending_capacity_is_rejected
   memory::consumed_records_are_purged_after_retention
+  memory::candidate_from_another_registry_cannot_claim_its_session
   unreachable_redis_fails_closed_at_connect
   connect_rejects_malformed_namespace
 )
@@ -221,6 +222,7 @@ REDIS_REQUIRED_TESTS=(
   redis::insert_rejects_duplicate_id_and_zero_ttl
   redis::snapshots_are_point_in_time_copies
   redis::snapshot_round_trips_every_field
+  redis::candidate_from_another_registry_cannot_claim_its_session
   # STATE-03: two workers (separate connections) racing 2/16/128-way.
   two_workers_racing_claims_commit_exactly_once
   # STATE-05: fail closed, no in-memory fallback.
@@ -237,6 +239,10 @@ REDIS_REQUIRED_TESTS=(
   due_keys_are_dropped_while_redis_is_unreachable
   refused_insert_drops_its_key_immediately
   key_table_growth_is_bounded_during_an_outage
+  # Candidates are bound to their namespace; expiry is judged on Redis server time.
+  candidate_from_another_namespace_cannot_claim_its_session
+  server_time_mode_inserts_resolves_claims_and_sweeps
+  claim_delayed_past_the_ttl_in_transit_is_not_committed
   redis_matches_memory_registry_on_random_operation_sequences
 )
 
