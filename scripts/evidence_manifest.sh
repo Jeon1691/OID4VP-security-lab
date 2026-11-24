@@ -19,12 +19,15 @@ sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum 
 export M_OUT="$OUT"
 M_SPRUCE_SHA="$(sed -n 's/^openid4vp = .*rev = "\([0-9a-f]*\)".*/\1/p' Cargo.toml)"
 M_LAB_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+# Git tree object of crates/ at HEAD: identical for identical crate sources, so a run stays
+# attributable after a rebase or squash changes the commit SHA (read with lab_source_dirty).
+M_CRATES_TREE="$(git rev-parse HEAD:crates 2>/dev/null || echo unknown)"
 # Evidence files are rewritten by the run being recorded; they do not make the source dirty.
 M_DIRTY="$([[ -n "$(git status --porcelain -- . ':(exclude)evidence' 2>/dev/null)" ]] && echo true || echo false)"
 M_LOCK_SHA="$(sha256 Cargo.lock)"
 M_UPSTREAM_LOCK_SHA="$([[ -f "$OUT/upstream.Cargo.lock" ]] && sha256 "$OUT/upstream.Cargo.lock" || echo none)"
 
-export M_SPRUCE_SHA M_LAB_SHA M_DIRTY M_LOCK_SHA M_UPSTREAM_LOCK_SHA
+export M_SPRUCE_SHA M_LAB_SHA M_CRATES_TREE M_DIRTY M_LOCK_SHA M_UPSTREAM_LOCK_SHA
 
 python3 -I - <<'EOF'
 import datetime, glob, json, os, platform, re, subprocess
@@ -99,6 +102,7 @@ if env.get("GITHUB_ACTIONS") == "true":
 manifest = {
     "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
     "lab_git_sha": env["M_LAB_SHA"],
+    "lab_crates_tree": env["M_CRATES_TREE"],
     "lab_source_dirty": env["M_DIRTY"] == "true",
     "spruce_openid4vp_sha": env["M_SPRUCE_SHA"],
     "cargo_lock_sha256": env["M_LOCK_SHA"],
