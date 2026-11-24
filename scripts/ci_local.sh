@@ -102,6 +102,23 @@ REQUIRED_TESTS=(
   consumed_records_are_purged_after_retention
   unique_route_policy_rejects_duplicate_route_token
   route_token_parse_rejects_malformed_input
+  # lab-server HPKE-0 HTTP path (IMP-008..010): G2/G3/G4.
+  unique_uri_form_post_succeeds_with_one_hpke_attempt
+  unique_uri_among_many_sessions_consumes_only_the_addressed_one
+  request_object_carries_exact_wire_values
+  unique_kid_on_shared_route_yields_one_candidate_and_one_attempt
+  bounded_trial_succeeds_with_right_session_last_within_budget
+  bounded_trial_over_budget_is_rejected_without_decryption
+  bounded_trial_with_two_validating_sessions_is_an_integrity_failure
+  admission_failures_are_rejected_before_decryption
+  jwe_bound_to_another_sessions_values_fails
+  sequential_replay_is_rejected
+  concurrent_identical_posts_consume_exactly_once
+  invalid_jwe_does_not_consume_the_session
+  generic_rejection_bodies_are_byte_identical
+  hardened_mode_has_no_shared_route
+  research_mode_refuses_non_loopback_bind
+  sweep_expires_and_purges_stale_sessions
 )
 
 stage_test() {
@@ -149,10 +166,24 @@ core_containment() {
   return "$hits"
 }
 
+# The Verifier build (lab-server default features, which the binary uses) must not contain
+# sender-side sealing: jose-hpke `test-support` and the wallet simulator's HTTP client are only
+# reachable through the `wallet-sim` feature that tests enable.
+verifier_without_sealing() {
+  local features normal
+  features="$(cargo tree --locked -p lab-server -e normal,features -i jose-hpke)" || return 1
+  normal="$(cargo tree --locked -p lab-server -e normal --prefix none)" || return 1
+  if grep -F 'feature "test-support"' <<<"$features" || grep -E '^reqwest ' <<<"$normal"; then
+    echo "sealing reachable from the default lab-server build"
+    return 1
+  fi
+}
+
 stage_supply_chain() {
   step deny cargo deny --locked check advisories licenses bans sources
   step advisory_baseline_sync advisory_baseline_sync
   step core_containment core_containment
+  step verifier_without_sealing verifier_without_sealing
   step audit cargo audit --deny warnings
 }
 
