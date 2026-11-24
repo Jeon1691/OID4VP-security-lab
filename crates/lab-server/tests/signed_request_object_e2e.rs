@@ -199,7 +199,10 @@ async fn request_uri_serves_signed_jar_with_spec_header_and_claims() {
     assert_eq!(payload["client_id"], DEFAULT_CLIENT_ID);
     assert_eq!(payload["response_mode"], "direct_post.jwt");
     assert_eq!(payload["response_type"], "vp_token");
-    assert_eq!(payload["client_metadata"]["jwks"]["keys"][0]["alg"], "HPKE-0");
+    assert_eq!(
+        payload["client_metadata"]["jwks"]["keys"][0]["alg"],
+        "HPKE-0"
+    );
     assert!(payload.get("iss").is_none());
 
     let request = lab
@@ -400,8 +403,8 @@ async fn wallet_refuses_request_signed_with_wrong_key() {
         pinned.fetch_request(&session).await,
         RequestRejection::Signature,
     );
-    let pinned_right = WalletSim::with_pinned_verifier_key(&fixture_public_jwk())
-        .expect("pinned wallet builds");
+    let pinned_right =
+        WalletSim::with_pinned_verifier_key(&fixture_public_jwk()).expect("pinned wallet builds");
     pinned_right
         .fetch_request(&session)
         .await

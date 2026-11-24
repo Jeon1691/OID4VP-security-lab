@@ -43,19 +43,28 @@ The gate fails if zero tests ran. Logs are stripped of absolute paths before the
 ### Lab server
 
 ```bash
-cargo run -p lab-server -- --mode hardened --bind 127.0.0.1:8080
-cargo run -p lab-server -- --mode research-trial=8      # shared route, bounded trial
-cargo run -p lab-server -- --mode research-kid          # shared route, unique kid
+KEY=crates/lab-server/tests/fixtures/spruce_verifier.jwk   # synthetic fixture, explicit opt-in
+cargo run -p lab-server -- --signing-key $KEY --mode hardened --bind 127.0.0.1:8080
+cargo run -p lab-server -- --signing-key $KEY --mode research-trial=8  # shared route, bounded trial
+cargo run -p lab-server -- --signing-key $KEY --mode research-kid      # shared route, unique kid
 ```
+
+`--signing-key` (or `LAB_SIGNING_KEY`) is required: the EC P-256 private JWK that signs every
+Request Object. No key is compiled into any build; the fixture above matches the default
+`client_id` (`decentralized_identifier:did:key:zDnaeaDj…`). Another key needs the matching
+did:key as `--client-id`.
 
 Every mode binds loopback only; a non-loopback deployment needs an explicit ADR first.
 Release binaries come from a plain `cargo build -p lab-server --release`: builds that include
 test targets unify the test-only `wallet-sim` feature (sealing) into the library.
 
 Endpoints, modes, the per-POST pipeline and the evidence records are documented in
-`crates/lab-server/src/lib.rs`. Request objects are **unsigned** for now; JAR signing is a
-follow-up and must sign the stored `client_id` / `nonce` / `response_uri` unchanged (they are
-the HPKE `session_info` inputs). Presentation validation is synthetic (Evidence level 2):
+`crates/lab-server/src/lib.rs`. Request objects are signed JWTs (JAR, RFC 9101; OpenID4VP 1.1
+§5): `GET request_uri` answers `application/oauth-authz-req+jwt` with an ES256 JWS (`typ`
+`oauth-authz-req+jwt`, did:key `kid`, `aud` `https://self-issued.me/v2`). It is signed once over
+the stored `client_id` / `nonce` / `response_uri` (the HPKE `session_info` inputs), which tests
+pin byte-equal on every route. The wallet simulator verifies the signature against the did:key
+of the `client_id` (ssi resolver) and uses only the verified payload. Presentation validation is synthetic (Evidence level 2):
 `nonce` and `aud` must match the session, HPKE decryption alone is never holder
 authentication, and KB-JWT holder binding is out of scope for this wave.
 

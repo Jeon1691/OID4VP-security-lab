@@ -129,7 +129,7 @@ impl Lab {
     ) -> (String, u16, Vec<u8>) {
         let request = self
             .wallet
-            .fetch_request(&session)
+            .fetch_request(session)
             .await
             .expect("request object is served");
         let jwe = self.wallet.seal(&request, opts).expect("wallet seals");
@@ -242,16 +242,8 @@ async fn request_object_carries_exact_wire_values() {
     let lab = Lab::start(Mode::Hardened).await;
     let a = lab.session(RouteKind::Unique).await;
     let b = lab.session(RouteKind::Unique).await;
-    let ra = lab
-        .wallet
-        .fetch_request(&a)
-        .await
-        .expect("request a");
-    let rb = lab
-        .wallet
-        .fetch_request(&b)
-        .await
-        .expect("request b");
+    let ra = lab.wallet.fetch_request(&a).await.expect("request a");
+    let rb = lab.wallet.fetch_request(&b).await.expect("request b");
 
     let prefix = format!("{}/lab/v1/response/", lab.base());
     assert!(ra.response_uri.starts_with(&prefix), "{}", ra.response_uri);
@@ -413,11 +405,7 @@ async fn bounded_trial_with_two_validating_sessions_is_an_integrity_failure() {
 async fn admission_failures_are_rejected_before_decryption() {
     let lab = Lab::start(Mode::Hardened).await;
     let session = lab.session(RouteKind::Unique).await;
-    let request = lab
-        .wallet
-        .fetch_request(&session)
-        .await
-        .expect("request");
+    let request = lab.wallet.fetch_request(&session).await.expect("request");
     let jwe = lab
         .wallet
         .seal(&request, &SealOptions::default())
@@ -508,11 +496,7 @@ async fn jwe_bound_to_another_sessions_values_fails() {
     let lab = Lab::start(Mode::Hardened).await;
     let a = lab.session(RouteKind::Unique).await;
     let b = lab.session(RouteKind::Unique).await;
-    let rb = lab
-        .wallet
-        .fetch_request(&b)
-        .await
-        .expect("request b");
+    let rb = lab.wallet.fetch_request(&b).await.expect("request b");
 
     let cases = [
         (
@@ -595,11 +579,7 @@ async fn concurrent_identical_posts_consume_exactly_once() {
     for k in CONCURRENCY_LEVELS {
         let lab = Lab::start(Mode::Hardened).await;
         let session = lab.session(RouteKind::Unique).await;
-        let request = lab
-            .wallet
-            .fetch_request(&session)
-            .await
-            .expect("request");
+        let request = lab.wallet.fetch_request(&session).await.expect("request");
         let jwe = lab
             .wallet
             .seal(&request, &SealOptions::default())
@@ -735,11 +715,7 @@ async fn invalid_jwe_does_not_consume_the_session() {
 async fn generic_rejection_bodies_are_byte_identical() {
     let lab = Lab::start(Mode::Hardened).await;
     let session = lab.session(RouteKind::Unique).await;
-    let request = lab
-        .wallet
-        .fetch_request(&session)
-        .await
-        .expect("request");
+    let request = lab.wallet.fetch_request(&session).await.expect("request");
     let mut bodies = Vec::new();
 
     // Resolve: a well-formed route token no session was issued with.
@@ -827,11 +803,7 @@ async fn generic_rejection_bodies_are_byte_identical() {
 async fn hardened_mode_has_no_shared_route() {
     let lab = Lab::start(Mode::Hardened).await;
     let session = lab.session(RouteKind::Unique).await;
-    let request = lab
-        .wallet
-        .fetch_request(&session)
-        .await
-        .expect("request");
+    let request = lab.wallet.fetch_request(&session).await.expect("request");
     let jwe = lab
         .wallet
         .seal(&request, &SealOptions::default())
@@ -915,11 +887,7 @@ async fn sweep_expires_and_purges_stale_sessions() {
     config.sweep_interval = FAST_SWEEP;
     let lab = Lab::start_with(config).await;
     let session = lab.session(RouteKind::Unique).await;
-    let request = lab
-        .wallet
-        .fetch_request(&session)
-        .await
-        .expect("request");
+    let request = lab.wallet.fetch_request(&session).await.expect("request");
     let jwe = lab
         .wallet
         .seal(&request, &SealOptions::default())
@@ -1196,11 +1164,7 @@ async fn shutdown_drains_in_flight_requests_and_commits_nothing_afterwards() {
         config.shutdown_drain = SHORT_DRAIN;
         let lab = Lab::start_with(config).await;
         let session = lab.session(RouteKind::Unique).await;
-        let request = lab
-            .wallet
-            .fetch_request(&session)
-            .await
-            .expect("request");
+        let request = lab.wallet.fetch_request(&session).await.expect("request");
         let jwe = lab
             .wallet
             .seal(&request, &SealOptions::default())
@@ -1332,11 +1296,7 @@ async fn timed_out_parked_post_is_no_longer_counted_as_parked() {
     config.request_timeout = SHORT_REQUEST_TIMEOUT;
     let lab = Lab::start_with(config).await;
     let session = lab.session(RouteKind::Unique).await;
-    let request = lab
-        .wallet
-        .fetch_request(&session)
-        .await
-        .expect("request");
+    let request = lab.wallet.fetch_request(&session).await.expect("request");
     let jwe = lab
         .wallet
         .seal(&request, &SealOptions::default())
@@ -1369,11 +1329,7 @@ async fn new_connections_are_refused_while_shutdown_drains() {
     let lab = Lab::start_with(config).await;
     let addr = lab.server.local_addr();
     let session = lab.session(RouteKind::Unique).await;
-    let request = lab
-        .wallet
-        .fetch_request(&session)
-        .await
-        .expect("request");
+    let request = lab.wallet.fetch_request(&session).await.expect("request");
     let jwe = lab
         .wallet
         .seal(&request, &SealOptions::default())
