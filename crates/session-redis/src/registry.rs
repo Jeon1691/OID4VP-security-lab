@@ -163,11 +163,11 @@ impl<K, R> RedisRegistry<K, R> {
         } = session;
         let key_ref = new_key_ref()?;
         // The key is in the table before the record is visible in Redis, so another worker
-        // never sees a pending session whose key it cannot find. Removed again on rejection,
-        // error or cancellation.
-        let staged = self
-            .keys
-            .stage(key_ref.clone(), id.clone(), expires_at, key)?;
+        // never sees a pending session whose key it cannot find. It is removed again only when
+        // Redis definitely rejected the insert: after an error or a cancelled call the script
+        // may still have run, so the key stays until `purge` / `expire_due` drop it at its TTL.
+        self.keys
+            .insert(key_ref.clone(), id.clone(), expires_at, key)?;
         let route = route_token.to_url_segment();
         let [mode, b1, b2, b3] = codec::encode_binding(&binding);
         let unique = if self.config.route_policy == RoutePolicy::UniquePerSession {
@@ -200,7 +200,6 @@ impl<K, R> RedisRegistry<K, R> {
             "ok" => {
                 let _incarnation = f.number()?;
                 self.forget(&f.rest()?);
-                staged.keep();
                 Ok(SessionSnapshot::from_store_record(
                     id,
                     binding,
@@ -213,11 +212,18 @@ impl<K, R> RedisRegistry<K, R> {
             }
             "capacity" => {
                 self.forget(&f.rest()?);
+                self.forget(&[key_ref]);
                 let limit = self.config.max_pending;
                 Err(InsertError::Capacity { limit })
             }
-            "duplicate_session" => Err(InsertError::DuplicateSession),
-            "duplicate_route" => Err(InsertError::DuplicateRoute),
+            "duplicate_session" => {
+                self.forget(&[key_ref]);
+                Err(InsertError::DuplicateSession)
+            }
+            "duplicate_route" => {
+                self.forget(&[key_ref]);
+                Err(InsertError::DuplicateRoute)
+            }
             _ => Err(StoreUnavailable.into()),
         }
     }
