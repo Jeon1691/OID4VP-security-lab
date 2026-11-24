@@ -135,6 +135,12 @@ impl RequestSigningKey {
         Ok(Self { key })
     }
 
+    /// The parsed key, for the wallet simulator's synthetic issuer.
+    #[cfg(feature = "wallet-sim")]
+    pub(crate) fn into_signing_key(self) -> SigningKey {
+        self.key
+    }
+
     /// `did:key:z…` of the public key: base58btc of the `p256-pub` multicodec varint and the
     /// compressed point (did:key Method v0.7).
     fn did_key(&self) -> String {

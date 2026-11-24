@@ -30,6 +30,8 @@ jose-hpke = { workspace = true }
 p256 = { workspace = true }
 protocol-model = { workspace = true }
 reqwest = { workspace = true, optional = true }
+# Duplicate-member check of every JWT header, payload and Disclosure (a `Visitor`; no derive).
+serde = { workspace = true }
 serde_json = { workspace = true }
 session-core = { workspace = true }
 sha2 = { workspace = true }

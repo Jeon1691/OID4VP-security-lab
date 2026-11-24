@@ -50,9 +50,8 @@ use crate::evidence::{
     ValidationResult,
 };
 use crate::jar::{REQUEST_OBJECT_AUD, REQUEST_OBJECT_MEDIA_TYPE, RequestSigner};
-use crate::validate::{
-    self, MAX_RESEARCH_NONCE_LEN, SYNTHETIC_CREDENTIAL_QUERY_ID, ValidatedResponse, ValidationError,
-};
+use crate::sd_jwt::TrustedIssuerKey;
+use crate::validate::{self, MAX_RESEARCH_NONCE_LEN, ValidatedResponse, ValidationError};
 
 /// Most response digests the replay guard remembers at once: four times session-core's
 /// default pending cap. An entry exists only for a response that decrypted and validated for
@@ -151,8 +150,6 @@ pub(crate) const P256_COORDINATE_BYTES: usize = 32;
 const MILLIS_PER_SECOND: u64 = 1000;
 /// OpenID4VP `response_type` of every lab request (§5.2).
 const RESPONSE_TYPE_VP_TOKEN: &str = "vp_token";
-/// DCQL `format` of the synthetic credential query; deliberately not a registered format.
-const SYNTHETIC_FORMAT: &str = "lab-synthetic";
 
 /// Private-key handle stored per session; shared across sessions in bounded-trial mode.
 type SessionKey = Arc<RecipientPrivateKey>;
@@ -198,6 +195,8 @@ struct AppState {
     client_id: ClientIdWire,
     /// Signs each request object once, at issue time.
     signer: RequestSigner,
+    /// Verifies the issuer signature of every presented SD-JWT VC.
+    trusted_issuer: TrustedIssuerKey,
     session_ttl: Duration,
     base_url: String,
     /// Unique-uri sessions; `RoutePolicy::UniquePerSession`, in every mode.
@@ -404,6 +403,7 @@ impl LabServer {
             mode: config.mode,
             client_id: config.client_id,
             signer,
+            trusted_issuer: config.trusted_issuer,
             session_ttl: config.session_ttl,
             base_url: base_url.clone(),
             unique: registry(RoutePolicy::UniquePerSession),
@@ -713,8 +713,8 @@ fn parse_create(
             ("route", Some("shared")) if research => route = RouteKind::Shared,
             ("route", _) => return Err("unsupported route"),
             ("nonce", Some(n)) if research => {
-                // Bounded so a matching presentation always fits the commit cap
-                // (`validate::MAX_COMMITTED_VP_TOKEN_BYTES`, checked at compile time there).
+                // Bounded so an honest KB-JWT always fits `MAX_KB_JWT_LEN` (checked at
+                // compile time in `validate`).
                 if n.len() > MAX_RESEARCH_NONCE_LEN {
                     return Err("nonce too long");
                 }
@@ -889,9 +889,7 @@ fn request_object(
         "response_mode": EncryptedResponseMode::DirectPostJwt.as_str(),
         "response_uri": response_uri.as_str(),
         "nonce": nonce.as_str(),
-        "dcql_query": {
-            "credentials": [{ "id": SYNTHETIC_CREDENTIAL_QUERY_ID, "format": SYNTHETIC_FORMAT }]
-        },
+        "dcql_query": validate::dcql_query(),
         "client_metadata": { "jwks": { "keys": [Value::Object(jwk)] } },
     })
 }
@@ -919,7 +917,7 @@ async fn get_request(State(state): State<Arc<AppState>>, Path(id): Path<String>)
 }
 
 /// `GET /lab/v1/results/{result_token}`: `{"state": "pending"|"consumed"|"expired"}`, with
-/// the committed synthetic `vp_token` once consumed. Only the result token from the
+/// the committed `credential` ([`ValidatedResponse::to_json`]) once consumed. Only the result token from the
 /// session-creation response finds a session; the request id does not.
 async fn get_result(State(state): State<Arc<AppState>>, Path(token): Path<String>) -> Response {
     let Ok(token) = RouteToken::parse(&token) else {
@@ -946,7 +944,7 @@ async fn get_result(State(state): State<Arc<AppState>>, Path(token): Path<String
     let body = match snapshot.state() {
         SessionState::Pending => json!({ "state": "pending" }),
         SessionState::Consumed { result, .. } => {
-            json!({ "state": "consumed", "vp_token": result.vp_token() })
+            json!({ "state": "consumed", "credential": result.to_json() })
         }
         SessionState::Expired => json!({ "state": "expired" }),
     };
@@ -1077,9 +1075,12 @@ async fn pipeline(
     #[cfg(feature = "lab-instrumentation")]
     drop(parked);
     let slot = slot.map_err(|_| Rejection::TrialAborted)?;
+    let issuer = state.trusted_issuer.clone();
+    // KB-JWT freshness is judged on this clock, in NumericDate seconds (RFC 7519 §2).
+    let now = SystemClock.now().as_unix_millis() / MILLIS_PER_SECOND;
     let (trial, candidates) = tokio::task::spawn_blocking(move || {
         let _slot = slot;
-        (trial(&jwe, &candidates), candidates)
+        (trial(&jwe, &candidates, &issuer, now), candidates)
     })
     .await
     .map_err(|_| Rejection::TrialAborted)?;
@@ -1141,12 +1142,18 @@ async fn pipeline(
     }
 }
 
-/// Opens the JWE with every candidate's key and `session_info` and validates every plaintext.
+/// Opens the JWE with every candidate's key and `session_info` and validates every plaintext
+/// (holder binding to that candidate's `client_id` and `nonce`).
 /// Never stops at the first match: for bounded trial, a second validating candidate must be
 /// seen to be refused. Only the first validated result is kept; later ones are counted and
 /// dropped, so the work per candidate (and the timing) is the same either way. Unique
 /// strategies return at most one candidate.
-fn trial(jwe: &CompactJwe, candidates: &[Candidate<SessionKey>]) -> Trial {
+fn trial(
+    jwe: &CompactJwe,
+    candidates: &[Candidate<SessionKey>],
+    issuer: &TrustedIssuerKey,
+    now: u64,
+) -> Trial {
     let mut out = Trial {
         attempts: 0,
         opened: 0,
@@ -1161,7 +1168,7 @@ fn trial(jwe: &CompactJwe, candidates: &[Candidate<SessionKey>]) -> Trial {
             continue;
         };
         out.opened += 1;
-        match validate::validate(&plaintext, candidate.binding()) {
+        match validate::validate(&plaintext, candidate.binding(), issuer, now) {
             Ok(result) => {
                 out.validated += 1;
                 if out.first.is_none() {
