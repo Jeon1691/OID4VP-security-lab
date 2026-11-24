@@ -1139,6 +1139,60 @@ async fn cross_session_replay_on_shared_route_is_rejected() {
     lab.shutdown().await;
 }
 
+/// PR #10 review: the JWE digest alone does not stop a replay of the *holder proof*. With a
+/// reused nonce and the same client_id, A's exact SD-JWT+KB re-sealed into a fresh JWE for B
+/// has a new ciphertext digest but the same verified KB-JWT; it is refused as
+/// `HolderProofReplay` and B stays pending. A's own retry with a fresh JWE still reaches the
+/// claim and is reported there as a replay.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn holder_proof_resealed_for_another_session_is_rejected() {
+    const REUSED_NONCE: &str = "lab-reused-nonce";
+    let lab = Lab::start(trial(TRIAL_SIZES[0])).await;
+    let base = lab.base();
+    let create = || {
+        lab.wallet
+            .create_session(&base, RouteKind::Shared, Some(REUSED_NONCE))
+    };
+    let a = create().await.expect("session a");
+    let request_a = lab.wallet.fetch_request(&a).await.expect("request a");
+    let presentation = lab
+        .wallet
+        .present(&request_a, &PresentationTamper::None)
+        .expect("presentation");
+    let reseal = SealOptions {
+        vp_token: Some(json!({ lab_server::SYNTHETIC_CREDENTIAL_QUERY_ID: [presentation] })),
+        ..SealOptions::default()
+    };
+    let (jwe_a, status, _) = lab.respond(&a, &reseal).await;
+    assert_success(status);
+    assert_committed(&lab.record(), &a);
+
+    let b = create().await.expect("session b with the same nonce");
+    let (jwe_b, status, body) = lab.respond(&b, &reseal).await;
+    assert_ne!(jwe_a, jwe_b, "a fresh JWE, so a fresh ciphertext digest");
+    assert_generic(status, &body);
+    let record = lab.record();
+    assert_eq!(
+        record.validation_result,
+        ValidationResult::Passed { validated: 1 },
+        "the proof itself is valid for b"
+    );
+    assert_eq!(record.rejection, Some(Rejection::HolderProofReplay));
+    assert_eq!(record.commit_result, CommitResult::NotRun);
+    lab.assert_pending(&b).await;
+
+    // A's own retry with a fresh JWE: same session, so it reaches the claim.
+    let (_, status, body) = lab.respond(&a, &reseal).await;
+    assert_generic(status, &body);
+    assert_eq!(
+        lab.record().rejection,
+        Some(Rejection::Claim(ClaimError::Replay {
+            same_response: false
+        }))
+    );
+    lab.shutdown().await;
+}
+
 /// Review M2: a caller-chosen research nonce is capped so that, with the longest allowed
 /// client_id (all characters needing JSON escapes), an honest KB-JWT still fits under
 /// MAX_KB_JWT_LEN and commits; longer nonces and client ids are refused up front.
