@@ -30,12 +30,16 @@ const RULE: &str = "every insert / resolve (exactly one candidate) / claim succe
 type Key = ();
 
 /// Per-operation latency of one backend.
+///
+/// No CPU time: one loop interleaves insert, resolve, claim (and PING) per cycle, so a process
+/// CPU delta belongs to no single operation, and per-call sampling (`ps` / `/proc`, 10 ms
+/// resolution on Linux) is far coarser than a microsecond store call. Store rows therefore
+/// leave `cpu_ms` empty.
 struct Ops {
     insert: Latencies,
     resolve: Latencies,
     claim: Latencies,
     ping: Latencies,
-    cpu: Option<Duration>,
 }
 
 fn digest(i: u64) -> ResponseDigest {
@@ -64,9 +68,7 @@ async fn measure<S: SessionStore<Key, String>>(
         resolve: Latencies::new(),
         claim: Latencies::new(),
         ping: Latencies::new(),
-        cpu: None,
     };
-    let mut before = None;
     for i in 0..warmup + iterations {
         if i == warmup {
             // Keep only measured samples.
@@ -74,7 +76,6 @@ async fn measure<S: SessionStore<Key, String>>(
             ops.resolve = Latencies::new();
             ops.claim = Latencies::new();
             ops.ping = Latencies::new();
-            before = Usage::sample();
         }
         let route = RouteToken::generate().context("OS CSPRNG")?;
         let session = NewSession {
@@ -117,16 +118,10 @@ async fn measure<S: SessionStore<Key, String>>(
             ensure!(pong == "PONG", "PING answered {pong:?}");
         }
     }
-    ops.cpu = Usage::sample()
-        .zip(before)
-        .map(|(after, before)| after.cpu.saturating_sub(before.cpu));
     Ok(ops)
 }
 
-const MILLIS_PER_SECOND: f64 = 1_000.0;
-
 fn rows(run_id: &str, backend: &str, ops: Ops) -> Vec<Row> {
-    let cpu_ms = ops.cpu.map(|c| c.as_secs_f64() * MILLIS_PER_SECOND);
     let rss_kib = Usage::sample().map(|u| u.rss_kib);
     [
         ("insert", ops.insert),
@@ -166,7 +161,8 @@ fn rows(run_id: &str, backend: &str, ops: Ops) -> Vec<Row> {
             trial: None,
             throughput_rps,
             rejection_ratio: 0.0,
-            cpu_ms,
+            // See `Ops`: not attributable to one operation.
+            cpu_ms: None,
             rss_kib,
             invariant: Invariant::Pass(RULE.to_owned()),
         }
