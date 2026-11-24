@@ -6,7 +6,7 @@
 #   STAGE = quality | test | supply-chain   (default: all three, in that order)
 #         | redis                           (opt-in: session-redis against a real server)
 # The redis stage uses REDIS_URL if set (CI service container); otherwise it starts a
-# disposable Redis in Docker and removes it on exit.
+# disposable Redis-compatible server (Valkey) in Docker and removes it on exit.
 # Every step must run and pass; a step that is skipped or runs zero tests fails the gate.
 set -euo pipefail
 export CARGO_TERM_COLOR=never
@@ -231,13 +231,20 @@ REDIS_REQUIRED_TESTS=(
   swapped_key_reference_fails_closed
   undecodable_record_fails_closed
   local_keys_are_dropped_once_sessions_leave_pending
+  index_entry_naming_another_session_fails_closed
+  counters_at_or_above_1e14_round_trip_exactly
+  # The local key table stays bounded and sheds due keys while Redis is down.
+  due_keys_are_dropped_while_redis_is_unreachable
+  refused_insert_drops_its_key_immediately
+  key_table_growth_is_bounded_during_an_outage
   redis_matches_memory_registry_on_random_operation_sequences
 )
 
-# Disposable server when REDIS_URL is unset: the multi-arch index digest of redis:8.4.8, bound to
-# loopback on a random host port, no persistence, read-only root filesystem, unprivileged user
-# (the image's `redis`, uid 999), no capabilities. Removed on exit, pass or fail.
-REDIS_IMAGE="redis:8.4.8@sha256:2e431571225bc941481b753c16192d5e71107c2e5dc6691ed3c416bf69550a9b"
+# Disposable server when REDIS_URL is unset: Valkey 8.1 (BSD-3-Clause, Redis 7.2 protocol and
+# Lua API, so the whole toolchain stays OSI-permissive), pinned by its multi-arch index digest,
+# bound to loopback on a random host port, no persistence, read-only root filesystem,
+# unprivileged user (the image's `valkey`, uid 999), no capabilities. Removed on exit.
+REDIS_IMAGE="valkey/valkey:8.1.12@sha256:5032c4dd7abe08d6fd9382054608183e2bf1f7e3895ef619b8784698454325f7"
 REDIS_UID=999
 # Readiness: up to 50 PINGs 0.2 s apart (10 s); a local server answers within about a second.
 REDIS_READY_TRIES=50
@@ -252,12 +259,12 @@ redis_start() {
   local port i
   REDIS_CONTAINER="$(docker run -d --rm -p 127.0.0.1::6379 --read-only \
     --user "${REDIS_UID}:${REDIS_UID}" --cap-drop ALL --security-opt no-new-privileges \
-    "$REDIS_IMAGE" redis-server --save '' --appendonly no)" || return 1
+    "$REDIS_IMAGE" valkey-server --save '' --appendonly no)" || return 1
   trap redis_teardown EXIT
   port="$(docker port "$REDIS_CONTAINER" 6379/tcp | head -n 1)" || return 1
   port="${port##*:}"
   for ((i = 0; i < REDIS_READY_TRIES; i++)); do
-    if [[ "$(docker exec "$REDIS_CONTAINER" redis-cli ping 2>/dev/null)" == PONG ]]; then
+    if [[ "$(docker exec "$REDIS_CONTAINER" valkey-cli ping 2>/dev/null)" == PONG ]]; then
       export REDIS_URL="redis://127.0.0.1:${port}/"
       return 0
     fi
@@ -323,11 +330,25 @@ verifier_without_sealing() {
   fi
 }
 
+# session-core's `store-backend` feature (candidate / snapshot constructors for store backends)
+# is for session-redis only. The Verifier build (lab-server default features, alone) must build
+# without it, and its feature graph must not enable it.
+verifier_without_store_backend() {
+  local features
+  features="$(cargo tree --locked -p lab-server -e features -i session-core)" || return 1
+  if grep -F 'feature "store-backend"' <<<"$features"; then
+    echo "session-core store-backend reachable from lab-server"
+    return 1
+  fi
+}
+
 stage_supply_chain() {
   step deny cargo deny --locked check advisories licenses bans sources
   step advisory_baseline_sync advisory_baseline_sync
   step core_containment core_containment
   step verifier_without_sealing verifier_without_sealing
+  step lab_server_default_check cargo check -p lab-server --locked
+  step verifier_without_store_backend verifier_without_store_backend
   step audit cargo audit --deny warnings
 }
 
