@@ -49,6 +49,8 @@ const FIXTURES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../lab-server/t
 const SIGNING_KEY_FILE: &str = "spruce_verifier.jwk";
 const ISSUER_KEY_FILE: &str = "lab_issuer.jwk";
 const ISSUER_PUBLIC_KEY_FILE: &str = "lab_issuer.pub.jwk";
+/// Exit statuses (also read by `scripts/bench.sh`).
+const EXIT_OK: u8 = 0;
 const EXIT_INVARIANT_FAILED: u8 = 1;
 const EXIT_BROKEN_RUN: u8 = 2;
 
@@ -71,7 +73,8 @@ fn parse<T: std::str::FromStr>(flag: &str, value: &str) -> Result<T> {
         .map_err(|_| anyhow::anyhow!("invalid value for {flag}: {value:?}"))
 }
 
-fn args() -> Result<Args> {
+/// Parses the flags after the program name.
+fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args> {
     let mut out = None;
     let mut run_id = None;
     let mut sizes = DEFAULT_SIZES.to_vec();
@@ -84,7 +87,7 @@ fn args() -> Result<Args> {
     let mut burst_rounds = DEFAULT_BURST_ROUNDS;
     let mut store_iterations = DEFAULT_STORE_ITERATIONS;
     let mut fixtures = PathBuf::from(FIXTURES_DIR);
-    let mut it = std::env::args().skip(1);
+    let mut it = argv.into_iter();
     while let Some(flag) = it.next() {
         let value = it.next().with_context(|| USAGE.to_owned())?;
         match flag.as_str() {
@@ -168,8 +171,17 @@ fn read(dir: &std::path::Path, file: &str) -> Result<String> {
     std::fs::read_to_string(&path).with_context(|| format!("fixture {file}"))
 }
 
-async fn run() -> Result<bool> {
-    let args = args()?;
+/// Process exit status for a finished run: [`EXIT_OK`] only if every row holds its invariant.
+fn exit_code(rows: &[evidence_report::Row]) -> u8 {
+    if rows.iter().all(|r| r.invariant.holds()) {
+        EXIT_OK
+    } else {
+        EXIT_INVARIANT_FAILED
+    }
+}
+
+async fn run() -> Result<u8> {
+    let args = parse_args(std::env::args().skip(1))?;
     let fixtures = http::Fixtures {
         signing_jwk: read(&args.fixtures, SIGNING_KEY_FILE)?,
         issuer_jwk: read(&args.fixtures, ISSUER_KEY_FILE)?,
@@ -233,14 +245,13 @@ async fn run() -> Result<bool> {
         rows.len(),
         failed.len()
     );
-    Ok(failed.is_empty())
+    Ok(exit_code(&rows))
 }
 
 #[tokio::main]
 async fn main() -> ExitCode {
     match run().await {
-        Ok(true) => ExitCode::SUCCESS,
-        Ok(false) => ExitCode::from(EXIT_INVARIANT_FAILED),
+        Ok(code) => ExitCode::from(code),
         Err(e) => {
             eprintln!("scenario-runner: {e:#}");
             ExitCode::from(EXIT_BROKEN_RUN)

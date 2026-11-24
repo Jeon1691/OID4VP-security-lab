@@ -700,6 +700,47 @@ pub async fn run(
     Ok(rows)
 }
 
+/// The invariants of one burst round: the answers' `statuses` and the evidence `records` the
+/// round left (in completion order; only their totals are compared with the answers).
+fn burst_violations(
+    strategy: Strategy,
+    n: usize,
+    limited: bool,
+    statuses: &[u16],
+    records: &[EvidenceRecord],
+) -> Vec<String> {
+    let admitted = statuses
+        .iter()
+        .filter(|&&s| s != SERVICE_UNAVAILABLE)
+        .count();
+    let mut violations = Vec::new();
+    if records.len() != admitted {
+        violations.push(format!(
+            "{} evidence records for {admitted} admitted requests (503s must leave none)",
+            records.len()
+        ));
+    }
+    for record in records {
+        let committed = record.commit_result == CommitResult::Committed;
+        if !committed || record.hpke_attempts > strategy.max_attempts(n) {
+            violations.push(format!(
+                "admitted request: attempts {}, commit {:?}",
+                record.hpke_attempts, record.commit_result
+            ));
+        }
+    }
+    if let Some(status) = statuses
+        .iter()
+        .find(|&&s| s != OK && s != SERVICE_UNAVAILABLE)
+    {
+        violations.push(format!("unexpected status {status}"));
+    }
+    if !limited && admitted != statuses.len() {
+        violations.push("503 with limits off".to_owned());
+    }
+    violations
+}
+
 /// `params.burst` sessions, all answered at once with valid responses, `burst_rounds` times
 /// (after one warm-up round). Limits on: [`LIMITED_IN_FLIGHT`] / [`LIMITED_DECRYPTIONS`];
 /// off: the default in-flight cap (above the burst) and one decryption slot per request.
@@ -753,35 +794,8 @@ async fn burst(
         let round_wall = started.elapsed();
         let round_cpu = cpu_since(before);
         let records = lab.server.evidence().take();
-        let admitted = answers
-            .iter()
-            .filter(|a| a.2 != SERVICE_UNAVAILABLE)
-            .count();
-        let mut violations = Vec::new();
-        if records.len() != admitted {
-            violations.push(format!(
-                "{} evidence records for {admitted} admitted requests (503s must leave none)",
-                records.len()
-            ));
-        }
-        for record in &records {
-            let committed = record.commit_result == CommitResult::Committed;
-            if !committed || record.hpke_attempts > strategy.max_attempts(n) {
-                violations.push(format!(
-                    "admitted request: attempts {}, commit {:?}",
-                    record.hpke_attempts, record.commit_result
-                ));
-            }
-        }
-        if let Some(&(_, _, status)) = answers
-            .iter()
-            .find(|a| a.2 != OK && a.2 != SERVICE_UNAVAILABLE)
-        {
-            violations.push(format!("unexpected status {status}"));
-        }
-        if !limited && admitted != answers.len() {
-            violations.push("503 with limits off".to_owned());
-        }
+        let statuses: Vec<u16> = answers.iter().map(|a| a.2).collect();
+        let violations = burst_violations(strategy, n, limited, &statuses, &records);
         // Sessions refused with 503 were never seen by the pipeline and stay pending.
         let refused: Vec<usize> = answers
             .iter()
