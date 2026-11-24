@@ -17,7 +17,7 @@ use session_core::{
     RegistryConfig, ResolutionStrategy, ResponseDigest, RoutePolicy, RouteToken, SessionState,
     SessionStore, Timestamp,
 };
-use session_redis::{KeyTable, RedisRegistry};
+use session_redis::{KeyTable, RedisRegistry, TimeSource};
 
 /// Reason on every Redis-backed test; the `redis` gate stage runs them with `--ignored`.
 pub const REDIS_IGNORE: &str = "requires Redis; run via scripts/ci_local.sh <dir> redis";
@@ -103,9 +103,15 @@ pub async fn redis_registry<K>(
     config: RegistryConfig,
     keys: KeyTable<K>,
 ) -> RedisRegistry<K, TestResult> {
-    RedisRegistry::connect(&redis_url(), namespace, clock, config, keys)
-        .await
-        .expect("Redis reachable at REDIS_URL")
+    RedisRegistry::connect(
+        &redis_url(),
+        namespace,
+        TimeSource::Injected(clock),
+        config,
+        keys,
+    )
+    .await
+    .expect("Redis reachable at REDIS_URL")
 }
 
 pub fn shared() -> RegistryConfig {

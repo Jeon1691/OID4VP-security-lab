@@ -581,6 +581,29 @@ mod suite {
         );
     }
 
+    pub async fn candidate_from_another_registry_cannot_claim_its_session<B: Backend>() {
+        // Two independent registries, each with a session-0 at the same incarnation and
+        // revision (both number their insertions from the same start).
+        let a = B::make(RegistryConfig::default()).await;
+        let b = B::make(RegistryConfig::default()).await;
+        let (_ra, ca) = pending(&*a.store, 0).await;
+        let (_rb, cb) = pending(&*b.store, 0).await;
+        assert_eq!((ca.id(), ca.revision()), (cb.id(), cb.revision()));
+        assert_eq!(
+            b.store
+                .claim(&ca, digest(1), "foreign".into())
+                .await
+                .unwrap_err(),
+            ClaimError::UnknownSession
+        );
+        assert!(state(&*b.store, cb.id()).await.is_pending());
+        b.store
+            .claim(&cb, digest(2), "own".into())
+            .await
+            .expect("B's own candidate still commits");
+        assert!(state(&*a.store, ca.id()).await.is_pending());
+    }
+
     pub async fn expire_and_purge_touch_only_due_sessions<B: Backend>() {
         let h = B::make(RegistryConfig::default()).await;
         let (_r0, _c0) = pending(&*h.store, 0).await;
@@ -812,6 +835,7 @@ macro_rules! contract_tests {
             failed_attempt_leaves_session_pending_and_claimable,
             stale_candidate_cannot_claim_a_reinserted_session,
             claim_of_unknown_session_is_rejected,
+            candidate_from_another_registry_cannot_claim_its_session,
             expire_and_purge_touch_only_due_sessions,
             consumed_records_are_purged_after_retention,
             insert_beyond_pending_capacity_is_rejected,

@@ -7,7 +7,7 @@ mod common;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use common::{
@@ -20,7 +20,7 @@ use session_core::{
     RegistryConfig, ResolutionStrategy, ResolveError, SessionSnapshot, SessionStore,
     StoreUnavailable,
 };
-use session_redis::{KEY_TABLE_SLACK, KeyTable, RedisRegistry, SetupError};
+use session_redis::{KEY_TABLE_SLACK, KeyTable, RedisRegistry, SetupError, TimeSource};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
@@ -132,7 +132,7 @@ async fn unreachable_redis_fails_closed_at_connect() {
         RedisRegistry::<TestKey, TestResult>::connect(
             &url,
             "unreachable",
-            clock,
+            TimeSource::Injected(clock),
             RegistryConfig::default(),
             KeyTable::new(),
         ),
@@ -152,7 +152,7 @@ async fn connect_rejects_malformed_namespace() {
         let outcome = RedisRegistry::<TestKey, TestResult>::connect(
             "redis://127.0.0.1:1/",
             ns,
-            clock.clone(),
+            TimeSource::Injected(clock.clone()),
             RegistryConfig::default(),
             KeyTable::new(),
         )
@@ -167,16 +167,28 @@ async fn connect_rejects_malformed_namespace() {
 /// Read buffer of one proxy direction; RESP frames in these tests are far smaller.
 const PROXY_BUF: usize = 16 * 1024;
 
-/// Copies `from` to `to` until either side closes; while `blackhole` is set, bytes are read and
-/// dropped instead (the peer stays connected but never gets an answer).
-async fn pump(mut from: OwnedReadHalf, mut to: OwnedWriteHalf, blackhole: Arc<AtomicBool>) {
+/// Switches of a test proxy.
+#[derive(Default)]
+struct ProxyControl {
+    /// Read and drop all traffic: the peer stays connected but never gets an answer.
+    blackhole: AtomicBool,
+    /// Hold every chunk this many milliseconds before forwarding it (a slow network).
+    delay_ms: AtomicU64,
+}
+
+/// Copies `from` to `to` until either side closes, as `control` says.
+async fn pump(mut from: OwnedReadHalf, mut to: OwnedWriteHalf, control: Arc<ProxyControl>) {
     let mut buf = vec![0u8; PROXY_BUF];
     loop {
         let n = match from.read(&mut buf).await {
             Ok(0) | Err(_) => return,
             Ok(n) => n,
         };
-        if !blackhole.load(Ordering::SeqCst) && to.write_all(&buf[..n]).await.is_err() {
+        let delay = control.delay_ms.load(Ordering::SeqCst);
+        if delay > 0 {
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+        }
+        if !control.blackhole.load(Ordering::SeqCst) && to.write_all(&buf[..n]).await.is_err() {
             return;
         }
     }
@@ -186,11 +198,11 @@ async fn pump(mut from: OwnedReadHalf, mut to: OwnedWriteHalf, blackhole: Arc<At
 /// the `JoinSet` of connection tasks, which closes every proxied socket at once (Redis "killed"
 /// from the registry's point of view, while the server keeps running for observers). Setting
 /// the flag keeps the sockets open but swallows all traffic (Redis hung: calls time out).
-async fn start_proxy(upstream: String) -> (String, tokio::task::JoinHandle<()>, Arc<AtomicBool>) {
+async fn start_proxy(upstream: String) -> (String, tokio::task::JoinHandle<()>, Arc<ProxyControl>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind proxy");
     let url = format!("redis://{}/", listener.local_addr().expect("addr"));
-    let blackhole = Arc::new(AtomicBool::new(false));
-    let flag = blackhole.clone();
+    let control = Arc::new(ProxyControl::default());
+    let flag = control.clone();
     let handle = tokio::spawn(async move {
         let mut connections = JoinSet::new();
         while let Ok((inbound, _)) = listener.accept().await {
@@ -207,7 +219,7 @@ async fn start_proxy(upstream: String) -> (String, tokio::task::JoinHandle<()>, 
             });
         }
     });
-    (url, handle, blackhole)
+    (url, handle, control)
 }
 
 /// `host:port` of `REDIS_URL`.
@@ -227,11 +239,11 @@ async fn redis_killed_mid_run_fails_closed_without_memory_fallback() {
     let ns = fresh_namespace();
     let clock = Arc::new(ManualClock::new(common::T0));
     let keys = KeyTable::new();
-    let (proxy_url, proxy, _blackhole) = start_proxy(redis_addr()).await;
+    let (proxy_url, proxy, _control) = start_proxy(redis_addr()).await;
     let worker: Worker = RedisRegistry::connect(
         &proxy_url,
         &ns,
-        clock.clone(),
+        TimeSource::Injected(clock.clone()),
         RegistryConfig::default(),
         keys.clone(),
     )
@@ -510,26 +522,30 @@ async fn local_keys_are_dropped_once_sessions_leave_pending() {
 /// A worker connected through a fresh proxy, its key table and the proxy controls.
 async fn proxied_worker(
     config: RegistryConfig,
-    clock: Arc<ManualClock>,
+    time: TimeSource,
 ) -> (
     Worker,
     KeyTable<TestKey>,
     tokio::task::JoinHandle<()>,
-    Arc<AtomicBool>,
+    Arc<ProxyControl>,
 ) {
     let keys = KeyTable::new();
-    let (url, proxy, blackhole) = start_proxy(redis_addr()).await;
-    let worker = RedisRegistry::connect(&url, &fresh_namespace(), clock, config, keys.clone())
+    let (url, proxy, control) = start_proxy(redis_addr()).await;
+    let worker = RedisRegistry::connect(&url, &fresh_namespace(), time, config, keys.clone())
         .await
         .expect("connect through proxy");
-    (worker, keys, proxy, blackhole)
+    (worker, keys, proxy, control)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Redis; run via scripts/ci_local.sh <dir> redis"]
 async fn due_keys_are_dropped_while_redis_is_unreachable() {
     let clock = Arc::new(ManualClock::new(common::T0));
-    let (worker, keys, proxy, _) = proxied_worker(RegistryConfig::default(), clock.clone()).await;
+    let (worker, keys, proxy, _) = proxied_worker(
+        RegistryConfig::default(),
+        TimeSource::Injected(clock.clone()),
+    )
+    .await;
     for i in 0..2 {
         worker
             .insert(new_session(i, &route(), None))
@@ -553,7 +569,8 @@ async fn due_keys_are_dropped_while_redis_is_unreachable() {
 #[ignore = "requires Redis; run via scripts/ci_local.sh <dir> redis"]
 async fn refused_insert_drops_its_key_immediately() {
     let clock = Arc::new(ManualClock::new(common::T0));
-    let (worker, keys, proxy, _) = proxied_worker(RegistryConfig::default(), clock).await;
+    let (worker, keys, proxy, _) =
+        proxied_worker(RegistryConfig::default(), TimeSource::Injected(clock)).await;
     worker
         .insert(new_session(0, &route(), None))
         .await
@@ -590,12 +607,13 @@ async fn key_table_growth_is_bounded_during_an_outage() {
         max_pending: MAX_PENDING,
         ..RegistryConfig::default()
     };
-    let (worker, keys, _proxy, blackhole) = proxied_worker(config, clock.clone()).await;
+    let (worker, keys, _proxy, control) =
+        proxied_worker(config, TimeSource::Injected(clock.clone())).await;
     let worker = Arc::new(worker);
 
     // Redis hangs: every insert is sent but never answered, so its outcome is unknown and its
     // key has to stay staged. The table must still not grow past its cap.
-    blackhole.store(true, Ordering::SeqCst);
+    control.blackhole.store(true, Ordering::SeqCst);
     let mut tasks = JoinSet::new();
     for i in 0..INSERTS {
         let w = worker.clone();
@@ -708,4 +726,119 @@ async fn counters_at_or_above_1e14_round_trip_exactly() {
         .expect("store")
         .expect("present");
     assert_eq!(snap.revision().get(), BIG);
+}
+
+use session_core::Clock as _;
+
+#[tokio::test]
+#[ignore = "requires Redis; run via scripts/ci_local.sh <dir> redis"]
+async fn candidate_from_another_namespace_cannot_claim_its_session() {
+    let (ns_a, ns_b) = (fresh_namespace(), fresh_namespace());
+    let clock = Arc::new(ManualClock::new(common::T0));
+    let keys = KeyTable::new();
+    let a: Worker = redis_registry(
+        &ns_a,
+        clock.clone(),
+        RegistryConfig::default(),
+        keys.clone(),
+    )
+    .await;
+    let b: Worker = redis_registry(&ns_b, clock, RegistryConfig::default(), keys).await;
+    let (ra, rb) = (route(), route());
+    a.insert(new_session(0, &ra, None)).await.expect("insert A");
+    b.insert(new_session(0, &rb, None)).await.expect("insert B");
+    let ca = only_candidate(&a, &ra).await;
+
+    // Same id, same incarnation (each namespace has its own counter), same revision.
+    let mut conn = raw_connection().await;
+    let inc_a: String = conn.hget(record_key(&ns_a, 0), "inc").await.expect("HGET");
+    let inc_b: String = conn.hget(record_key(&ns_b, 0), "inc").await.expect("HGET");
+    assert_eq!(inc_a, inc_b);
+
+    assert_eq!(
+        b.claim(&ca, digest(1), "foreign".into()).await.unwrap_err(),
+        ClaimError::UnknownSession
+    );
+    let snap = b.snapshot(&sid(0)).await.expect("store").expect("present");
+    assert!(snap.state().is_pending(), "B's session is untouched");
+}
+
+/// A worker on Redis server time (the production setting).
+async fn server_time_worker(url: &str) -> Worker {
+    RedisRegistry::connect(
+        url,
+        &fresh_namespace(),
+        TimeSource::RedisServer,
+        RegistryConfig::default(),
+        KeyTable::new(),
+    )
+    .await
+    .expect("connect")
+}
+
+#[tokio::test]
+#[ignore = "requires Redis; run via scripts/ci_local.sh <dir> redis"]
+async fn server_time_mode_inserts_resolves_claims_and_sweeps() {
+    let reg = server_time_worker(&redis_url()).await;
+    let r = route();
+    let before = session_core::SystemClock.now();
+    let inserted = reg.insert(new_session(0, &r, None)).await.expect("insert");
+    let after = session_core::SystemClock.now();
+    // expires_at is the server's insert time + TTL; allow for clock offset to this host.
+    let slack = Duration::from_secs(5);
+    let exp = inserted.expires_at();
+    assert!(exp >= before.saturating_add(TTL - slack) && exp <= after.saturating_add(TTL + slack));
+
+    let c = only_candidate(&reg, &r).await;
+    assert_eq!(c.expires_at(), exp);
+    let committed = reg.claim(&c, digest(1), "ok".into()).await.expect("claim");
+    assert!(committed.state().is_consumed());
+    assert_eq!(
+        reg.claim(&c, digest(1), "again".into()).await.unwrap_err(),
+        ClaimError::Replay {
+            same_response: true
+        }
+    );
+    assert_eq!(reg.expire_due().await, Ok(0));
+    assert_eq!(reg.purge().await, Ok(0));
+    assert!(
+        reg.snapshot(&sid(0))
+            .await
+            .expect("store")
+            .expect("present")
+            .state()
+            .is_consumed()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Redis; run via scripts/ci_local.sh <dir> redis"]
+async fn claim_delayed_past_the_ttl_in_transit_is_not_committed() {
+    // Short TTL; the network then holds the claim (and its reply) longer than that, but less
+    // than the registry's response timeout.
+    const SHORT_TTL: Duration = Duration::from_millis(300);
+    const NETWORK_DELAY_MS: u64 = 600;
+    let (url, _proxy, control) = start_proxy(redis_addr()).await;
+    let reg = server_time_worker(&url).await;
+    let r = route();
+    let session = NewSession {
+        ttl: SHORT_TTL,
+        ..new_session(0, &r, None)
+    };
+    reg.insert(session).await.expect("insert");
+    let c = only_candidate(&reg, &r).await;
+
+    // The claim is dispatched while the session is live, but reaches Redis after its TTL.
+    control.delay_ms.store(NETWORK_DELAY_MS, Ordering::SeqCst);
+    assert_eq!(
+        reg.claim(&c, digest(1), "late".into()).await.unwrap_err(),
+        ClaimError::SessionExpired
+    );
+    control.delay_ms.store(0, Ordering::SeqCst);
+    let snap = reg
+        .snapshot(&sid(0))
+        .await
+        .expect("store")
+        .expect("present");
+    assert!(snap.state().is_expired(), "{:?}", snap.state());
 }
