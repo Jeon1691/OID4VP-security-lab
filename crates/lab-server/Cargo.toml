@@ -6,7 +6,25 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Wallet simulator (IMP-010): fetches request objects and seals HPKE-0 responses. Enables
+# jose-hpke's sender-side `test-support`, so the default (Verifier) build never contains
+# sealing code. Tests enable it through the self dev-dependency below.
+wallet-sim = ["dep:reqwest", "jose-hpke/test-support"]
+
 [dependencies]
+axum = { workspace = true }
+base64 = { workspace = true }
+form_urlencoded = { workspace = true }
+getrandom = { workspace = true }
+jose-hpke = { workspace = true }
+protocol-model = { workspace = true }
+reqwest = { workspace = true, optional = true }
+serde_json = { workspace = true }
+session-core = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
 
 [dev-dependencies]
 anyhow = { workspace = true }
@@ -15,6 +33,8 @@ axum = { workspace = true }
 base64 = { workspace = true }
 form_urlencoded = { workspace = true }
 josekit = { workspace = true }
+# Self dev-dependency: integration tests drive the server with the wallet simulator.
+lab-server = { path = ".", features = ["wallet-sim"] }
 openid4vp = { workspace = true }
 p256-spruce = { workspace = true }
 reqwest = { workspace = true }
