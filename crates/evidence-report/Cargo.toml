@@ -1,0 +1,15 @@
+[package]
+name = "evidence-report"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Writes G6 benchmark rows as JSON, CSV and a Markdown summary. std + serde_json only: no
+# statistics or HTTP code lives here (scenario-runner computes the numbers).
+[dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

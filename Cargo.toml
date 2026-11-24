@@ -1,13 +1,28 @@
 [workspace]
 resolver = "3"
 # MVP scope (06 · Design Review §6) was four packages; session-redis (G5, IMP-014) is split out
-# now that G0/G1 have passed. spruce-adapter, scenario-runner and evidence-report follow later.
+# now that G0/G1 have passed, scenario-runner and evidence-report (G6, IMP-015/016) after the
+# MVP. spruce-adapter follows later.
 members = [
     "crates/protocol-model",
     "crates/jose-hpke",
     "crates/session-core",
     "crates/session-redis",
     "crates/lab-server",
+    "crates/evidence-report",
+    "crates/scenario-runner",
+]
+# Everything but scenario-runner: it enables lab-server's test-only `wallet-sim` (sealing, ssi)
+# as a normal dependency, so building it next to lab-server unifies that feature into the
+# lab-server binary. A plain `cargo build` / `cargo run` at the root therefore stays a Verifier
+# build; the benchmark is built explicitly (`-p scenario-runner`, `--workspace`).
+default-members = [
+    "crates/protocol-model",
+    "crates/jose-hpke",
+    "crates/session-core",
+    "crates/session-redis",
+    "crates/lab-server",
+    "crates/evidence-report",
 ]
 # Pinned upstream checkout for G0 reproduction (scripts/g0_upstream.sh); built standalone.
 exclude = ["upstream"]
@@ -76,6 +91,18 @@ sha2 = { version = "0.11.1", default-features = false }
 protocol-model = { path = "crates/protocol-model" }
 jose-hpke = { path = "crates/jose-hpke" }
 session-core = { path = "crates/session-core" }
+session-redis = { path = "crates/session-redis" }
+lab-server = { path = "crates/lab-server" }
+evidence-report = { path = "crates/evidence-report" }
+
+# scenario-runner (G6, IMP-015): latency percentiles. Defaults add `serialization` (flate2, nom,
+# base64 for the histogram wire format) and `sync` (crossbeam-channel); the runner only records
+# and reads quantiles in one thread, so neither is needed (leaves only num-traits).
+# MIT OR Apache-2.0.
+hdrhistogram = { version = "7.6.0", default-features = false }
+# scenario-runner micro-benchmarks (`benches/`, dev-dependency only). Defaults add rayon and
+# plotters (parallel analysis, SVG/HTML charts); text output needs neither. Apache-2.0 OR MIT.
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 
 # session-redis (G5, IMP-014). Async client on the tokio runtime the lab-server already uses;
 # defaults (acl, streams, geospatial, num-bigint) are not needed. `script` = EVALSHA with
