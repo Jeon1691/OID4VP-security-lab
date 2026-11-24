@@ -3,6 +3,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use protocol_model::{KeyId, RequestBinding, SessionId};
@@ -16,9 +17,16 @@ use crate::session::{
 };
 use crate::store::SessionStore;
 
+/// Source of registry ids: unique per process, which is the reach of an in-memory registry
+/// (its candidates cannot leave the process either). A counter instead of randomness, so
+/// construction cannot fail.
+static NEXT_REGISTRY: AtomicU64 = AtomicU64::new(0);
+
 /// The authoritative record. Never leaves the registry; callers only get copies.
 struct SessionRecord<K, R> {
     incarnation: u64,
+    /// Id of the registry holding the record; candidates carry it as their origin.
+    origin: u128,
     binding: RequestBinding,
     route_token: RouteToken,
     kid: Option<KeyId>,
@@ -45,6 +53,7 @@ impl<K, R> SessionRecord<K, R> {
         Candidate {
             id: id.clone(),
             incarnation: self.incarnation,
+            origin: self.origin,
             binding: self.binding.clone(),
             kid: self.kid.clone(),
             key: Arc::clone(&self.key),
@@ -143,6 +152,8 @@ struct Inner<K, R> {
     terminal_by_route: HashMap<RouteToken, TerminalCounts>,
     terminal_by_route_kid: HashMap<(RouteToken, KeyId), TerminalCounts>,
     next_incarnation: u64,
+    /// This registry's id (see [`NEXT_REGISTRY`]).
+    registry: u128,
 }
 
 /// Live and past-TTL pending sessions under one index entry.
@@ -305,7 +316,9 @@ impl<K, R> Inner<K, R> {
         let Some(record) = self
             .sessions
             .get_mut(id)
-            .filter(|r| r.incarnation == candidate.incarnation)
+            // A candidate from another registry is unknown here, even if its id, incarnation
+            // and revision coincide with one of ours.
+            .filter(|r| r.origin == candidate.origin && r.incarnation == candidate.incarnation)
         else {
             return (Err(ClaimError::UnknownSession), Some(result));
         };
@@ -408,6 +421,7 @@ impl<K, R> Inner<K, R> {
         self.next_incarnation = self.next_incarnation.saturating_add(1);
         let record = SessionRecord {
             incarnation,
+            origin: self.registry,
             binding,
             route_token,
             kid,
@@ -500,6 +514,7 @@ impl<K, R> MemoryRegistry<K, R> {
                 terminal_by_route: HashMap::new(),
                 terminal_by_route_kid: HashMap::new(),
                 next_incarnation: 0,
+                registry: u128::from(NEXT_REGISTRY.fetch_add(1, Ordering::Relaxed)),
             }),
         }
     }

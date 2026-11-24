@@ -72,6 +72,8 @@ pub use route::{
     BudgetError, CandidateBudget, IngressHint, MAX_CANDIDATE_BUDGET, ROUTE_TOKEN_BYTES,
     ResolutionStrategy, RouteToken, RouteTokenError,
 };
+#[cfg(feature = "store-backend")]
+pub use session::StoreRef;
 pub use session::{
     Candidate, ClaimError, InsertError, NewSession, RESPONSE_DIGEST_BYTES, ResolveError,
     ResponseDigest, Revision, SessionSnapshot, SessionState, StoreUnavailable,

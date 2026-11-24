@@ -22,12 +22,21 @@
 //! | `{ns}:purge` | zset | terminal ids, score = when purge may delete them (`0` for expired, `exp + retention` for consumed) |
 //!
 //! These mirror the indexes of `MemoryRegistry` one to one. Timestamps are absolute Unix
-//! milliseconds, the unit `PEXPIREAT` takes, read from the injected [`session_core::Clock`] and
-//! passed to every script. Redis-side key expiry is deliberately **not** used for session
-//! state: it would delete records on the Redis server's clock (not the injected one, so TTL
-//! tests and scenario clocks would diverge), skip the `Expired` state (a late response would
-//! read as unknown instead of expired) and leave the indexes pointing at deleted records.
-//! Removal is explicit, through `expire_due` and `purge`, exactly as in memory.
+//! milliseconds, the unit `PEXPIREAT` takes. Redis-side key expiry is deliberately **not** used
+//! for session state: it would skip the `Expired` state (a late response would read as unknown
+//! instead of expired) and leave the indexes pointing at deleted records. Removal is explicit,
+//! through `expire_due` and `purge`, exactly as in memory.
+//!
+//! # Time
+//!
+//! With [`TimeSource::RedisServer`] (the default, and the production setting) every script
+//! reads the server clock (`TIME`) itself: `insert` computes `expires_at` from it, and
+//! `resolve`, `claim`, `expire_due` and `purge` judge expiry by it at the moment they run. So a
+//! claim that was dispatched in time but reaches Redis after the TTL is refused, as
+//! `MemoryRegistry` refuses one that waits for its lock past the TTL, and all workers judge
+//! expiry on one clock regardless of their own. [`TimeSource::Injected`] sends the caller's
+//! clock reading instead; it exists for deterministic tests and lab scenarios and has the
+//! in-transit caveat (a call is judged at its dispatch time).
 //!
 //! # Atomicity: Lua, not `MULTI`/`WATCH`
 //!
@@ -92,14 +101,16 @@
 //! The MVP state machine (`Pending -> Consumed` after validation) needs no `Reserved` state:
 //! workers decrypt and validate in parallel without touching the store, and only the claim
 //! writes. Because the claim is one atomic script that requires `Pending` at the resolved
-//! incarnation and revision, exactly one claim per session commits regardless of how many
+//! origin, incarnation and revision, exactly one claim per session commits regardless of how many
 //! workers race (tests: 2/16/128-way across two registries on separate connections); the losers
 //! see `Replay`. A lease with fencing tokens would only be needed if the commit were not a
 //! single atomic step (e.g. results written to a second system after the CAS) or to stop
 //! duplicate decryption work; neither applies here.
 //!
-//! Clocks: each worker passes its own clock reading, so workers should run synchronized clocks;
-//! a skew shifts expiry decisions by the skew, as it would for any wall-clock TTL.
+//! Candidates are bound to the record that issued them: the record's random key reference is
+//! the candidate's origin token, and `claim` checks it before anything else, so a candidate from
+//! another namespace (or registry) is `UnknownSession` even if id, incarnation and revision
+//! coincide.
 //!
 //! Single Redis server only; the scripts build key names from the prefix instead of declaring
 //! them in `KEYS`, so Redis Cluster is not supported (the shared hash tag keeps a port feasible).
@@ -110,4 +121,4 @@ mod registry;
 mod scripts;
 
 pub use keys::{KEY_TABLE_SLACK, KeyTable};
-pub use registry::{RedisRegistry, SetupError};
+pub use registry::{RedisRegistry, SetupError, TimeSource};

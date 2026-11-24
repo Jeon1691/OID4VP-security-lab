@@ -12,11 +12,11 @@ use serde::de::DeserializeOwned;
 use session_core::{
     Candidate, ClaimError, Clock, IngressHint, InsertError, NewSession, RegistryConfig,
     ResolutionStrategy, ResolveError, ResponseDigest, Revision, RoutePolicy, SessionSnapshot,
-    SessionState, SessionStore, StoreUnavailable, Timestamp,
+    SessionState, SessionStore, StoreRef, StoreUnavailable, SystemClock, Timestamp,
 };
 
 use crate::codec::{self, Fields, Record, Reply};
-use crate::keys::{KEY_TABLE_SLACK, KeyTable, new_key_ref};
+use crate::keys::{KEY_REF_HEX_LEN, KEY_TABLE_SLACK, KeyTable, new_key_ref};
 use crate::scripts::{RECORD_FIELDS, SCRIPTS};
 
 /// How long one Redis call may take before it fails closed. Loopback Redis answers in well
@@ -55,6 +55,28 @@ enum Outcome {
     Unknown,
 }
 
+/// Extra lifetime of a local key beyond its session's TTL under [`TimeSource::RedisServer`].
+/// The table judges TTLs by this host's clock while Redis judges them by its own; the grace
+/// covers the offset between the two (NTP keeps it far smaller), so a key is never dropped
+/// while Redis still considers its session live. A key that outlives its session is harmless:
+/// `resolve` never returns a session past its TTL.
+const SERVER_TIME_KEY_GRACE: Duration = Duration::from_secs(30);
+
+/// Which clock judges session TTLs. Defaults to [`TimeSource::RedisServer`].
+#[derive(Default)]
+pub enum TimeSource {
+    /// The Redis server's clock, read inside every script (`TIME`) at the moment it decides.
+    /// The production setting: a call delayed in transit is judged on arrival (a claim that
+    /// reaches Redis after the TTL does not commit), and every worker uses one clock.
+    #[default]
+    RedisServer,
+    /// A caller-supplied clock, read by the worker before each call and sent with it. For
+    /// deterministic tests and lab scenarios only: a call delayed in transit is judged at its
+    /// dispatch time (a claim sent just before the TTL can still commit after it), and workers
+    /// with different clocks disagree by their skew.
+    Injected(Arc<dyn Clock>),
+}
+
 /// Errors from [`RedisRegistry::connect`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SetupError {
@@ -78,7 +100,7 @@ pub struct RedisRegistry<K, R> {
     conn: ConnectionManager,
     /// `{<namespace>}:`, the hash-tagged prefix of every key.
     prefix: String,
-    clock: Arc<dyn Clock>,
+    time: TimeSource,
     config: RegistryConfig,
     keys: KeyTable<K>,
     // Results are serialized into Redis, never held: no `R` value lives in the registry.
@@ -86,7 +108,8 @@ pub struct RedisRegistry<K, R> {
 }
 
 impl<K, R> RedisRegistry<K, R> {
-    /// Connects to `url` and serves sessions under `namespace`, judging TTLs by `clock`.
+    /// Connects to `url` and serves sessions under `namespace`, judging TTLs by `time`
+    /// ([`TimeSource::RedisServer`] outside tests).
     ///
     /// Registries with the same namespace on the same server are workers of one registry and
     /// must use the same `config`. `keys` holds the private-key handles; share it between
@@ -97,7 +120,7 @@ impl<K, R> RedisRegistry<K, R> {
     pub async fn connect(
         url: &str,
         namespace: &str,
-        clock: Arc<dyn Clock>,
+        time: TimeSource,
         config: RegistryConfig,
         keys: KeyTable<K>,
     ) -> Result<Self, SetupError> {
@@ -121,7 +144,7 @@ impl<K, R> RedisRegistry<K, R> {
         Ok(Self {
             conn,
             prefix: format!("{{{namespace}}}:"),
-            clock,
+            time,
             config,
             keys,
             _results: PhantomData,
@@ -134,8 +157,29 @@ impl<K, R> RedisRegistry<K, R> {
         &self.keys
     }
 
-    fn now(&self) -> Timestamp {
-        codec::clamp(self.clock.now())
+    /// The `now` argument of every script: empty for server time, else the injected clock.
+    fn script_now(&self) -> String {
+        match &self.time {
+            TimeSource::RedisServer => String::new(),
+            TimeSource::Injected(clock) => codec::clamp(clock.now()).as_unix_millis().to_string(),
+        }
+    }
+
+    /// This host's view of the time, for the local key table only.
+    fn local_now(&self) -> Timestamp {
+        match &self.time {
+            TimeSource::RedisServer => codec::clamp(SystemClock.now()),
+            TimeSource::Injected(clock) => codec::clamp(clock.now()),
+        }
+    }
+
+    /// When the local key of a session with `ttl` inserted now may go.
+    fn local_key_expiry(&self, ttl: Duration) -> Timestamp {
+        let grace = match self.time {
+            TimeSource::RedisServer => SERVER_TIME_KEY_GRACE,
+            TimeSource::Injected(_) => Duration::ZERO,
+        };
+        codec::clamp(self.local_now().saturating_add(ttl).saturating_add(grace))
     }
 
     fn millis(d: Duration) -> u64 {
@@ -176,9 +220,9 @@ impl<K, R> RedisRegistry<K, R> {
     }
 
     async fn insert_impl(&self, session: NewSession<K>) -> Result<SessionSnapshot<R>, InsertError> {
-        let now = self.now();
-        let expires_at = codec::clamp(now.saturating_add(session.ttl));
-        if expires_at <= now {
+        // expires_at itself is computed by the script, on the clock that judges expiry.
+        let ttl_ms = Self::millis(session.ttl);
+        if ttl_ms == 0 {
             return Err(InsertError::ZeroTtl);
         }
         let NewSession {
@@ -187,7 +231,7 @@ impl<K, R> RedisRegistry<K, R> {
             route_token,
             kid,
             key,
-            ttl: _,
+            ttl,
         } = session;
         let key_ref = new_key_ref()?;
         // The key is in the table before the record is visible in Redis, so another worker
@@ -196,8 +240,9 @@ impl<K, R> RedisRegistry<K, R> {
         // cancelled call, the script may still have run, so the key stays until `purge` /
         // `expire_due` drop it at its TTL; the table cap bounds how many such keys pile up.
         let cap = self.config.max_pending.saturating_add(KEY_TABLE_SLACK);
+        let entry = (id.clone(), self.local_key_expiry(ttl), key);
         self.keys
-            .insert(key_ref.clone(), (id.clone(), expires_at, key), cap, now)?;
+            .insert(key_ref.clone(), entry, cap, self.local_now())?;
         let route = route_token.to_url_segment();
         let [mode, b1, b2, b3] = codec::encode_binding(&binding);
         let unique = if self.config.route_policy == RoutePolicy::UniquePerSession {
@@ -205,16 +250,16 @@ impl<K, R> RedisRegistry<K, R> {
         } else {
             "0"
         };
-        let (now_s, exp_s, max_s) = (
-            now.as_unix_millis().to_string(),
-            expires_at.as_unix_millis().to_string(),
+        let (now_s, ttl_s, max_s) = (
+            self.script_now(),
+            ttl_ms.to_string(),
             self.config.max_pending.to_string(),
         );
         let kid_s = kid.as_ref().map_or("", KeyId::as_str);
         let args: [&[u8]; 12] = [
             id.as_bytes(),
             now_s.as_bytes(),
-            exp_s.as_bytes(),
+            ttl_s.as_bytes(),
             route.as_bytes(),
             kid_s.as_bytes(),
             key_ref.as_bytes(),
@@ -236,6 +281,7 @@ impl<K, R> RedisRegistry<K, R> {
         match f.text()?.as_str() {
             "ok" => {
                 let _incarnation = f.number()?;
+                let expires_at = Timestamp::from_unix_millis(f.number()?);
                 self.forget(&f.rest()?);
                 Ok(SessionSnapshot::from_store_record(
                     id,
@@ -252,6 +298,10 @@ impl<K, R> RedisRegistry<K, R> {
                 self.forget(&[key_ref]);
                 let limit = self.config.max_pending;
                 Err(InsertError::Capacity { limit })
+            }
+            "zero_ttl" => {
+                self.forget(&[key_ref]);
+                Err(InsertError::ZeroTtl)
             }
             "duplicate_session" => {
                 self.forget(&[key_ref]);
@@ -308,8 +358,7 @@ impl<K, R> RedisRegistry<K, R> {
                 budget.get().saturating_add(1),
             ),
         };
-        let now_ts = self.now();
-        let now = now_ts.as_unix_millis().to_string();
+        let now = self.script_now();
         let limit_s = limit.to_string();
         let args: [&[u8]; 7] = [
             kind.as_bytes(),
@@ -324,6 +373,8 @@ impl<K, R> RedisRegistry<K, R> {
         let (consumed, expired) = (f.number()?, f.number()?);
         let saw_due = f.text()? == "1";
         let live = usize::try_from(f.number()?).map_err(|_| StoreUnavailable)?;
+        // The instant the script judged expiry at (server time, or the injected clock).
+        let now_ts = Timestamp::from_unix_millis(f.number()?);
         let mut records = Vec::new();
         while !f.is_done() {
             let id = codec::session_id(f.text()?)?;
@@ -378,9 +429,16 @@ impl<K, R> RedisRegistry<K, R> {
             .into_iter()
             .map(|(id, r)| {
                 let key = self.keys.get(&r.key_ref, &id)?;
+                // The key reference doubles as the candidate's origin: random per insertion,
+                // so it names this record in this namespace and no other.
+                let origin = u128::from_str_radix(&r.key_ref, 16).map_err(|_| StoreUnavailable)?;
+                let store_ref = StoreRef {
+                    incarnation: r.incarnation,
+                    origin,
+                };
                 Ok(Candidate::from_store_record(
                     id,
-                    r.incarnation,
+                    store_ref,
                     r.binding,
                     r.kid,
                     key,
@@ -402,14 +460,15 @@ impl<K, R> RedisRegistry<K, R> {
     {
         // A result that cannot be stored is never committed.
         let encoded = serde_json::to_vec(&result).map_err(|_| StoreUnavailable)?;
-        let now = self.now();
-        let (inc, rev, now_s, retention) = (
-            candidate.incarnation().to_string(),
+        let store_ref = candidate.store_ref();
+        let (inc, rev, now_s, retention, origin) = (
+            store_ref.incarnation.to_string(),
             candidate.revision().get().to_string(),
-            now.as_unix_millis().to_string(),
+            self.script_now(),
             Self::millis(self.config.consumed_retention).to_string(),
+            format!("{:0width$x}", store_ref.origin, width = KEY_REF_HEX_LEN),
         );
-        let args: [&[u8]; 7] = [
+        let args: [&[u8]; 8] = [
             candidate.id().as_bytes(),
             inc.as_bytes(),
             rev.as_bytes(),
@@ -417,6 +476,7 @@ impl<K, R> RedisRegistry<K, R> {
             &encoded,
             now_s.as_bytes(),
             retention.as_bytes(),
+            origin.as_bytes(),
         ];
         let mut f = self.run(&SCRIPTS.claim, &args).await?;
         match f.text()?.as_str() {
@@ -499,9 +559,8 @@ impl<K, R> RedisRegistry<K, R> {
     /// Drops local keys past their TTL, then runs a sweep script and drops the keys it reports.
     /// The local step comes first, so it also happens while Redis is unreachable.
     async fn sweep(&self, script: &Script) -> Result<usize, StoreUnavailable> {
-        let now = self.now();
-        self.keys.remove_due(now)?;
-        let now_s = now.as_unix_millis().to_string();
+        self.keys.remove_due(self.local_now())?;
+        let now_s = self.script_now();
         let refs = self.run(script, &[now_s.as_bytes()]).await?.rest()?;
         self.forget(&refs);
         Ok(refs.len())

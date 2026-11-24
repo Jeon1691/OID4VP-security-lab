@@ -11,6 +11,9 @@ use session_core::{StoreUnavailable, Timestamp};
 /// coordination through Redis.
 const KEY_REF_BYTES: usize = 16;
 
+/// Length of a hex-encoded key reference (two digits per byte).
+pub(crate) const KEY_REF_HEX_LEN: usize = KEY_REF_BYTES * 2;
+
 /// Keys a [`KeyTable`] may hold beyond the registry's `max_pending`: twice the largest lab
 /// scenario (128 concurrent sessions).
 ///

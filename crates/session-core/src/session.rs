@@ -166,6 +166,10 @@ pub struct Candidate<K> {
     /// Which insertion of `id` this candidate names, so a candidate for a purged session cannot
     /// commit a later session that reuses the id.
     pub(crate) incarnation: u64,
+    /// Which store issued this candidate (a per-registry id in memory, a per-insertion random
+    /// token in Redis), so a candidate from one registry cannot commit another registry's
+    /// session that happens to share id, incarnation and revision.
+    pub(crate) origin: u128,
     pub(crate) binding: RequestBinding,
     pub(crate) kid: Option<KeyId>,
     pub(crate) key: Arc<K>,
@@ -211,17 +215,31 @@ impl<K> Candidate<K> {
     }
 }
 
+/// Which authoritative record a [`Candidate`] names, as a store backend tracks it (feature
+/// `store-backend`): the insertion of the id, and an opaque token the issuing store can
+/// recognise as its own.
+#[cfg(feature = "store-backend")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoreRef {
+    /// Which insertion of the id.
+    pub incarnation: u64,
+    /// Store-issued origin token; `claim` must refuse a candidate whose token is not the one
+    /// it issued for that record (`ClaimError::UnknownSession`).
+    pub origin: u128,
+}
+
 /// For [`SessionStore`](crate::SessionStore) backends outside this crate (feature
 /// `store-backend`). A backend must only hand out candidates for records it holds as `Pending`,
-/// and its `claim` must re-check `incarnation` and `revision` against the authoritative record,
-/// because the type no longer guarantees that a candidate came from `resolve`.
+/// and its `claim` must re-check the [`StoreRef`] (origin first) and `revision` against the
+/// authoritative record, because the type no longer guarantees that a candidate came from
+/// `resolve`.
 #[cfg(feature = "store-backend")]
 impl<K> Candidate<K> {
-    /// A candidate for the authoritative record `id` / `incarnation` at `revision`.
+    /// A candidate for the authoritative record `id` / `store_ref` at `revision`.
     #[must_use]
     pub const fn from_store_record(
         id: SessionId,
-        incarnation: u64,
+        store_ref: StoreRef,
         binding: RequestBinding,
         kid: Option<KeyId>,
         key: Arc<K>,
@@ -230,7 +248,8 @@ impl<K> Candidate<K> {
     ) -> Self {
         Self {
             id,
-            incarnation,
+            incarnation: store_ref.incarnation,
+            origin: store_ref.origin,
             binding,
             kid,
             key,
@@ -239,10 +258,13 @@ impl<K> Candidate<K> {
         }
     }
 
-    /// Which insertion of the id this candidate names; `claim` compares it.
+    /// Which record this candidate names; `claim` compares it.
     #[must_use]
-    pub const fn incarnation(&self) -> u64 {
-        self.incarnation
+    pub const fn store_ref(&self) -> StoreRef {
+        StoreRef {
+            incarnation: self.incarnation,
+            origin: self.origin,
+        }
     }
 }
 
@@ -251,6 +273,7 @@ impl<K> Clone for Candidate<K> {
         Self {
             id: self.id.clone(),
             incarnation: self.incarnation,
+            origin: self.origin,
             binding: self.binding.clone(),
             kid: self.kid.clone(),
             key: Arc::clone(&self.key),
@@ -264,6 +287,7 @@ impl<K: PartialEq> PartialEq for Candidate<K> {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
             && self.incarnation == other.incarnation
+            && self.origin == other.origin
             && self.binding == other.binding
             && self.kid == other.kid
             && self.key == other.key
