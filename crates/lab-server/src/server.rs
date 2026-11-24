@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::body::Bytes;
@@ -1104,13 +1104,16 @@ async fn pipeline(
     let issuer = state.trusted_issuer.clone();
     // KB-JWT freshness is judged on this clock, in NumericDate seconds (RFC 7519 §2).
     let now = SystemClock.now().as_unix_millis() / MILLIS_PER_SECOND;
-    let (trial, candidates) = tokio::task::spawn_blocking(move || {
+    let (trial, trial_time, candidates) = tokio::task::spawn_blocking(move || {
         let _slot = slot;
-        (trial(&jwe, &candidates, &issuer, now), candidates)
+        let started = Instant::now();
+        let trial = trial(&jwe, &candidates, &issuer, now);
+        (trial, started.elapsed(), candidates)
     })
     .await
     .map_err(|_| Rejection::TrialAborted)?;
     record.hpke_attempts = trial.attempts;
+    record.trial_time = trial_time;
     if trial.attempts > 0 {
         record.crypto_result = if trial.opened == 0 {
             CryptoResult::NoneOpened
