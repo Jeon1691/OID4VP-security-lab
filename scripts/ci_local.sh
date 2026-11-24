@@ -117,7 +117,11 @@ REQUIRED_TESTS=(
   invalid_jwe_does_not_consume_the_session
   generic_rejection_bodies_are_byte_identical
   hardened_mode_has_no_shared_route
-  research_mode_refuses_non_loopback_bind
+  every_mode_binds_loopback_only
+  presentation_with_extra_or_oversized_members_is_rejected_and_does_not_consume
+  results_are_served_only_by_result_token
+  jwe_without_kid_is_rejected_on_every_route
+  request_limit_sheds_load_and_times_out_stalled_bodies
   sweep_expires_and_purges_stale_sessions
 )
 
