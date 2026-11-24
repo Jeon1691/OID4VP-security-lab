@@ -194,6 +194,9 @@ REQUIRED_TESTS=(
   sd_jwt::tests::key_binding_jwt_claims_and_header_are_enforced
   sd_jwt::tests::sizes_and_counts_are_bounded_before_any_crypto
   sd_jwt::tests::sd_jwt_vc_profile_enforces_vct_and_exactly_the_requested_claims
+  sd_jwt::tests::kb_jwt_exp_and_nbf_have_their_own_error
+  sd_jwt::tests::disclosures_outside_the_requested_claims_are_rejected_at_any_depth
+  sd_jwt::tests::non_disclosable_claims_must_not_carry_digests
   jose::tests::strict_json_refuses_duplicate_members_at_any_depth
   # session-redis (IMP-014): the shared contract suite on MemoryRegistry, and the fail-closed
   # checks that need no server. The Redis side runs in the redis stage.
