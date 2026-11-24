@@ -155,6 +155,10 @@ async fn issue_792_shared_uri_and_kid_leave_nothing_outside_the_ciphertext_to_co
         distinct(requests.iter().map(|r| r.response_uri.as_str())),
         1
     );
+    assert!(
+        requests[0].kid.is_some(),
+        "the shared key is advertised with a kid"
+    );
     assert_eq!(distinct(requests.iter().map(|r| r.kid.as_deref())), 1);
     assert_eq!(
         distinct(requests.iter().map(|r| r.public_key.to_bytes())),
@@ -209,6 +213,11 @@ async fn issue_792_shared_uri_and_kid_leave_nothing_outside_the_ciphertext_to_co
 /// spec MUST: an unauthenticated cleartext `state` next to `response` is not accepted as a
 /// correlation shortcut; it is refused at admission, before any HPKE work, and the session
 /// stays pending and still accepts the same JWE alone.
+///
+/// Overlap: `http_e2e.rs` `admission_failures_are_rejected_before_decryption` already refuses
+/// a `state` *alone* and a plaintext `vp_token` beside `response`, on a unique URI. This test
+/// adds `state` *next to a valid `response`*, on the shared bounded-trial route, where a
+/// cleartext correlator would be the only pre-decryption way to pick a session.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn issue_792_cleartext_state_beside_the_jwe_is_refused_before_decryption() {
     let lab = Lab::start(shared_key(PAIR)).await;
@@ -258,12 +267,13 @@ async fn issue_792_cleartext_state_beside_the_jwe_is_refused_before_decryption()
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn issue_792_workarounds_compared_on_one_population() {
     for n in POPULATIONS {
-        // (name, mode, route, distinct response_uris, distinct kids, HPKE attempts)
+        // (name, mode, route, strategy, distinct response_uris, distinct kids, HPKE attempts)
         let cases = [
             (
                 "unique response_uri",
                 Mode::Hardened,
                 RouteKind::Unique,
+                ResolutionStrategy::UniqueUri,
                 n,
                 n,
                 1,
@@ -272,6 +282,7 @@ async fn issue_792_workarounds_compared_on_one_population() {
                 "unique kid",
                 Mode::Research(SharedRouteStrategy::UniqueKid),
                 RouteKind::Shared,
+                ResolutionStrategy::UniqueKid,
                 1,
                 n,
                 1,
@@ -280,12 +291,13 @@ async fn issue_792_workarounds_compared_on_one_population() {
                 "trial decryption",
                 shared_key(n),
                 RouteKind::Shared,
+                ResolutionStrategy::BoundedTrial(CandidateBudget::new(n).expect("budget")),
                 1,
                 1,
                 n,
             ),
         ];
-        for (name, mode, route, want_uris, want_kids, want_attempts) in cases {
+        for (name, mode, route, want_strategy, want_uris, want_kids, want_attempts) in cases {
             let lab = Lab::start(mode).await;
             let sessions = lab.sessions(route, n).await;
             let mut requests = Vec::with_capacity(n);
@@ -300,6 +312,7 @@ async fn issue_792_workarounds_compared_on_one_population() {
             let (status, _) = lab.respond(target, &SealOptions::default()).await;
             assert_eq!(status, OK, "{name}, N={n}");
             let record = lab.record();
+            assert_eq!(record.strategy, want_strategy, "{name}, N={n}");
             assert_eq!(record.candidate_count, want_attempts, "{name}, N={n}");
             assert_eq!(record.hpke_attempts, want_attempts, "{name}, N={n}");
             assert_eq!(

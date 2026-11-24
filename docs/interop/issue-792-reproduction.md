@@ -21,11 +21,13 @@ anywhere.
 
 **Section numbers.** The issue cites "§14.3.2" for Protection of the Response URI. In the
 11 November 2026 draft, §14.3 is Session Fixation and Protection of the Response URI is
-**§14.4.2**. The draft's own Document History still says "Section 14.3.2. Protection of the
-Response URI". Below, section numbers follow the 11 November 2026 draft.
+**§14.4.2**. The draft's Document History records the earlier numbering ("Section 14.3.2. Protection
+of the Response URI"). Below, section numbers follow the 11 November 2026 draft.
 
 ### 1.1 Spec text quoted (11 November 2026 Editor's draft)
 
+- **§5.1, `client_metadata.jwks`**: "Each JWK in the set MUST have a kid (Key ID) parameter
+  that uniquely identifies the key within the context of the request."
 - **§8.3**: "If the selected public key contains a kid parameter, the JWE MUST include the same
   value in the kid JWE Header Parameter (as defined in Section 4.1.6) of the encrypted
   response. This enables the Verifier to easily identify the specific public key that was
@@ -96,9 +98,9 @@ New tests are in `crates/lab-server/tests/issue_792_scenarios.rs` and are listed
 | Claim | Status | Evidence |
 | --- | --- | --- |
 | C1 | **Reproduced** (crypto level and HTTP level) | jose-hpke `direct_post_bound_jwe_opens_only_with_identical_session` and `direct_post_bound_jwe_fails_with_any_single_field_changed`. The second includes empty `info`, which is the "decrypt first" order. HTTP: `jwe_bound_to_another_sessions_values_fails` (each of nonce, client_id and response_uri changed → `Rejection::Decrypt`, 1 attempt, session pending). |
-| C2 | **Reproduced** | New: `issue_792_shared_uri_and_kid_leave_nothing_outside_the_ciphertext_to_correlate_on`. With a shared URI and a shared key, the request objects of N=8 sessions differ only in `nonce`, the protected headers of their honest JWEs are byte-identical, and the resolver must return all N live sessions as candidates. The lab issues no `state` at all. |
+| C2 | **Reproduced** (the no-correlator part) | New: `issue_792_shared_uri_and_kid_leave_nothing_outside_the_ciphertext_to_correlate_on`. With a shared URI and a shared key, the request objects of N=8 sessions differ only in `nonce`, the protected headers of their honest JWEs are byte-identical, and the resolver must return all N live sessions as candidates. The lab issues no `state` at all. |
 | C3 | **Partly reproduced** | The HPKE half is covered by C1: the key alone with empty `info` cannot open. The ECDH-ES half is only the G0-D SpruceID round trip (`ecdh_es_direct_post_jwt_round_trip_completes_with_success`). That flow routes by a per-session URL path, not by `state`, so the lab has no 1.0-style "decrypt, then read `state`" Verifier. |
-| C4 | **Reproduced** | Bounded trial: every session shares one `kid`, so `kid` selects nothing (`issue_792_workarounds_compared_on_one_population`: N distinct sessions, 1 distinct `kid`). New: `issue_792_kid_of_another_session_on_the_unique_kid_route_fails_closed` shows that even when `kid` is per session, it is an unauthenticated hint. |
+| C4 | **Reproduced** | Bounded trial: every session shares one `kid`, so `kid` selects nothing (`issue_792_workarounds_compared_on_one_population`: N distinct sessions, 1 distinct `kid`). New: `issue_792_kid_of_another_session_on_the_unique_kid_route_fails_closed` shows that even when `kid` is per session, it is an unauthenticated hint. Note that §5.1 requires a `kid` that is unique "within the context of the request", not across requests, so one key and `kid` shared by every request (bounded trial) is permitted by the text, and `kid` is not specified as a session identifier. |
 | C5 | **Reproduced** (as the consequence of C1 + C2) | The lab can only break the loop with a pre-decryption selector (route token or per-session `kid`) or by trying every candidate. |
 | C6 (1) | **Reproduced** | `unique_uri_among_many_sessions_consumes_only_the_addressed_one` (N=8). New matrix: `issue_792_workarounds_compared_on_one_population` (N=2/8/32: 1 candidate, 1 attempt). Binding strength: the response_uri case of `jwe_bound_to_another_sessions_values_fails`. |
 | C6 (2) | **Reproduced** | `unique_kid_on_shared_route_yields_one_candidate_and_one_attempt`, the matrix test (1 attempt), and the new misdirected-`kid` test. |
@@ -140,7 +142,9 @@ New tests are in `crates/lab-server/tests/issue_792_scenarios.rs` and are listed
    exceeds the budget, every response on that route is refused before decryption, honest ones
    included (`bounded_trial_over_budget_is_rejected_without_decryption`). Whoever can open
    sessions can therefore deny service on the shared route. Below the budget, each
-   unauthenticated POST costs N HPKE decapsulations. The issue does not mention either effect.
+   unauthenticated POST costs N HPKE decapsulations. The issue notes the O(n) cost; it does not
+   discuss that any unauthenticated sender can trigger it, or the all-or-nothing failure once
+   the budget is exceeded.
 5. **The shared strategies leak information through timing (documented, not measured).** The
    number of attempts per POST equals the live population under bounded trial, and unique-kid
    reveals whether a `kid` is pending. The HTTP answer never shows this, but response timing
@@ -179,7 +183,10 @@ New tests are in `crates/lab-server/tests/issue_792_scenarios.rs` and are listed
 - §5.2: a fresh nonce for every Authorization Request (MUST). Findings §4.1 and §4.3 depend on
   it.
 - §8.3.1: `session_info` for encryption and decryption (MUST).
-- §8.3: the JWE `kid` equals the chosen JWK's `kid` when the JWK has one (MUST).
+- §5.1 and §8.3: every JWK in `client_metadata.jwks` has a `kid` (MUST, §5.1), and the JWE
+  carries the chosen JWK's `kid` (MUST, §8.3). The lab advertises every key with a `kid`, so
+  refusing a JWE without one on every route (`jwe_without_kid_is_rejected_on_every_route`)
+  follows from these two MUSTs.
 - §14.2.2: every presentation is bound to `client_id` and `nonce` (MUST).
 
 ### 6.2 Candidate spec text (offered to the WG as input, not decided)
@@ -211,7 +218,6 @@ New tests are in `crates/lab-server/tests/issue_792_scenarios.rs` and are listed
 
 - Unique response_uri per session, as the only strategy in Hardened mode. A shared route exists
   only in Research mode and needs a fixed strategy (`hardened_mode_has_no_shared_route`).
-- `kid` required on every route.
 - Only `response` in the body: a cleartext `state` or `vp_token` is refused at admission.
 - A Verifier-wide replay guard on the JWE digest and the holder-proof digest.
 - A hard candidate budget; no stop-at-first under bounded trial.
