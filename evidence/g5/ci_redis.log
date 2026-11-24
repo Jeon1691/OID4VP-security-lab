@@ -1,0 +1,121 @@
+redis_server=pass (disposable valkey/valkey:8.1.12@sha256:5032c4dd7abe08d6fd9382054608183e2bf1f7e3895ef619b8784698454325f7)
+## redis_test: cargo test -p session-redis --all-features --locked -- --ignored
+   Compiling smallvec v1.16.6
+   Compiling serde_core v1.0.229
+   Compiling memchr v2.8.3
+   Compiling form_urlencoded v1.2.3
+   Compiling num-traits v0.2.19
+   Compiling slab v0.4.12
+   Compiling futures-channel v0.3.34
+   Compiling syn v3.0.10
+   Compiling futures-util v0.3.34
+   Compiling proptest v1.12.0
+   Compiling serde_json v1.0.154
+   Compiling serde v1.0.229
+   Compiling synstructure v0.14.0
+   Compiling zerovec-derive v0.11.7
+   Compiling displaydoc v0.2.7
+   Compiling tokio-macros v2.7.2
+   Compiling thiserror-impl v2.0.21
+   Compiling zerofrom-derive v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling tokio v1.54.1
+   Compiling zerofrom v0.1.8
+   Compiling thiserror v2.0.21
+   Compiling yoke v0.8.4
+   Compiling protocol-model v0.0.0 (./crates/protocol-model)
+   Compiling session-core v0.0.0 (./crates/session-core)
+   Compiling zerovec v0.11.9
+   Compiling zerotrie v0.2.5
+   Compiling tinystr v0.8.5
+   Compiling potential_utf v0.1.6
+   Compiling icu_collections v2.4.0
+   Compiling icu_locale_core v2.4.0
+   Compiling icu_provider v2.4.0
+   Compiling icu_properties v2.4.0
+   Compiling icu_normalizer v2.4.0
+   Compiling tokio-util v0.7.20
+   Compiling combine v4.6.9
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling url v2.5.9
+   Compiling redis v1.8.3
+   Compiling session-redis v0.0.0 (./crates/session-redis)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.03s
+     Running unittests src/lib.rs (target/debug/build/session-redis/a73d9c892897982a/out/session_redis-a73d9c892897982a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/contract.rs (target/debug/build/session-redis/6d4ecda4561ee511/out/contract-6d4ecda4561ee511)
+
+running 27 tests
+test redis::insert_rejects_duplicate_id_and_zero_ttl ... ok
+test redis::failed_attempt_leaves_session_pending_and_claimable ... ok
+test redis::claim_of_unknown_session_is_rejected ... ok
+test redis::claim_just_before_expiry_succeeds ... ok
+test redis::dropped_claim_future_commits_nothing ... ok
+test redis::snapshot_round_trips_every_field ... ok
+test redis::candidate_from_another_registry_cannot_claim_its_session ... ok
+test redis::claim_after_expiry_is_rejected ... ok
+test redis::snapshots_are_point_in_time_copies ... ok
+test redis::sequential_replay_after_consume_is_rejected ... ok
+test redis::expired_sessions_are_never_candidates ... ok
+test redis::unique_strategy_refuses_an_ambiguous_hint ... ok
+test redis::unique_kid_checks_kid_uniqueness_before_route ... ok
+test redis::consumed_records_are_purged_after_retention ... ok
+test redis::consumed_sessions_are_never_candidates ... ok
+test redis::expire_and_purge_touch_only_due_sessions ... ok
+test redis::unique_route_policy_rejects_duplicate_route_token ... ok
+test redis::insert_beyond_pending_capacity_is_rejected ... ok
+test redis::stale_candidate_cannot_claim_a_reinserted_session ... ok
+test redis::unique_uri_checks_route_uniqueness_before_kid ... ok
+test redis::unknown_route_token_or_kid_yields_no_candidate ... ok
+test redis::bounded_trial_budget_counts_only_live_sessions ... ok
+test redis::concurrent_async_claims_commit_exactly_once ... ok
+test redis::bounded_trial_rejects_more_candidates_than_budget ... ok
+test redis::bounded_trial_returns_all_candidates_within_budget ... ok
+test redis::unique_uri_yields_exactly_one_candidate_among_sessions_sharing_kid ... ok
+test redis::unique_kid_yields_exactly_one_candidate_among_sessions_sharing_route ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.12s
+
+     Running tests/differential.rs (target/debug/build/session-redis/0f1785d9f2fb5e74/out/differential-0f1785d9f2fb5e74)
+
+running 1 test
+test redis_matches_memory_registry_on_random_operation_sequences ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.69s
+
+     Running tests/redis_backend.rs (target/debug/build/session-redis/317b1dd6af520e52/out/redis_backend-317b1dd6af520e52)
+
+running 15 tests
+test due_keys_are_dropped_while_redis_is_unreachable ... ok
+test worker_without_the_key_fails_closed ... ok
+test local_keys_are_dropped_once_sessions_leave_pending ... ok
+test counters_at_or_above_1e14_round_trip_exactly ... ok
+test server_time_mode_inserts_resolves_claims_and_sweeps ... ok
+test swapped_key_reference_fails_closed ... ok
+test index_entry_naming_another_session_fails_closed ... ok
+test candidate_from_another_namespace_cannot_claim_its_session ... ok
+test undecodable_record_fails_closed ... ok
+test private_keys_never_reach_redis ... ok
+test two_workers_racing_claims_commit_exactly_once ... ok
+test refused_insert_drops_its_key_immediately ... ok
+test redis_killed_mid_run_fails_closed_without_memory_fallback ... ok
+test claim_delayed_past_the_ttl_in_transit_is_not_committed ... ok
+test key_table_growth_is_bounded_during_an_outage ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 4.01s
+
+   Doc-tests session_redis
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+redis_test=pass
+tests_passed_total=43
+required_tests=pass
+stage_redis=pass

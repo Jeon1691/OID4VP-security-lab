@@ -19,6 +19,7 @@ evidence.
 | `scripts/` | Gate stages (shared by local and CI), upstream reproduction, evidence manifest |
 | `.github/workflows/` | `ci.yml` PR/main gate, `security.yml` daily advisory scan |
 | `evidence/g0/` | G0 run logs, upstream lockfile, advisory baseline, manifest |
+| `evidence/g5/` | G5 Redis-stage run (Valkey service, 2-worker races, fail-closed) and manifest |
 | `upstream/` | Pinned SpruceID checkout (git-ignored, recreated by `make g0-upstream`) |
 
 The MVP was limited to four packages (Notion 06 §6); `session-redis` is split out after G0/G1.

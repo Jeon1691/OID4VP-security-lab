@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-11-23T14:32:11+00:00",
-  "lab_git_sha": "a61a5d6896ff62e9338b4e2f73e512cbb66a5cea",
+  "generated_at": "2026-11-24T14:30:40+00:00",
+  "lab_git_sha": "7225594aac3dc0f307082337baf6a048e2af27ba",
   "lab_source_dirty": false,
   "spruce_openid4vp_sha": "c57a895884d039a741cc4b472c1698fb147ba487",
-  "cargo_lock_sha256": "c8f093ea095c6def3a1d00a8e99cfa4f4b74211d12b92ec216f704aa8d01f563",
+  "cargo_lock_sha256": "3c6c55cdd5778112c2c546eff5d2bcd148adb925453693cc3f5e63539332245a",
   "upstream_cargo_lock_sha256": "e959bcfb62707c9c6b07c42184cce618fa873b55f68e44fdf9c01586ce776474",
   "rustc_vv": [
     "rustc 1.100.0 (0ef1bc386 2026-11-09)",
@@ -39,6 +39,9 @@
       "deny": "pass",
       "advisory_baseline_sync": "pass",
       "core_containment": "pass",
+      "verifier_without_sealing": "pass",
+      "lab_server_default_check": "pass",
+      "verifier_without_store_backend": "pass",
       "audit": "pass",
       "stage_supply_chain": "pass"
     },
@@ -59,7 +62,7 @@
     }
   },
   "tests_passed": {
-    "ci_test": 2,
+    "ci_test": 185,
     "upstream_ci_local": 120
   }
 }
