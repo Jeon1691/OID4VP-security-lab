@@ -223,6 +223,17 @@ REQUIRED_TESTS=(
   stats::tests::schedule_is_a_reproducible_permutation
   stats::tests::percentiles_are_in_microseconds
   http::tests::positions_dedupe_for_small_n
+  # G6 invariants: exact attempt counts, rejection reasons, failing rows and exit status.
+  http::tests::honest_records_pass_every_case
+  http::tests::violated_invariants_fail_the_check
+  http::tests::bounded_trial_must_try_every_candidate_at_every_position
+  http::tests::unique_failures_must_make_exactly_one_attempt
+  http::tests::failure_cases_must_carry_their_rejection_reason
+  http::tests::a_violation_fails_the_row
+  http::tests::attempts_mean_counts_only_requests_with_an_evidence_record
+  http::tests::burst_with_limits_on_must_shed_load
+  tests::exit_code_fails_when_any_row_breaks_its_invariant
+  tests::arguments_must_exercise_over_budget_and_the_limited_burst
 )
 
 # Fails unless every named test ran and passed in this stage's log, and at least one test ran.
@@ -407,11 +418,26 @@ verifier_without_store_backend() {
   fi
 }
 
+# A plain `cargo build` / `cargo run` at the root builds the workspace default members. They must
+# leave lab-server a Verifier build: scenario-runner (G6) enables `wallet-sim` as a normal
+# dependency and is therefore kept out of `default-members`. This fails if it (or any other
+# crate that turns on a test-only lab-server feature) re-enters them. `--workspace` builds
+# are never Verifier builds.
+default_members_are_verifier_builds() {
+  local own
+  own="$(cargo tree --locked -e normal,features -i lab-server)" || return 1
+  if grep -E 'lab-server feature "(wallet-sim|lab-instrumentation)"' <<<"$own"; then
+    echo "a default workspace member enables a test-only lab-server feature"
+    return 1
+  fi
+}
+
 stage_supply_chain() {
   step deny cargo deny --locked check advisories licenses bans sources
   step advisory_baseline_sync advisory_baseline_sync
   step core_containment core_containment
   step verifier_without_sealing verifier_without_sealing
+  step default_members_are_verifier_builds default_members_are_verifier_builds
   step lab_server_default_check cargo check -p lab-server --locked
   step verifier_without_store_backend verifier_without_store_backend
   step audit cargo audit --deny warnings
