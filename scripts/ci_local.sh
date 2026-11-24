@@ -122,6 +122,10 @@ REQUIRED_TESTS=(
   results_are_served_only_by_result_token
   jwe_without_kid_is_rejected_on_every_route
   request_limit_sheds_load_and_times_out_stalled_bodies
+  cross_session_replay_on_shared_route_is_rejected
+  research_nonce_length_is_capped_so_the_presentation_always_fits
+  shutdown_drains_in_flight_requests_and_commits_nothing_afterwards
+  connection_cap_holds_connections_stalled_before_headers
   sweep_expires_and_purges_stale_sessions
 )
 
