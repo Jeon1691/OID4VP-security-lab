@@ -943,10 +943,10 @@ async fn pipeline(
 
     // HPKE is CPU-bound: run it on the blocking pool, at most `decryptions` trials at once.
     #[cfg(feature = "lab-instrumentation")]
-    state.parked_trials.fetch_add(1, Ordering::SeqCst);
+    let parked = ParkedTrial::enter(&state.parked_trials);
     let slot = Arc::clone(&state.decryptions).acquire_owned().await;
     #[cfg(feature = "lab-instrumentation")]
-    state.parked_trials.fetch_sub(1, Ordering::SeqCst);
+    drop(parked);
     let slot = slot.map_err(|_| Rejection::TrialAborted)?;
     let (trial, candidates) = tokio::task::spawn_blocking(move || {
         let _slot = slot;
@@ -1076,5 +1076,27 @@ fn single_response_param(body: &[u8]) -> Result<String, AdmissionError> {
     match response {
         Some(value) if !value.is_empty() => Ok(value.into_owned()),
         _ => Err(AdmissionError::MissingResponse),
+    }
+}
+
+/// Counts a POST as parked on the decryption semaphore for exactly as long as it waits there.
+///
+/// An RAII guard rather than paired `fetch_add`/`fetch_sub`: the request-timeout middleware
+/// drops the handler future while it is parked, and only `Drop` runs on that path.
+#[cfg(feature = "lab-instrumentation")]
+struct ParkedTrial<'a>(&'a AtomicUsize);
+
+#[cfg(feature = "lab-instrumentation")]
+impl<'a> ParkedTrial<'a> {
+    fn enter(counter: &'a AtomicUsize) -> Self {
+        counter.fetch_add(1, Ordering::SeqCst);
+        Self(counter)
+    }
+}
+
+#[cfg(feature = "lab-instrumentation")]
+impl Drop for ParkedTrial<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }

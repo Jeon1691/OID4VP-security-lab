@@ -1282,7 +1282,11 @@ async fn timed_out_parked_post_is_no_longer_counted_as_parked() {
         reply.expect("answered")
     };
     assert_eq!(reply.status, HTTP_REQUEST_TIMEOUT);
-    assert_eq!(lab.server.parked_trials(), 0, "timed-out POST still counted");
+    assert_eq!(
+        lab.server.parked_trials(),
+        0,
+        "timed-out POST still counted"
+    );
     drop(pause);
     lab.shutdown().await;
 }
