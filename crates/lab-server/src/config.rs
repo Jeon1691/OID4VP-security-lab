@@ -18,6 +18,27 @@ pub const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(300);
 /// memory, here to at most 10% beyond their lifetime.
 pub const DEFAULT_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Default upper bound on one request, headers to response (config candidate, not normative).
+///
+/// Loopback requests finish in milliseconds: a full 1 MiB body arrives almost at once, and the
+/// worst trial (256 candidates, one P-256 ECDH plus AEAD open each) takes well under a second
+/// in a debug build. Ten seconds only cuts off clients that stall a request (slow or missing
+/// body) while holding an in-flight slot; they are answered 408.
+pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Default cap on requests in flight at once (config candidate, not normative): four times the
+/// largest concurrent scenario (STATE-02, 128 POSTs). Above it the server answers 503 at once
+/// instead of queueing, so overload is visible in results. `/health` is exempt.
+pub const DEFAULT_MAX_IN_FLIGHT_REQUESTS: usize = 512;
+
+/// Default cap on HPKE trials running at once (config candidate, not normative).
+///
+/// Trials are CPU-bound and run on tokio's blocking pool; more of them than cores only adds
+/// contention. Eight covers typical developer and CI machines while leaving the async workers
+/// free, and bounds the CPU that concurrent unauthenticated POSTs can claim (each trial is at
+/// most `MAX_CANDIDATE_BUDGET` attempts). Further trials wait for a slot.
+pub const DEFAULT_MAX_CONCURRENT_DECRYPTIONS: usize = 8;
+
 /// Room for the form encoding around the JWE: the `response=` name (9 bytes) plus slack for a
 /// client that percent-encodes some of the base64url/`.` characters. Anything else is rejected
 /// by the form check anyway.
@@ -76,8 +97,8 @@ impl SharedRouteStrategy {
 pub enum Mode {
     /// Default: unique-uri routes only; the shared route does not exist (404).
     Hardened,
-    /// Adds the shared route with the given strategy. Loopback binds only (ADR-005). Unique-uri
-    /// routes keep working as in hardened mode.
+    /// Adds the shared route with the given strategy. Unique-uri routes keep working as in
+    /// hardened mode.
     Research(SharedRouteStrategy),
 }
 
@@ -86,7 +107,9 @@ pub enum Mode {
 pub struct LabConfig {
     /// Server mode.
     pub mode: Mode,
-    /// Listen address. Research mode requires a loopback address.
+    /// Listen address. Must be loopback in every mode (`IpAddr::is_loopback`: `127.0.0.0/8` or
+    /// `::1`). Lab policy: synthetic data, loopback only (ADR-005); serving anything else
+    /// needs an explicit future ADR.
     pub bind: SocketAddr,
     /// `client_id` of every request object.
     pub client_id: ClientIdWire,
@@ -94,6 +117,12 @@ pub struct LabConfig {
     pub session_ttl: Duration,
     /// Interval of the background expiry/purge sweep.
     pub sweep_interval: Duration,
+    /// Upper bound on one request; see [`DEFAULT_REQUEST_TIMEOUT`].
+    pub request_timeout: Duration,
+    /// Requests in flight before 503; see [`DEFAULT_MAX_IN_FLIGHT_REQUESTS`].
+    pub max_in_flight_requests: usize,
+    /// HPKE trials at once; see [`DEFAULT_MAX_CONCURRENT_DECRYPTIONS`].
+    pub max_concurrent_decryptions: usize,
 }
 
 impl LabConfig {
@@ -109,6 +138,9 @@ impl LabConfig {
             client_id: ClientIdWire::new(DEFAULT_CLIENT_ID).expect("constant client_id is valid"),
             session_ttl: DEFAULT_SESSION_TTL,
             sweep_interval: DEFAULT_SWEEP_INTERVAL,
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            max_in_flight_requests: DEFAULT_MAX_IN_FLIGHT_REQUESTS,
+            max_concurrent_decryptions: DEFAULT_MAX_CONCURRENT_DECRYPTIONS,
         }
     }
 }
@@ -116,15 +148,13 @@ impl LabConfig {
 /// Errors from [`crate::LabServer::start`].
 #[derive(Debug, thiserror::Error)]
 pub enum StartError {
-    /// Research mode was asked to bind a non-loopback address. Checked before binding.
-    #[error("research mode binds to loopback addresses only")]
-    ResearchRequiresLoopback,
-    /// The unspecified address (`0.0.0.0` / `::`) cannot appear in an exact `response_uri`.
-    #[error("bind address must be a concrete IP, not the unspecified address")]
-    UnspecifiedAddress,
-    /// The sweep interval is zero.
-    #[error("sweep interval must be non-zero")]
-    ZeroSweepInterval,
+    /// A non-loopback bind address (including `0.0.0.0`, `::` and IPv4-mapped addresses, which
+    /// `IpAddr::is_loopback` does not count as loopback). Checked before binding.
+    #[error("the lab binds to loopback addresses only")]
+    LoopbackOnly,
+    /// A zero sweep interval, request timeout or concurrency limit.
+    #[error("intervals, timeouts and limits must be non-zero")]
+    ZeroLimit,
     /// Binding or reading the listener address failed.
     #[error("bind failed: {0}")]
     Bind(#[from] std::io::Error),
@@ -135,14 +165,15 @@ pub enum StartError {
 
 /// Checks `config` before anything is bound.
 pub(crate) fn check(config: &LabConfig) -> Result<(), StartError> {
-    if matches!(config.mode, Mode::Research(_)) && !config.bind.ip().is_loopback() {
-        return Err(StartError::ResearchRequiresLoopback);
+    if !config.bind.ip().is_loopback() {
+        return Err(StartError::LoopbackOnly);
     }
-    if config.bind.ip().is_unspecified() {
-        return Err(StartError::UnspecifiedAddress);
-    }
-    if config.sweep_interval.is_zero() {
-        return Err(StartError::ZeroSweepInterval);
+    if config.sweep_interval.is_zero()
+        || config.request_timeout.is_zero()
+        || config.max_in_flight_requests == 0
+        || config.max_concurrent_decryptions == 0
+    {
+        return Err(StartError::ZeroLimit);
     }
     Ok(())
 }

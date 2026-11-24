@@ -8,9 +8,10 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
-use axum::extract::{DefaultBodyLimit, Path, State};
+use axum::extract::{DefaultBodyLimit, Path, Request, State};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderMap, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use base64::Engine as _;
@@ -29,6 +30,7 @@ use session_core::{
 };
 use sha2::{Digest as _, Sha256};
 use tokio::net::TcpListener;
+use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 
@@ -40,6 +42,18 @@ use crate::evidence::{
 };
 use crate::validate::{self, SYNTHETIC_CREDENTIAL_QUERY_ID, ValidatedResponse, ValidationError};
 
+/// Result of one HPKE trial over a resolve's candidates.
+struct Trial {
+    attempts: usize,
+    opened: usize,
+    /// Candidates that validated (all are tried; only the first result is kept).
+    validated: usize,
+    /// Index and result of the first validating candidate.
+    first: Option<(usize, ValidatedResponse)>,
+    /// First validation error among opened candidates.
+    first_error: Option<ValidationError>,
+}
+
 /// The one body answered for every resolve, parse, decrypt, validate and claim failure, so the
 /// response does not reveal whether a session exists, was consumed, expired or is shared
 /// (session-core `ResolveError` / `ClaimError` docs). Status 400.
@@ -49,6 +63,7 @@ pub const GENERIC_REJECTION_BODY: &str = r#"{"error":"invalid_request"}"#;
 const SESSIONS_PATH: &str = "/lab/v1/sessions";
 const REQUESTS_PATH: &str = "/lab/v1/requests";
 const RESPONSE_PATH: &str = "/lab/v1/response";
+const RESULTS_PATH: &str = "/lab/v1/results";
 /// Last path segment of the shared research route. Never a valid route token (wrong length),
 /// so it cannot collide with a unique route.
 const SHARED_SEGMENT: &str = "shared";
@@ -92,10 +107,30 @@ struct SharedRoute {
     shared_key: Option<(SessionKey, KeyId)>,
 }
 
-/// What `GET /lab/v1/requests/{id}` serves, and which registry holds the session.
+/// What `GET /lab/v1/requests/{id}` serves, which registry holds the session, and the result
+/// token that reads its outcome.
 struct IssuedRequest {
     route: RouteKind,
     request_object: String,
+    result_token: RouteToken,
+}
+
+/// Lookup tables of held sessions.
+///
+/// The request id appears in the `request_uri` the wallet sees; the result token is a separate
+/// 128-bit capability returned only in the session-creation response, so knowing the request
+/// id never unlocks the result. It reuses session-core's [`RouteToken`] for the same properties
+/// (OS CSPRNG, canonical parse, redacted `Debug`, comparison without early exit).
+#[derive(Default)]
+struct Issued {
+    requests: HashMap<SessionId, IssuedRequest>,
+    results: HashMap<RouteToken, SessionId>,
+}
+
+/// Global request limits (see the `config` defaults); `/health` is exempt.
+struct Limits {
+    in_flight: Arc<Semaphore>,
+    timeout: Duration,
 }
 
 struct AppState {
@@ -107,9 +142,12 @@ struct AppState {
     unique: Registry,
     /// Research mode only; `RoutePolicy::Shared`.
     shared: Option<SharedRoute>,
-    /// Request objects of held sessions. Entries are added only after the registry accepted
-    /// the session (so its capacity bounds this map) and pruned by the sweep after a purge.
-    requests: Mutex<HashMap<SessionId, IssuedRequest>>,
+    /// Request objects and result tokens of held sessions. Entries are added only after the
+    /// registry accepted the session (so its capacity bounds the maps) and pruned by the sweep
+    /// after a purge.
+    issued: Mutex<Issued>,
+    /// Slots for HPKE trials on the blocking pool.
+    decryptions: Arc<Semaphore>,
     evidence: EvidenceLog,
 }
 
@@ -121,9 +159,10 @@ impl AppState {
         }
     }
 
-    fn requests(&self) -> std::sync::MutexGuard<'_, HashMap<SessionId, IssuedRequest>> {
-        // Plain map of immutable entries; a panic elsewhere cannot leave it inconsistent.
-        self.requests.lock().unwrap_or_else(PoisonError::into_inner)
+    fn issued(&self) -> std::sync::MutexGuard<'_, Issued> {
+        // Plain maps of immutable entries, each insert/remove pair done under one guard; a
+        // panic elsewhere cannot leave them inconsistent.
+        self.issued.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Expires and purges both registries, then drops request objects of purged sessions.
@@ -139,9 +178,16 @@ impl AppState {
             let _ = registry.expire_due();
             let _ = registry.purge();
         }
-        self.requests().retain(|id, issued| {
-            self.registry(issued.route)
-                .is_some_and(|r| r.snapshot(id).ok().flatten().is_some())
+        let mut issued = self.issued();
+        let Issued { requests, results } = &mut *issued;
+        requests.retain(|id, request| {
+            let held = self
+                .registry(request.route)
+                .is_some_and(|r| r.snapshot(id).ok().flatten().is_some());
+            if !held {
+                results.remove(&request.result_token);
+            }
+            held
         });
     }
 }
@@ -159,7 +205,7 @@ impl LabServer {
     /// Checks the configuration, binds the listener and starts serving and sweeping.
     ///
     /// # Errors
-    /// [`StartError`]; research mode on a non-loopback address is refused before binding.
+    /// [`StartError`]; a non-loopback address is refused before binding.
     pub async fn start(config: LabConfig) -> Result<Self, StartError> {
         config::check(&config)?;
         let listener = TcpListener::bind(config.bind).await?;
@@ -193,8 +239,13 @@ impl LabServer {
             base_url: base_url.clone(),
             unique: registry(RoutePolicy::UniquePerSession),
             shared,
-            requests: Mutex::new(HashMap::new()),
+            issued: Mutex::new(Issued::default()),
+            decryptions: Arc::new(Semaphore::new(config.max_concurrent_decryptions)),
             evidence: evidence.clone(),
+        });
+        let limits = Arc::new(Limits {
+            in_flight: Arc::new(Semaphore::new(config.max_in_flight_requests)),
+            timeout: config.request_timeout,
         });
 
         let sweep_state = Arc::clone(&state);
@@ -207,7 +258,7 @@ impl LabServer {
                 sweep_state.sweep();
             }
         });
-        let app = router(state);
+        let app = router(state, limits);
         let serve = tokio::spawn(async move { axum::serve(listener, app).await });
         Ok(Self {
             addr,
@@ -247,7 +298,9 @@ impl LabServer {
     }
 
     /// Stops serving and sweeping. A serve or sweep task that panicked re-raises its panic, and
-    /// one that exited early panics, so a broken server fails the caller (tests).
+    /// one that exited early panics, so a broken server fails the caller (tests). A sweep panic
+    /// surfaces only here: while running, a dead sweep only means expired sessions linger
+    /// (session-core still checks TTLs lazily).
     pub async fn shutdown(self) {
         self.serve.abort();
         self.sweep.abort();
@@ -287,12 +340,11 @@ fn random_b64(bytes: usize) -> Option<String> {
     Some(URL_SAFE_NO_PAD.encode(buf))
 }
 
-fn router(state: Arc<AppState>) -> Router {
+fn router(state: Arc<AppState>, limits: Arc<Limits>) -> Router {
     let mut app = Router::new()
-        .route("/health", get(health))
         .route(SESSIONS_PATH, post(create_session))
         .route(&format!("{REQUESTS_PATH}/{{id}}"), get(get_request))
-        .route(&format!("{SESSIONS_PATH}/{{id}}/result"), get(get_result))
+        .route(&format!("{RESULTS_PATH}/{{token}}"), get(get_result))
         .route(&format!("{RESPONSE_PATH}/{{token}}"), post(post_unique));
     if state.shared.is_some() {
         // A static segment takes precedence over `{token}` in the router.
@@ -301,8 +353,28 @@ fn router(state: Arc<AppState>) -> Router {
             post(post_shared),
         );
     }
-    app.layer(DefaultBodyLimit::max(MAX_RESPONSE_BODY_BYTES))
+    let limited = app
+        .layer(DefaultBodyLimit::max(MAX_RESPONSE_BODY_BYTES))
+        .layer(middleware::from_fn_with_state(limits, limit));
+    Router::new()
+        .route("/health", get(health))
+        .merge(limited)
         .with_state(state)
+}
+
+/// In-flight limit and request timeout. Over the limit the request is refused with 503 at once
+/// (no queue, so overload shows in results). A request still running at the timeout, e.g. one
+/// whose body never arrives, is dropped and answered 408; dropping is safe because the claim
+/// is atomic and session-core futures are lazy. A trial already on the blocking pool runs to
+/// completion but its result is discarded, and that request leaves no evidence record.
+async fn limit(State(limits): State<Arc<Limits>>, request: Request, next: Next) -> Response {
+    let Ok(_slot) = Arc::clone(&limits.in_flight).try_acquire_owned() else {
+        return error_response(StatusCode::SERVICE_UNAVAILABLE, "server busy");
+    };
+    match tokio::time::timeout(limits.timeout, next.run(request)).await {
+        Ok(response) => response,
+        Err(_) => error_response(StatusCode::REQUEST_TIMEOUT, "request timed out"),
+    }
 }
 
 fn json_response(status: StatusCode, body: String) -> Response {
@@ -424,6 +496,12 @@ async fn issue(
     )
     .await?;
     let request_uri = format!("{}{REQUESTS_PATH}/{id}", state.base_url);
+    let result_token = RouteToken::generate().map_err(|_| fail())?;
+    let result_uri = format!(
+        "{}{RESULTS_PATH}/{}",
+        state.base_url,
+        result_token.to_url_segment()
+    );
     let route_name = match route {
         RouteKind::Unique => "unique",
         RouteKind::Shared => "shared",
@@ -432,13 +510,17 @@ async fn issue(
         "session_id": id.as_str(),
         "request_uri": request_uri,
         "response_uri": response_uri,
+        "result_uri": result_uri,
         "route": route_name,
     });
-    state.requests().insert(
+    let mut issued = state.issued();
+    issued.results.insert(result_token.clone(), id.clone());
+    issued.requests.insert(
         id,
         IssuedRequest {
             route,
             request_object,
+            result_token,
         },
     );
     Ok(created)
@@ -486,21 +568,35 @@ async fn get_request(State(state): State<Arc<AppState>>, Path(id): Path<String>)
     let Ok(id) = SessionId::new(id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let object = state.requests().get(&id).map(|r| r.request_object.clone());
+    let object = state
+        .issued()
+        .requests
+        .get(&id)
+        .map(|r| r.request_object.clone());
     match object {
         Some(object) => json_response(StatusCode::OK, object),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
-/// `GET /lab/v1/sessions/{id}/result`: `{"state": "pending"|"consumed"|"expired"}`, with the
-/// committed synthetic `vp_token` once consumed.
-async fn get_result(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    let Ok(id) = SessionId::new(id) else {
+/// `GET /lab/v1/results/{result_token}`: `{"state": "pending"|"consumed"|"expired"}`, with
+/// the committed synthetic `vp_token` once consumed. Only the result token from the
+/// session-creation response finds a session; the request id does not.
+async fn get_result(State(state): State<Arc<AppState>>, Path(token): Path<String>) -> Response {
+    let Ok(token) = RouteToken::parse(&token) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let route = state.requests().get(&id).map(|r| r.route);
-    let Some(registry) = route.and_then(|r| state.registry(r)) else {
+    let found = {
+        let issued = state.issued();
+        issued.results.get(&token).and_then(|id| {
+            let route = issued.requests.get(id)?.route;
+            Some((id.clone(), route))
+        })
+    };
+    let Some((id, route)) = found else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Some(registry) = state.registry(route) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let snapshot = match SessionStore::snapshot(registry, &id).await {
@@ -511,7 +607,7 @@ async fn get_result(State(state): State<Arc<AppState>>, Path(id): Path<String>) 
     let body = match snapshot.state() {
         SessionState::Pending => json!({ "state": "pending" }),
         SessionState::Consumed { result, .. } => {
-            json!({ "state": "consumed", "vp_token": result.vp_token })
+            json!({ "state": "consumed", "vp_token": result.vp_token() })
         }
         SessionState::Expired => json!({ "state": "expired" }),
     };
@@ -572,7 +668,9 @@ async fn respond(
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
     let mut record = EvidenceRecord::new(route.kind, route.strategy);
-    record.rejection = pipeline(&mut record, route, headers, body).await.err();
+    record.rejection = pipeline(&mut record, &state.decryptions, route, headers, body)
+        .await
+        .err();
     let response = match &record.rejection {
         None => json_response(StatusCode::OK, "{}".to_owned()),
         Some(Rejection::Admission(a)) => admission_response(*a),
@@ -602,10 +700,12 @@ fn admission_response(error: AdmissionError) -> Response {
     }
 }
 
-/// The per-POST pipeline, in order: body limit, media type, form, JWE parse (no key), ingress
-/// hint, resolve, open + validate every candidate, claim.
+/// The per-POST pipeline, in order: body limit, media type, form, JWE parse (no key), `kid`
+/// required, ingress hint, resolve, open + validate every candidate (blocking pool, bounded
+/// by `decryptions`), claim.
 async fn pipeline(
     record: &mut EvidenceRecord,
+    decryptions: &Arc<Semaphore>,
     route: Route<'_>,
     headers: &HeaderMap,
     body: Result<Bytes, BytesRejection>,
@@ -622,26 +722,55 @@ async fn pipeline(
     }
     let response = single_response_param(&body).map_err(Rejection::Admission)?;
     let jwe = CompactJwe::parse(&response).map_err(Rejection::JweParse)?;
-    let hint = IngressHint::new(route.token, jwe.header().kid().cloned());
+    // Every lab key is advertised with a kid, and OpenID4VP 1.1 §8.3 ties the JWE kid to the
+    // chosen JWK: a JWE without one matches nothing, on any route.
+    let kid = jwe.header().kid().cloned().ok_or(Rejection::MissingKid)?;
+    let hint = IngressHint::new(route.token, Some(kid));
     let candidates = SessionStore::resolve(route.registry, &hint, route.strategy)
         .await
         .map_err(Rejection::Resolve)?;
     record.candidate_count = candidates.len();
 
-    let (validated, first_error) = trial(record, &jwe, &candidates);
-    let mut validated = validated.into_iter();
-    let (candidate, result) = match (validated.next(), validated.len()) {
-        (None, _) => {
-            return Err(first_error.map_or(Rejection::Decrypt, Rejection::Validation));
-        }
-        (Some(only), 0) => only,
-        (Some(_), more) => {
+    // HPKE is CPU-bound: run it on the blocking pool, at most `decryptions` trials at once.
+    let slot = Arc::clone(decryptions)
+        .acquire_owned()
+        .await
+        .map_err(|_| Rejection::TrialAborted)?;
+    let (trial, candidates) = tokio::task::spawn_blocking(move || {
+        let _slot = slot;
+        (trial(&jwe, &candidates), candidates)
+    })
+    .await
+    .map_err(|_| Rejection::TrialAborted)?;
+    record.hpke_attempts = trial.attempts;
+    if trial.attempts > 0 {
+        record.crypto_result = if trial.opened == 0 {
+            CryptoResult::NoneOpened
+        } else {
+            CryptoResult::Opened {
+                opened: trial.opened,
+            }
+        };
+    }
+    if trial.opened > 0 {
+        record.validation_result = match (trial.validated, trial.first_error) {
+            (0, Some(e)) => ValidationResult::Failed(e),
+            (validated, _) => ValidationResult::Passed { validated },
+        };
+    }
+    let (index, result) = match (trial.first, trial.validated) {
+        (Some(first), 1) => first,
+        (Some(_), validated) => {
             record.commit_result = CommitResult::RefusedAmbiguous;
-            return Err(Rejection::Ambiguous {
-                validated: more + 1,
-            });
+            return Err(Rejection::Ambiguous { validated });
+        }
+        (None, _) => {
+            return Err(trial
+                .first_error
+                .map_or(Rejection::Decrypt, Rejection::Validation));
         }
     };
+    let candidate = candidates.get(index).ok_or(Rejection::TrialAborted)?;
     let digest = ResponseDigest::new(Sha256::digest(response.as_bytes()).into());
     match SessionStore::claim(route.registry, candidate, digest, result).await {
         Ok(snapshot) => {
@@ -658,46 +787,37 @@ async fn pipeline(
 
 /// Opens the JWE with every candidate's key and `session_info` and validates every plaintext.
 /// Never stops at the first match: for bounded trial, a second validating candidate must be
-/// seen to be refused. Unique strategies return at most one candidate.
-fn trial<'c>(
-    record: &mut EvidenceRecord,
-    jwe: &CompactJwe,
-    candidates: &'c [Candidate<SessionKey>],
-) -> (
-    Vec<(&'c Candidate<SessionKey>, ValidatedResponse)>,
-    Option<ValidationError>,
-) {
-    let mut opened = 0;
-    let mut validated = Vec::new();
-    let mut first_error = None;
-    for candidate in candidates {
-        record.hpke_attempts += 1;
+/// seen to be refused. Only the first validated result is kept; later ones are counted and
+/// dropped, so the work per candidate (and the timing) is the same either way. Unique
+/// strategies return at most one candidate.
+fn trial(jwe: &CompactJwe, candidates: &[Candidate<SessionKey>]) -> Trial {
+    let mut out = Trial {
+        attempts: 0,
+        opened: 0,
+        validated: 0,
+        first: None,
+        first_error: None,
+    };
+    for (index, candidate) in candidates.iter().enumerate() {
+        out.attempts += 1;
         let info = SessionInfo::from_binding(candidate.binding());
         let Ok(plaintext) = jwe.open(candidate.key(), info.as_bytes()) else {
             continue;
         };
-        opened += 1;
+        out.opened += 1;
         match validate::validate(&plaintext, candidate.binding()) {
-            Ok(result) => validated.push((candidate, result)),
+            Ok(result) => {
+                out.validated += 1;
+                if out.first.is_none() {
+                    out.first = Some((index, result));
+                }
+            }
             Err(e) => {
-                first_error.get_or_insert(e);
+                out.first_error.get_or_insert(e);
             }
         }
     }
-    if record.hpke_attempts > 0 {
-        record.crypto_result = if opened == 0 {
-            CryptoResult::NoneOpened
-        } else {
-            CryptoResult::Opened { opened }
-        };
-    }
-    if opened > 0 {
-        record.validation_result = match (validated.len(), first_error) {
-            (0, Some(e)) => ValidationResult::Failed(e),
-            (validated, _) => ValidationResult::Passed { validated },
-        };
-    }
-    (validated, first_error)
+    out
 }
 
 /// Content-Type essence is `application/x-www-form-urlencoded` (parameters such as `charset`
@@ -710,22 +830,24 @@ fn is_form_urlencoded(headers: &HeaderMap) -> bool {
         .is_some_and(|essence| essence.trim().eq_ignore_ascii_case(FORM_CONTENT_TYPE))
 }
 
-/// The value of the single `response` parameter. Refuses a plaintext `vp_token` (anywhere in
-/// the form), a repeated `response`, any other parameter, and an empty or missing `response`.
+/// The value of the single `response` parameter. Parses lazily and stops at the first
+/// plaintext `vp_token`, second `response` or any other parameter; an empty or missing
+/// `response` is refused too.
 fn single_response_param(body: &[u8]) -> Result<String, AdmissionError> {
-    let pairs: Vec<_> = form_urlencoded::parse(body).collect();
-    if pairs.iter().any(|(k, _)| k == validate::VP_TOKEN) {
-        return Err(AdmissionError::PlaintextVpToken);
+    let mut response = None;
+    for (name, value) in form_urlencoded::parse(body) {
+        if name == validate::VP_TOKEN {
+            return Err(AdmissionError::PlaintextVpToken);
+        }
+        if name != RESPONSE_PARAM {
+            return Err(AdmissionError::UnexpectedParameter);
+        }
+        if response.replace(value).is_some() {
+            return Err(AdmissionError::DuplicateResponse);
+        }
     }
-    let responses = pairs.iter().filter(|(k, _)| k == RESPONSE_PARAM).count();
-    if responses > 1 {
-        return Err(AdmissionError::DuplicateResponse);
-    }
-    if pairs.iter().any(|(k, _)| k != RESPONSE_PARAM) {
-        return Err(AdmissionError::UnexpectedParameter);
-    }
-    match pairs.into_iter().next() {
-        Some((_, value)) if !value.is_empty() => Ok(value.into_owned()),
+    match response {
+        Some(value) if !value.is_empty() => Ok(value.into_owned()),
         _ => Err(AdmissionError::MissingResponse),
     }
 }
