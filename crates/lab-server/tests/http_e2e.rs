@@ -1251,3 +1251,38 @@ async fn connection_cap_holds_connections_stalled_before_headers() {
     assert_eq!(reply.status, OK);
     lab.shutdown().await;
 }
+
+/// HTTP status of a request cut off by the request timeout (RFC 9110 §15.5.9).
+const HTTP_REQUEST_TIMEOUT: u16 = 408;
+
+/// PR review: a POST that times out while parked on the decryption semaphore is dropped by the
+/// timeout middleware before it reaches the slot; the parked-trial counter must not keep
+/// counting it, or later research steps that wait on `parked_trials()` proceed too early.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn timed_out_parked_post_is_no_longer_counted_as_parked() {
+    let mut config = LabConfig::new(Mode::Hardened);
+    config.request_timeout = SHORT_REQUEST_TIMEOUT;
+    let lab = Lab::start_with(config).await;
+    let session = lab.session(RouteKind::Unique).await;
+    let request = lab
+        .wallet
+        .fetch_request(&session.request_uri)
+        .await
+        .expect("request");
+    let jwe = lab
+        .wallet
+        .seal(&request, &SealOptions::default())
+        .expect("seal");
+
+    let pause = lab.server.pause_decryptions().await;
+    let reply = {
+        let post = lab.wallet.post_response(&request.response_uri, &jwe);
+        let parked = wait_parked(&lab.server, 1);
+        let (reply, ()) = tokio::join!(post, parked);
+        reply.expect("answered")
+    };
+    assert_eq!(reply.status, HTTP_REQUEST_TIMEOUT);
+    assert_eq!(lab.server.parked_trials(), 0, "timed-out POST still counted");
+    drop(pause);
+    lab.shutdown().await;
+}

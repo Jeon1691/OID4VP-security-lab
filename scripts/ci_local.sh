@@ -44,6 +44,7 @@ stage_quality() {
 # Named G0 tests that must have run and passed; guards against "green with nothing executed".
 REQUIRED_TESTS=(
   signed_request_binding_matches_stored_session
+  timed_out_parked_post_is_no_longer_counted_as_parked
   each_session_gets_a_distinct_response_uri
   wire_strings_round_trip_byte_exact
   non_ascii_values_are_rejected
