@@ -248,6 +248,72 @@ async fn run() -> Result<u8> {
     Ok(exit_code(&rows))
 }
 
+#[cfg(test)]
+mod tests {
+    use evidence_report::{Invariant, Row};
+
+    use super::*;
+
+    fn argv(extra: &[&str]) -> Vec<String> {
+        ["--out", "out"]
+            .iter()
+            .chain(extra)
+            .map(|s| (*s).to_owned())
+            .collect()
+    }
+
+    fn row(invariant: Invariant) -> Row {
+        Row {
+            run_id: "t".to_owned(),
+            scenario: "http".to_owned(),
+            strategy: "bounded_trial".to_owned(),
+            pending: 8,
+            budget: Some(8),
+            case: "valid_last".to_owned(),
+            limits: "default".to_owned(),
+            requests: 1,
+            status_2xx: 1,
+            status_4xx: 0,
+            status_503: 0,
+            committed: 1,
+            attempts_min: 8,
+            attempts_max: 8,
+            attempts_mean: 8.0,
+            candidates_max: 8,
+            latency: None,
+            trial: None,
+            throughput_rps: 0.0,
+            rejection_ratio: 0.0,
+            cpu_ms: None,
+            rss_kib: None,
+            invariant,
+        }
+    }
+
+    #[test]
+    fn exit_code_fails_when_any_row_breaks_its_invariant() {
+        let pass = row(Invariant::Pass("rule".to_owned()));
+        let measured = row(Invariant::NotApplicable);
+        let fail = row(Invariant::Fail("attempts 7 != N 8".to_owned()));
+        assert_eq!(exit_code(&[pass.clone(), measured.clone()]), EXIT_OK);
+        assert_eq!(exit_code(&[pass, fail, measured]), EXIT_INVARIANT_FAILED);
+    }
+
+    #[test]
+    fn arguments_must_exercise_over_budget_and_the_limited_burst() {
+        assert!(
+            parse_args(argv(&[])).is_ok(),
+            "defaults exercise every invariant"
+        );
+        // No N above the over-budget budget (8): the over-budget rows would be empty.
+        assert!(parse_args(argv(&["--sizes", "1,8"])).is_err());
+        // A burst no larger than the limited in-flight cap (8) cannot be shed.
+        assert!(parse_args(argv(&["--sizes", "1,32", "--burst", "8"])).is_err());
+        assert!(parse_args(argv(&["--sizes", "1,32", "--burst-rounds", "0"])).is_err());
+        assert!(parse_args(argv(&["--sizes", "1,32"])).is_ok());
+    }
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     match run().await {

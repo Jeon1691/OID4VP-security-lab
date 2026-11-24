@@ -855,7 +855,316 @@ async fn burst(
 
 #[cfg(test)]
 mod tests {
+    use lab_server::{AdmissionError, CryptoResult, ValidationError, ValidationResult};
+    use session_core::ResolutionStrategy;
+
     use super::*;
+
+    const N: usize = 8;
+    const BOUNDED: Strategy = Strategy::BoundedTrial { budget: 128 };
+    const UNIQUE: [Strategy; 2] = [Strategy::UniqueUri, Strategy::UniqueKid];
+
+    /// A record with `attempts` HPKE attempts (and a trial time when any) and nothing else.
+    fn base(attempts: usize) -> EvidenceRecord {
+        EvidenceRecord {
+            route: RouteKind::Shared,
+            strategy: ResolutionStrategy::UniqueKid,
+            candidate_count: attempts,
+            hpke_attempts: attempts,
+            trial_time: if attempts > 0 {
+                Duration::from_micros(1)
+            } else {
+                Duration::ZERO
+            },
+            crypto_result: CryptoResult::NotAttempted,
+            validation_result: ValidationResult::NotRun,
+            commit_result: CommitResult::NotRun,
+            rejection: None,
+            committed_session: None,
+        }
+    }
+
+    fn committed(attempts: usize) -> EvidenceRecord {
+        EvidenceRecord {
+            crypto_result: CryptoResult::Opened { opened: 1 },
+            validation_result: ValidationResult::Passed { validated: 1 },
+            commit_result: CommitResult::Committed,
+            ..base(attempts)
+        }
+    }
+
+    fn none_opened(attempts: usize) -> EvidenceRecord {
+        EvidenceRecord {
+            crypto_result: CryptoResult::NoneOpened,
+            rejection: Some(Rejection::Decrypt),
+            ..base(attempts)
+        }
+    }
+
+    fn validation_failed(attempts: usize) -> EvidenceRecord {
+        EvidenceRecord {
+            crypto_result: CryptoResult::Opened { opened: 1 },
+            validation_result: ValidationResult::Failed(ValidationError::NotJsonObject),
+            rejection: Some(Rejection::Validation(ValidationError::NotJsonObject)),
+            ..base(attempts)
+        }
+    }
+
+    fn resolve_refused() -> EvidenceRecord {
+        EvidenceRecord {
+            rejection: Some(Rejection::Resolve(ResolveError::Replay)),
+            ..base(0)
+        }
+    }
+
+    fn sample(status: u16, record: Option<EvidenceRecord>) -> Sample {
+        Sample {
+            latency: Duration::from_millis(1),
+            status,
+            record,
+        }
+    }
+
+    fn passes(strategy: Strategy, case: Case, status: u16, record: EvidenceRecord) -> bool {
+        check(strategy, N, case, &sample(status, Some(record))).is_ok()
+    }
+
+    #[test]
+    fn honest_records_pass_every_case() {
+        for strategy in UNIQUE {
+            assert!(passes(
+                strategy,
+                Case::Valid(Position::Last),
+                OK,
+                committed(1)
+            ));
+            assert!(passes(
+                strategy,
+                Case::InvalidCiphertext,
+                BAD_REQUEST,
+                none_opened(1)
+            ));
+            assert!(passes(
+                strategy,
+                Case::WrongNonce,
+                BAD_REQUEST,
+                validation_failed(1)
+            ));
+            assert!(passes(
+                strategy,
+                Case::Replay,
+                BAD_REQUEST,
+                resolve_refused()
+            ));
+        }
+        for position in Position::BY_PRIORITY {
+            assert!(passes(BOUNDED, Case::Valid(position), OK, committed(N)));
+        }
+        assert!(passes(
+            BOUNDED,
+            Case::InvalidCiphertext,
+            BAD_REQUEST,
+            none_opened(N)
+        ));
+        assert!(passes(
+            BOUNDED,
+            Case::WrongNonce,
+            BAD_REQUEST,
+            validation_failed(N)
+        ));
+        assert!(passes(BOUNDED, Case::Replay, BAD_REQUEST, none_opened(N)));
+        let admission = EvidenceRecord {
+            rejection: Some(Rejection::Admission(AdmissionError::UnsupportedMediaType)),
+            ..base(0)
+        };
+        assert!(passes(
+            BOUNDED,
+            Case::Admission,
+            UNSUPPORTED_MEDIA_TYPE,
+            admission
+        ));
+        let over = EvidenceRecord {
+            rejection: Some(Rejection::Resolve(ResolveError::CandidateBudgetExceeded {
+                found: N,
+                budget: 1,
+            })),
+            ..base(0)
+        };
+        assert!(passes(BOUNDED, Case::OverBudget, BAD_REQUEST, over));
+    }
+
+    #[test]
+    fn violated_invariants_fail_the_check() {
+        // Bounded trial, correct session last, one attempt short.
+        assert!(!passes(
+            BOUNDED,
+            Case::Valid(Position::Last),
+            OK,
+            committed(N - 1)
+        ));
+        // Unique-uri valid with two attempts.
+        assert!(!passes(
+            Strategy::UniqueUri,
+            Case::Valid(Position::Last),
+            OK,
+            committed(2)
+        ));
+        // Admission rejection after an HPKE attempt.
+        let admitted_late = EvidenceRecord {
+            rejection: Some(Rejection::Admission(AdmissionError::UnsupportedMediaType)),
+            ..base(1)
+        };
+        assert!(!passes(
+            BOUNDED,
+            Case::Admission,
+            UNSUPPORTED_MEDIA_TYPE,
+            admitted_late
+        ));
+        // No evidence record at all.
+        let missing = sample(OK, None);
+        assert!(check(BOUNDED, N, Case::Valid(Position::Last), &missing).is_err());
+        // An attempt without a recorded trial time.
+        let untimed = EvidenceRecord {
+            trial_time: Duration::ZERO,
+            ..committed(1)
+        };
+        assert!(!passes(
+            Strategy::UniqueUri,
+            Case::Valid(Position::Last),
+            OK,
+            untimed
+        ));
+    }
+
+    #[test]
+    fn bounded_trial_must_try_every_candidate_at_every_position() {
+        for position in [Position::First, Position::Middle] {
+            assert!(!passes(BOUNDED, Case::Valid(position), OK, committed(1)));
+        }
+        assert!(!passes(
+            BOUNDED,
+            Case::InvalidCiphertext,
+            BAD_REQUEST,
+            none_opened(N - 1)
+        ));
+        assert!(!passes(
+            BOUNDED,
+            Case::WrongNonce,
+            BAD_REQUEST,
+            validation_failed(N - 1)
+        ));
+        assert!(!passes(
+            BOUNDED,
+            Case::Replay,
+            BAD_REQUEST,
+            none_opened(N - 1)
+        ));
+    }
+
+    #[test]
+    fn unique_failures_must_make_exactly_one_attempt() {
+        for strategy in UNIQUE {
+            assert!(!passes(
+                strategy,
+                Case::InvalidCiphertext,
+                BAD_REQUEST,
+                none_opened(0)
+            ));
+            assert!(!passes(
+                strategy,
+                Case::WrongNonce,
+                BAD_REQUEST,
+                validation_failed(0)
+            ));
+        }
+    }
+
+    #[test]
+    fn failure_cases_must_carry_their_rejection_reason() {
+        assert!(!passes(
+            BOUNDED,
+            Case::InvalidCiphertext,
+            BAD_REQUEST,
+            validation_failed(N)
+        ));
+        assert!(!passes(
+            BOUNDED,
+            Case::WrongNonce,
+            BAD_REQUEST,
+            none_opened(N)
+        ));
+        for strategy in UNIQUE {
+            let decrypt_without_attempt = EvidenceRecord {
+                rejection: Some(Rejection::Decrypt),
+                ..base(0)
+            };
+            assert!(!passes(
+                strategy,
+                Case::Replay,
+                BAD_REQUEST,
+                decrypt_without_attempt
+            ));
+        }
+    }
+
+    fn head() -> RowHead<'static> {
+        RowHead {
+            run_id: "t",
+            scenario: "http",
+            strategy: BOUNDED,
+            pending: N,
+            case: "valid_last",
+            limits: "default",
+        }
+    }
+
+    #[test]
+    fn a_violation_fails_the_row() {
+        let mut acc = Acc::new();
+        acc.add(&sample(OK, Some(committed(N))));
+        acc.violation("attempts 7 != N 8".to_owned());
+        acc.add(&sample(OK, Some(committed(N))));
+        let row = acc.row(head(), Duration::from_millis(2), None, "rule");
+        assert!(!row.invariant.holds());
+        let Invariant::Fail(detail) = row.invariant else {
+            panic!("row must fail");
+        };
+        assert!(detail.contains("1 of 2 measured"), "{detail}");
+        let clean = Acc::new().row(head(), Duration::ZERO, None, "rule");
+        assert!(clean.invariant.holds());
+    }
+
+    #[test]
+    fn attempts_mean_counts_only_requests_with_an_evidence_record() {
+        let mut acc = Acc::new();
+        acc.add(&sample(OK, Some(committed(64))));
+        for _ in 0..7 {
+            acc.add(&sample(SERVICE_UNAVAILABLE, None));
+        }
+        let row = acc.row(head(), Duration::from_millis(8), None, "rule");
+        assert_eq!(row.attempts_min, 64);
+        assert_eq!(row.attempts_max, 64);
+        assert!(
+            (row.attempts_mean - 64.0).abs() < f64::EPSILON,
+            "{}",
+            row.attempts_mean
+        );
+        assert!((row.rejection_ratio - 7.0 / 8.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn burst_with_limits_on_must_shed_load() {
+        let all_ok = vec![OK; N];
+        let records: Vec<EvidenceRecord> = (0..N).map(|_| committed(1)).collect();
+        assert!(!burst_violations(Strategy::UniqueUri, N, true, &all_ok, &records).is_empty());
+        assert!(burst_violations(Strategy::UniqueUri, N, false, &all_ok, &records).is_empty());
+        let mut shed = all_ok.clone();
+        shed[0] = SERVICE_UNAVAILABLE;
+        assert!(burst_violations(Strategy::UniqueUri, N, true, &shed, &records[1..]).is_empty());
+        assert!(!burst_violations(Strategy::UniqueUri, N, false, &shed, &records[1..]).is_empty());
+        // A 503 that still left an evidence record.
+        assert!(!burst_violations(Strategy::UniqueUri, N, true, &shed, &records).is_empty());
+    }
 
     #[test]
     fn positions_dedupe_for_small_n() {
