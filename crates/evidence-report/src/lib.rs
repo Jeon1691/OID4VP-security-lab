@@ -112,7 +112,10 @@ pub struct Row {
     pub throughput_rps: f64,
     /// Non-2xx answers / requests.
     pub rejection_ratio: f64,
-    /// Process CPU time (user + system) spent during the measured requests, if the OS exposes it.
+    /// Process CPU time (user + system) over the row's measured loop, if the OS exposes it.
+    /// Server and client share the process, so it also covers the client's off-clock work in
+    /// that loop: refilling the session pool, sealing, and the replay set-up POST. Empty for
+    /// rows measured in an interleaved loop (valid positions), where it is not attributable.
     pub cpu_ms: Option<f64>,
     /// Process resident set size after the row, KiB, if the OS exposes it.
     pub rss_kib: Option<u64>,
