@@ -67,6 +67,10 @@ pub enum Rejection {
     /// being committed, for a different session. Possible on the shared research route when
     /// sessions share `session_info` (shared key, reused nonce): the #792 observation, refused.
     CrossSessionReplay,
+    /// The verified holder proof (the KB-JWT's signing input) was already committed, or is
+    /// being committed, for a different session, inside a different JWE: a reused nonce and
+    /// the same `client_id` let one holder proof validate for two sessions; refused (PR #10).
+    HolderProofReplay,
     /// The replay guard is full (see `MAX_REMEMBERED_DIGESTS`); refused, fail closed.
     ReplayGuardFull,
     /// The server is shutting down past its drain deadline; nothing is committed any more.

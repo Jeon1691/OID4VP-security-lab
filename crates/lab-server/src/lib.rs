@@ -84,8 +84,10 @@
 //!    more than one that validates is an integrity failure (reject, claim nothing, record it).
 //!    Only the first validated result is kept.
 //! 9. Verifier-wide replay guard: a response whose `SHA-256(compact JWE)` already validated
-//!    for a *different* session is refused (`Rejection::CrossSessionReplay`); see
-//!    [`MAX_REMEMBERED_DIGESTS`].
+//!    for a *different* session is refused (`Rejection::CrossSessionReplay`), and so is one
+//!    whose verified holder proof (`SHA-256` of the KB-JWT signing input, signature excluded
+//!    because ECDSA signatures are malleable) did, even inside a fresh JWE
+//!    (`Rejection::HolderProofReplay`); see [`MAX_REMEMBERED_DIGESTS`].
 //! 10. `claim` with that digest as the response digest.
 //!
 //! Around every route except `/health`: [`LabConfig::max_in_flight_requests`] (503 above it,
@@ -126,6 +128,9 @@
 //!   session's response would decrypt and validate for a new one. Per-session state cannot
 //!   see that, so the verifier-wide replay guard refuses any response already validated for
 //!   another session, and records `CrossSessionReplay` as evidence of the #792 condition.
+//!   With a reused nonce and the same `client_id` the holder proof itself is valid for both
+//!   sessions, so re-sealing it into a fresh JWE gets past the JWE digest; the guard therefore
+//!   also binds each verified KB-JWT to its first session (`HolderProofReplay`, PR #10).
 //! * Results are readable only with the result token, so the request id (visible to the
 //!   wallet and anyone who sees the `request_uri`) does not reveal the outcome.
 //! * Consumed records retain only the bounded [`ValidatedResponse`], never decrypted input or

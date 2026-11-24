@@ -53,49 +53,75 @@ use crate::jar::{REQUEST_OBJECT_AUD, REQUEST_OBJECT_MEDIA_TYPE, RequestSigner};
 use crate::sd_jwt::TrustedIssuerKey;
 use crate::validate::{self, MAX_RESEARCH_NONCE_LEN, ValidatedResponse, ValidationError};
 
-/// Most response digests the replay guard remembers at once: four times session-core's
-/// default pending cap. An entry exists only for a response that decrypted and validated for
-/// a live session, and lives as long as that session's consumed record would (TTL plus
-/// `DEFAULT_CONSUMED_RETENTION`). About 100 bytes each, so at most a few MiB. When full, new
-/// responses are refused (fail closed) until the sweep frees entries.
+/// Most digests the replay guard remembers at once, per kind (response and holder proof): four
+/// times session-core's default pending cap. An entry exists only for a response that
+/// decrypted and validated for a live session, and lives as long as that session's consumed
+/// record would (TTL plus `DEFAULT_CONSUMED_RETENTION`). About 100 bytes each, so at most a
+/// few MiB for both kinds. When either is full, new responses are refused (fail closed) until
+/// the sweep frees entries.
 pub const MAX_REMEMBERED_DIGESTS: usize = 4 * session_core::DEFAULT_MAX_PENDING_SESSIONS;
 
-/// Verifier-wide replay guard: digests of responses that validated, with the session they
-/// validated for.
+/// Verifier-wide replay guard: digests of responses that validated, and of the holder proofs
+/// they carried, each with the session it validated for.
 ///
 /// Per-session state alone does not stop cross-session replay on the shared research route:
 /// bounded trial never offers a consumed session as a candidate, so a new session with the
-/// same `session_info` (shared key and route, reused nonce) would accept an old response. A
-/// digest is recorded before the claim, under one lock, so two concurrent POSTs of one JWE for
-/// two sessions cannot both pass; a recorded digest is kept even if its claim then fails
-/// (fail closed: that JWE stays bound to the first session it validated for). The same
-/// session's own retries pass through to the claim, which reports them as replays.
+/// same `session_info` (shared key and route, reused nonce) would accept an old response.
+/// Two keys are guarded, because the JWE digest alone only catches the *same ciphertext*:
+///
+/// * the response digest (`SHA-256` of the compact JWE): the same JWE posted again;
+/// * the holder-proof digest (`validate::holder_proof_digest`, `SHA-256` of the verified
+///   KB-JWT's signing input): the same holder proof re-sealed into a fresh JWE, which a
+///   reused nonce and the same `client_id` would let another session accept (PR #10).
+///
+/// Both are checked and recorded together before the claim, under one lock, so two concurrent
+/// POSTs carrying one JWE or one proof for two sessions cannot both pass; recorded digests are
+/// kept even if their claim then fails (fail closed: that JWE or proof stays bound to the first
+/// session it validated for). The same session's own retries pass through to the claim, which
+/// reports them as replays.
 #[derive(Default)]
 struct ReplayGuard {
-    /// Digest, owning session, and when the entry may be forgotten.
-    seen: HashMap<ResponseDigest, (SessionId, Timestamp)>,
+    /// Response digest, owning session, and when the entry may be forgotten.
+    responses: HashMap<ResponseDigest, (SessionId, Timestamp)>,
+    /// Holder-proof digest, owning session, and when the entry may be forgotten.
+    proofs: HashMap<ResponseDigest, (SessionId, Timestamp)>,
 }
 
 impl ReplayGuard {
     fn admit(
         &mut self,
-        digest: ResponseDigest,
+        response: ResponseDigest,
+        proof: ResponseDigest,
         session: &SessionId,
         retain_until: Timestamp,
     ) -> Result<(), Rejection> {
-        match self.seen.get(&digest) {
-            Some((owner, _)) if owner == session => Ok(()),
-            Some(_) => Err(Rejection::CrossSessionReplay),
-            None if self.seen.len() >= MAX_REMEMBERED_DIGESTS => Err(Rejection::ReplayGuardFull),
-            None => {
-                self.seen.insert(digest, (session.clone(), retain_until));
-                Ok(())
-            }
+        let owned_elsewhere = |map: &HashMap<ResponseDigest, (SessionId, Timestamp)>, digest| {
+            map.get(digest).is_some_and(|(owner, _)| owner != session)
+        };
+        if owned_elsewhere(&self.responses, &response) {
+            return Err(Rejection::CrossSessionReplay);
         }
+        if owned_elsewhere(&self.proofs, &proof) {
+            return Err(Rejection::HolderProofReplay);
+        }
+        let full = |map: &HashMap<ResponseDigest, _>, digest| {
+            !map.contains_key(digest) && map.len() >= MAX_REMEMBERED_DIGESTS
+        };
+        if full(&self.responses, &response) || full(&self.proofs, &proof) {
+            return Err(Rejection::ReplayGuardFull);
+        }
+        self.responses
+            .entry(response)
+            .or_insert_with(|| (session.clone(), retain_until));
+        self.proofs
+            .entry(proof)
+            .or_insert_with(|| (session.clone(), retain_until));
+        Ok(())
     }
 
     fn forget_before(&mut self, now: Timestamp) {
-        self.seen.retain(|_, (_, until)| *until > now);
+        self.responses.retain(|_, (_, until)| *until > now);
+        self.proofs.retain(|_, (_, until)| *until > now);
     }
 }
 
@@ -106,7 +132,7 @@ struct Trial {
     /// Candidates that validated (all are tried; only the first result is kept).
     validated: usize,
     /// Index and result of the first validating candidate.
-    first: Option<(usize, ValidatedResponse)>,
+    first: Option<(usize, validate::Validated)>,
     /// First validation error among opened candidates.
     first_error: Option<ValidationError>,
 }
@@ -1100,7 +1126,13 @@ async fn pipeline(
             (validated, _) => ValidationResult::Passed { validated },
         };
     }
-    let (index, result) = match (trial.first, trial.validated) {
+    let (
+        index,
+        validate::Validated {
+            response: result,
+            holder_proof,
+        },
+    ) = match (trial.first, trial.validated) {
         (Some(first), 1) => first,
         (Some(_), validated) => {
             record.commit_result = CommitResult::RefusedAmbiguous;
@@ -1124,6 +1156,7 @@ async fn pipeline(
         .unwrap_or_else(PoisonError::into_inner)
         .admit(
             digest,
+            ResponseDigest::new(holder_proof),
             candidate.id(),
             candidate
                 .expires_at()
