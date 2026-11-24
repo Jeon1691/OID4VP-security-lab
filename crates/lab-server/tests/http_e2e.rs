@@ -1342,3 +1342,41 @@ async fn timed_out_parked_post_is_no_longer_counted_as_parked() {
     drop(pause);
     lab.shutdown().await;
 }
+
+/// PR review: once shutdown starts, the listening socket must be closed while in-flight requests
+/// drain, so new clients fail at connect time instead of being queued by the kernel and left
+/// waiting for a response that never comes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn new_connections_are_refused_while_shutdown_drains() {
+    let mut config = LabConfig::new(Mode::Hardened);
+    config.shutdown_drain = SHORT_DRAIN;
+    let lab = Lab::start_with(config).await;
+    let addr = lab.server.local_addr();
+    let session = lab.session(RouteKind::Unique).await;
+    let request = lab
+        .wallet
+        .fetch_request(&session.request_uri)
+        .await
+        .expect("request");
+    let jwe = lab
+        .wallet
+        .seal(&request, &SealOptions::default())
+        .expect("seal");
+
+    let pause = lab.server.pause_decryptions().await;
+    let wallet = lab.wallet.clone();
+    let uri = request.response_uri.clone();
+    let post = tokio::spawn(async move { wallet.post_response(&uri, &jwe).await });
+    wait_parked(&lab.server, 1).await;
+
+    let Lab { server, .. } = lab;
+    let shutdown = tokio::spawn(server.shutdown());
+    tokio::time::sleep(DRAIN_HEAD_START).await;
+    let late = tokio::net::TcpStream::connect(addr).await;
+    assert!(late.is_err(), "listener still accepting connections during the drain");
+
+    drop(pause);
+    shutdown.await.expect("shutdown");
+    let reply = post.await.expect("task").expect("answered during the drain");
+    assert_success(reply.status);
+}
