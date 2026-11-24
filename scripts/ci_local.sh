@@ -236,6 +236,7 @@ REQUIRED_TESTS=(
   http::tests::bounded_trial_still_sees_n_candidates_when_the_block_outlives_the_session_ttl
   tests::exit_code_fails_when_any_row_breaks_its_invariant
   tests::arguments_must_exercise_over_budget_and_the_limited_burst
+  store::tests::store_rows_leave_cpu_ms_empty
 )
 
 # Fails unless every named test ran and passed in this stage's log, and at least one test ran.

@@ -142,7 +142,7 @@ row carries `run_id`, which names the run directory and its `manifest.json`.
 | `trial_*_us` | Server trial time (`EvidenceRecord::trial_time`): every HPKE open and the validation of each opened plaintext, on the blocking pool, without the wait for a decryption slot. Requests without a trial are excluded. In a burst, concurrent trials compete for CPU cores, so this includes contention | server evidence |
 | `throughput_rps` | Sequential: requests / summed latency (= 1 / mean). Burst: requests / round wall time, 503 answers included. Store: 1 / mean | client |
 | `rejection_ratio` | Non-2xx answers / requests | client |
-| `cpu_ms` | Process CPU time (user + system) over the row's measured loop, including the client's off-clock work in it (pool refill, sealing, replay set-up). Empty for the interleaved valid rows | OS, see below |
+| `cpu_ms` | Process CPU time (user + system) over the row's measured loop, including the client's off-clock work in it (pool refill, sealing, replay set-up). Empty for the interleaved valid rows, the in-flight cap row and the store rows (one loop interleaves operations, so no single row owns its CPU time) | OS, see below |
 | `rss_kib` | Process resident set size after the row | OS, see below |
 | `invariant`, `invariant_detail` | `pass` / `FAIL` / `n/a` and the rule (or the first violation) | runner |
 

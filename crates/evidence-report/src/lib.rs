@@ -115,7 +115,8 @@ pub struct Row {
     /// Process CPU time (user + system) over the row's measured loop, if the OS exposes it.
     /// Server and client share the process, so it also covers the client's off-clock work in
     /// that loop: refilling the session pool, sealing, and the replay set-up POST. Empty for
-    /// rows measured in an interleaved loop (valid positions), where it is not attributable.
+    /// rows measured in an interleaved loop (valid positions, store operations), where it is
+    /// not attributable to the row.
     pub cpu_ms: Option<f64>,
     /// Process resident set size after the row, KiB, if the OS exposes it.
     pub rss_kib: Option<u64>,
