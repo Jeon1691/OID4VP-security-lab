@@ -1,5 +1,5 @@
 {
-  "alias": "oid4vp-lab-c3",
+  "alias": "LAB: oid4vp-lab-c3-<16 random hex, new for every run>",
   "description": "OID4VP security lab C3, local run, synthetic data only",
   "client": {
     "client_id": "host.docker.internal",

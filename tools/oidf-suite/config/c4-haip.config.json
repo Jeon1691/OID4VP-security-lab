@@ -1,5 +1,5 @@
 {
-  "alias": "oid4vp-lab-c4",
+  "alias": "LAB: oid4vp-lab-c4-<16 random hex, new for every run>",
   "description": "OID4VP security lab C4 (HAIP), local run, synthetic data only",
   "client": {
     "request_object_trust_anchor_pem": "LAB: PEM of the synthetic reader CA that issued the request-object leaf; required; not in x5c; newlines as \\n"
