@@ -515,9 +515,11 @@ impl LabServer {
             ),
             None => (base_url, success_body, None, None),
         };
+        // Only conformance mode has a time box.
         #[cfg(not(feature = "conformance"))]
-        let max_runtime: Option<Duration> = None;
+        let deadline: Option<Instant> = None;
         // `config::check` bounds the runtime; `checked_add` keeps an overflow from panicking.
+        #[cfg(feature = "conformance")]
         let deadline = match max_runtime {
             Some(runtime) => Some(
                 Instant::now()
