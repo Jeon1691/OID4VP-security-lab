@@ -17,6 +17,11 @@ use crate::validate::{CredentialRequest, MAX_CLIENT_ID_LEN};
 /// retention window is sized for (`DEFAULT_CONSUMED_RETENTION` = two TTLs).
 pub const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(300);
 
+/// Longest session lifetime a server accepts (lab policy): twelve default lifetimes. Request
+/// Objects are fetched within seconds; even a tester pasting an Authorization Request into the
+/// OIDF suite by hand needs minutes, and every consumed session is retained for two lifetimes.
+pub const MAX_SESSION_TTL: Duration = Duration::from_secs(60 * 60);
+
 /// Default interval of the background expiry/purge sweep: a tenth of [`DEFAULT_SESSION_TTL`].
 ///
 /// Correctness never depends on the sweep (session-core checks TTLs lazily in resolve, claim
@@ -261,7 +266,8 @@ pub enum StartError {
     /// `client_id` longer than `MAX_CLIENT_ID_LEN`.
     #[error("client_id exceeds the lab length limit")]
     ClientIdTooLong,
-    /// A zero sweep interval, request timeout or concurrency limit.
+    /// A zero session TTL, sweep interval, request timeout, concurrency limit or (conformance)
+    /// maximum runtime.
     #[error("intervals, timeouts and limits must be non-zero")]
     ZeroLimit,
     /// Binding or reading the listener address failed.
@@ -284,6 +290,14 @@ pub enum StartError {
     #[cfg(feature = "ecdh-es-research")]
     #[error("the ECDH-ES route is served in research mode only")]
     EcdhEsRouteNeedsResearchMode,
+    /// [`LabConfig::session_ttl`] above [`MAX_SESSION_TTL`].
+    #[error("session TTL exceeds the lab limit")]
+    SessionTtlTooLong,
+    /// `ConformanceConfig::max_runtime` above `MAX_CONFORMANCE_MAX_RUNTIME` (the time box of
+    /// ADR 0002).
+    #[cfg(feature = "conformance")]
+    #[error("conformance maximum runtime exceeds the lab limit")]
+    MaxRuntimeTooLong,
     /// [`LabConfig::authorization_endpoint`] empty, over the lab length limit, not visible
     /// ASCII, or with a fragment.
     #[error("authorization endpoint must be visible ASCII without a fragment")]
@@ -314,7 +328,11 @@ pub(crate) fn check(config: &LabConfig) -> Result<KeyHint, StartError> {
     if config.client_id.as_str().len() > MAX_CLIENT_ID_LEN {
         return Err(StartError::ClientIdTooLong);
     }
+    if config.session_ttl > MAX_SESSION_TTL {
+        return Err(StartError::SessionTtlTooLong);
+    }
     if config.sweep_interval.is_zero()
+        || config.session_ttl.is_zero()
         || config.request_timeout.is_zero()
         || config.max_in_flight_requests == 0
         || config.max_concurrent_decryptions == 0

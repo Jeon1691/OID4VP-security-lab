@@ -39,9 +39,9 @@ use lab_server::wallet_sim::{
     StateChoice, SyntheticIssuer, WalletError, WalletSim,
 };
 use lab_server::{
-    ConformanceConfig, CredentialRequest, GENERIC_REJECTION_BODY, LabConfig, LabServer, Mode,
-    PublicOrigin, Rejection, RequestSigningKey, RouteKind, StartError, TrustedIssuerKey,
-    ValidationError, X509Credentials, X509Error,
+    ConformanceConfig, CredentialRequest, GENERIC_REJECTION_BODY, LabConfig, LabServer,
+    MAX_CONFORMANCE_MAX_RUNTIME, MAX_SESSION_TTL, Mode, PublicOrigin, Rejection, RequestSigningKey,
+    RouteKind, StartError, TrustedIssuerKey, ValidationError, X509Credentials, X509Error,
 };
 use serde_json::{Map, Value, json};
 
@@ -52,6 +52,10 @@ const NOT_FOUND: u16 = 404;
 /// Synthetic conformance fixtures (scripts/conformance_fixtures.py).
 const CA_PEM: &[u8] = include_bytes!("fixtures/conformance_ca.pem");
 const LEAF_PEM: &[u8] = include_bytes!("fixtures/conformance_leaf.pem");
+/// Negative-test fixtures: a leaf of the same CA and key whose only SAN is a wildcard over the
+/// public host, and a CA that issued nothing here.
+const WILDCARD_LEAF_PEM: &[u8] = include_bytes!("fixtures/conformance_wildcard_leaf.pem");
+const FOREIGN_CA_PEM: &[u8] = include_bytes!("fixtures/conformance_foreign_ca.pem");
 const LEAF_KEY_PEM: &[u8] = include_bytes!("fixtures/conformance_leaf.key.pem");
 const LEAF_JWK: &str = include_str!("fixtures/conformance_leaf.jwk");
 const MANIFEST: &str = include_str!("fixtures/conformance_fixtures.json");
@@ -74,6 +78,10 @@ const PID_CLAIMS: [&str; 3] = ["given_name", "family_name", "birthdate"];
 const REDIRECT_URI: &str = "https://host.docker.internal/lab/conformance/done";
 /// A short maximum runtime for the kill-switch test, and how long it may take to take effect.
 const SHORT_RUNTIME: Duration = Duration::from_secs(1);
+/// Runtime of the keep-alive test: long enough for one request to complete before it ends.
+const KEEP_ALIVE_RUNTIME: Duration = Duration::from_secs(2);
+/// One second above the conformance runtime ceiling.
+const ONE_SECOND: Duration = Duration::from_secs(1);
 const RUNTIME_SLACK: Duration = Duration::from_secs(10);
 /// JOSE compact segments (RFC 7515 §7.1).
 const JWS_HEADER: usize = 0;
@@ -648,6 +656,54 @@ async fn conformance_mode_refuses_to_start_unless_everything_fits() {
     }
     assert!(matches!(start(zero).await, Some(StartError::ZeroLimit)));
 
+    // The time box has a ceiling; even `u64::MAX` seconds is refused, not an overflow panic.
+    for runtime in [
+        MAX_CONFORMANCE_MAX_RUNTIME + ONE_SECOND,
+        Duration::from_secs(u64::MAX),
+    ] {
+        let mut long = config(Prefix::SanDns);
+        if let Some(conformance) = &mut long.conformance {
+            conformance.max_runtime = runtime;
+        }
+        assert!(
+            matches!(start(long).await, Some(StartError::MaxRuntimeTooLong)),
+            "{runtime:?}"
+        );
+    }
+    let mut ttl_zero = config(Prefix::SanDns);
+    ttl_zero.session_ttl = Duration::ZERO;
+    assert!(matches!(start(ttl_zero).await, Some(StartError::ZeroLimit)));
+    let mut ttl_long = config(Prefix::SanDns);
+    ttl_long.session_ttl = MAX_SESSION_TTL + ONE_SECOND;
+    assert!(matches!(
+        start(ttl_long).await,
+        Some(StartError::SessionTtlTooLong)
+    ));
+
+    // The leaf must chain to the configured anchor: a foreign CA is refused.
+    let mut foreign_anchor = config(Prefix::SanDns);
+    if let Some(conformance) = &mut foreign_anchor.conformance {
+        conformance.credentials =
+            X509Credentials::from_pem(LEAF_PEM, LEAF_KEY_PEM, FOREIGN_CA_PEM).expect("pem");
+    }
+    assert!(x509(X509Error::Chain)(start(foreign_anchor).await));
+
+    // §5.9.3 wants a dNSName SAN entry: a wildcard that TLS would accept for the host is not.
+    let mut wildcard = config(Prefix::SanDns);
+    if let Some(conformance) = &mut wildcard.conformance {
+        conformance.credentials =
+            X509Credentials::from_pem(WILDCARD_LEAF_PEM, LEAF_KEY_PEM, CA_PEM).expect("pem");
+    }
+    assert!(x509(X509Error::SanMismatch)(start(wildcard).await));
+
+    // The ECDH-ES research route stays research-only.
+    let mut research_route = config(Prefix::SanDns);
+    research_route.ecdh_es_route = true;
+    assert!(matches!(
+        start(research_route).await,
+        Some(StartError::EcdhEsRouteNeedsResearchMode)
+    ));
+
     let mut http_redirect = config(Prefix::SanDns);
     if let Some(conformance) = &mut http_redirect.conformance {
         conformance.response_redirect_uri = Some("http://host.docker.internal/done".to_owned());
@@ -719,4 +775,81 @@ fn binary_refuses_conformance_mode_from_the_environment() {
         String::from_utf8_lossy(&output.stderr)
             .contains("conformance mode needs the explicit --mode conformance flag")
     );
+}
+
+/// The time box with a keep-alive TLS connection held across the deadline: the connection is
+/// closed when the server stops, `wait` returns, and the next request on the same client fails.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn conformance_time_box_closes_kept_alive_connections() {
+    let mut cfg = config(Prefix::SanDns);
+    if let Some(conformance) = &mut cfg.conformance {
+        conformance.max_runtime = KEEP_ALIVE_RUNTIME;
+    }
+    let lab = Lab::start(cfg).await;
+    let session = lab.session().await;
+    assert_eq!(
+        lab.state(&session).await,
+        "pending",
+        "kept-alive connection in use"
+    );
+    let Lab { server, wallet } = lab;
+    tokio::time::timeout(RUNTIME_SLACK, server.wait())
+        .await
+        .expect("wait returns although a client still holds a kept-alive connection")
+        .expect("serve loop ended cleanly");
+    assert!(
+        wallet.get(&session.result_uri).await.is_err(),
+        "no request is served after the time box"
+    );
+}
+
+/// The Wallet side of the exact-SAN rule: a Request Object whose `x5c` leaf only has a wildcard
+/// SAN over the host is refused for `x509_san_dns:<host>` (`ClientId`), although its chain and
+/// signature verify; the same leaf under `x509_hash` verifies.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn wallet_refuses_x509_san_dns_matched_only_by_a_wildcard() {
+    use p256_spruce::ecdsa::signature::Signer as _;
+    let wildcard_hash = X509Credentials::from_pem(WILDCARD_LEAF_PEM, LEAF_KEY_PEM, CA_PEM)
+        .expect("pem")
+        .x509_hash_client_id();
+    let mut cfg = config(Prefix::Hash);
+    cfg.client_id = protocol_model::ClientIdWire::new(wildcard_hash.clone()).expect("id");
+    if let Some(conformance) = &mut cfg.conformance {
+        conformance.credentials =
+            X509Credentials::from_pem(WILDCARD_LEAF_PEM, LEAF_KEY_PEM, CA_PEM).expect("pem");
+    }
+    let lab = Lab::start(cfg).await;
+    let session = lab.session().await;
+    assert_eq!(session.client_id, wildcard_hash);
+    lab.request(&session).await;
+
+    // The same Request Object, re-signed by the leaf key for `x509_san_dns:<host>`.
+    let jwt = String::from_utf8(
+        lab.wallet
+            .get(&session.request_uri)
+            .await
+            .expect("get")
+            .body,
+    )
+    .expect("JWS");
+    let segments: Vec<&str> = jwt.split('.').collect();
+    let san_dns = manifest("client_id_x509_san_dns");
+    let mut payload = decode(segments[JWS_PAYLOAD]);
+    payload.insert("client_id".to_owned(), json!(san_dns));
+    let input = format!(
+        "{}.{}",
+        segments[JWS_HEADER],
+        URL_SAFE_NO_PAD.encode(Value::Object(payload).to_string())
+    );
+    let jwk: Value = serde_json::from_str(LEAF_JWK).expect("JWK");
+    let d = URL_SAFE_NO_PAD
+        .decode(jwk["d"].as_str().expect("d"))
+        .expect("base64url d");
+    let key = p256_spruce::ecdsa::SigningKey::from_slice(&d).expect("leaf key");
+    let signature: p256_spruce::ecdsa::Signature = key.sign(input.as_bytes());
+    let forged = format!("{input}.{}", URL_SAFE_NO_PAD.encode(signature.to_bytes()));
+    assert!(matches!(
+        lab.wallet.verify_request(&forged, &san_dns).await,
+        Err(WalletError::Rejected(RequestRejection::ClientId))
+    ));
 }
