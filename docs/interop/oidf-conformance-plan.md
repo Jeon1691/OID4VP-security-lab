@@ -5,10 +5,19 @@ Status: G7 groundwork. Sections 1-2 and 5-7 are desk research. All sources were 
 
 *Update 2026-11-25:* the suite now runs self-hosted (`tools/oidf-suite/`, release-v5.3.5 = commit
 `246b2c1`, images pinned by digest, OrbStack, loopback only). It was run against a throwaway
-local stand-in verifier only, not against the lab and not against any external system, to
-resolve the UNKNOWNs in §3-§4. `tools/oidf-suite/README.md` holds the runbook, the exact plan
-configuration and the source citations; below, **[run]** marks what was observed running and
-**[read]** what was read from source.
+local stand-in (`tools/oidf-suite/standin/`, which observes the suite and verifies nothing),
+not against the lab and not against any external system, to resolve the UNKNOWNs in §3-§4.
+`tools/oidf-suite/README.md` holds the runbook, the exact plan configuration and the source
+citations. Below, **[run]** marks what was observed running and **[read]** what was read from
+source only.
+
+External contacts for that work were:
+- image pulls from `registry.gitlab.com` (suite and nginx) and Docker Hub (mongo);
+- public source reads (the suite repository clone, MongoDB advisory pages for CVE-2025-14847);
+- one DNS lookup of `localhost.emobix.co.uk`;
+- PyPI, for the stand-in's `cryptography` package.
+
+The suite container's own egress is not restricted (README "Egress" and §2).
 
 ## 1. Sources
 
@@ -122,7 +131,11 @@ Runbook, pins and findings: `tools/oidf-suite/README.md`. In short:
   `mongo:6.0.13` images are pinned by multi-arch index digest. On 2026-11-25 `:latest` resolved
   to the same suite digests. [run]
 - **No login**: the `dev` profile sets `fintechlabs.devmode=true`, which authenticates every
-  request as a dummy admin, so the REST API needs no token. [run]
+  request as a dummy admin, so the REST API needs no token. [run] With CSRF off and no
+  authentication, any web page in a browser that has accepted the suite's certificate can
+  make the suite fetch an arbitrary `request_uri` with its trust-all client. That is SSRF into
+  host loopback, the LAN or the internet [read]. So runs are driven by curl or the driver
+  only, with a random alias per run, and the stack is up only during a run (README §2).
 - **No hosts-file edit**: `BASE_URL=https://localhost:8443`, and nginx publishes
   `127.0.0.1:8443` only. Mongo is on tmpfs, so `docker compose down` leaves nothing behind
   (export the results first). [run]
@@ -148,7 +161,10 @@ None of these is in scope for G7. Each needs its own decision record.
    - *Option B*: suite in Docker. On OrbStack the container reaches a service bound to host
      `127.0.0.1` through `host.docker.internal` (or `host.orb.internal`), so neither a wider
      bind nor host networking is needed [run, `scripts/oidf_suite_probe.sh`]. Docker Desktop
-     is still **UNKNOWN**.
+     is still **UNKNOWN**. The same mechanism means that on OrbStack host 127.0.0.1 is
+     reachable from *every* local container: a loopback bind isolates the lab from the LAN,
+     not from other containers on this machine. The conformance-mode ADR therefore treats the
+     mode as time-boxed and off by default.
    - *Option C*: hosted demo/production server. This needs a public endpoint and is **not**
      compatible with the lab policy.
 
