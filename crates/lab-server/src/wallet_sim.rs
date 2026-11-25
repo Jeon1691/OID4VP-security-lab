@@ -116,6 +116,10 @@ pub enum WalletError {
     /// Sealing failed.
     #[error("seal: {0}")]
     Seal(#[from] jose_hpke::Error),
+    /// ECDH-ES sealing failed (`ecdh-es-research` only).
+    #[cfg(feature = "ecdh-es-research")]
+    #[error("seal ECDH-ES: {0}")]
+    SealEcdhEs(jose_ecdh_es::Error),
     /// The Request Object did not verify; nothing from it was used.
     #[error("request object rejected: {0:?}")]
     Rejected(RequestRejection),
@@ -605,6 +609,8 @@ impl WalletSim {
         let route = match route {
             RouteKind::Unique => "unique",
             RouteKind::Shared => "shared",
+            #[cfg(feature = "ecdh-es-research")]
+            RouteKind::EcdhEs => crate::ecdh_es::ECDH_ES_ROUTE_NAME,
         };
         let mut body = json!({ "route": route });
         if let Some(nonce) = nonce {
@@ -788,6 +794,62 @@ impl WalletSim {
             &ResponseUriWire::new(pick(&opts.session_info_response_uri, &request.response_uri))
                 .map_err(malformed)?,
         );
+        let plaintext = self.payload(request, opts)?;
+        let jwe = seal_compact(
+            &request.public_key,
+            kid_header(request, opts),
+            info.as_bytes(),
+            plaintext.to_string().as_bytes(),
+            &mut UnwrapErr(getrandom::SysRng),
+        )?;
+        Ok(if opts.tamper_ciphertext {
+            tamper_ciphertext(&jwe)
+        } else {
+            jwe
+        })
+    }
+
+    /// The OpenID4VP 1.0-style counterpart of [`Self::seal`] (`ecdh-es-research` only): the same
+    /// payload, sealed as an `ECDH-ES` (Direct Key Agreement) JWE with `enc` to the request's
+    /// advertised P-256 key, `kid` per [`SealOptions::kid`] (1.0 §8.3). ECDH-ES has no
+    /// `session_info`, so the `session_info_*` knobs have no effect here. The request's key is
+    /// used whatever its advertised `alg`, so tests can aim ECDH-ES at an HPKE-0 route.
+    ///
+    /// # Errors
+    /// A presentation or sealing failure.
+    #[cfg(feature = "ecdh-es-research")]
+    pub fn seal_ecdh_es(
+        &self,
+        request: &RequestObject,
+        enc: jose_ecdh_es::ContentEncryption,
+        opts: &SealOptions,
+    ) -> Result<String, WalletError> {
+        let point = request.public_key.to_bytes();
+        let (x, y) = point
+            .strip_prefix(&[SEC1_UNCOMPRESSED_TAG])
+            .map(|xy| xy.split_at(crate::server::P256_COORDINATE_BYTES))
+            .ok_or(WalletError::Malformed("jwk coordinate"))?;
+        let recipient = jose_ecdh_es::RecipientPublicKey::from_coordinates(x, y)
+            .map_err(WalletError::SealEcdhEs)?;
+        let plaintext = self.payload(request, opts)?;
+        let jwe = jose_ecdh_es::test_support::seal_compact(
+            &recipient,
+            enc,
+            kid_header(request, opts),
+            plaintext.to_string().as_bytes(),
+            &mut jose_ecdh_es::rand_core::UnwrapErr(getrandom::SysRng),
+        )
+        .map_err(WalletError::SealEcdhEs)?;
+        Ok(if opts.tamper_ciphertext {
+            tamper_ciphertext(&jwe)
+        } else {
+            jwe
+        })
+    }
+
+    /// The response payload `{"vp_token": ..., "state": ...}` (plus
+    /// [`SealOptions::extra_members`]) both sealers encrypt.
+    fn payload(&self, request: &RequestObject, opts: &SealOptions) -> Result<Value, WalletError> {
         let vp_token = match &opts.vp_token {
             Some(vp_token) => vp_token.clone(),
             None => {
@@ -809,24 +871,7 @@ impl WalletSim {
         if let Some(state) = state {
             payload.insert(RESPONSE_STATE.to_owned(), state);
         }
-        let plaintext = Value::Object(payload);
-        let kid = match &opts.kid {
-            KidChoice::Advertised => request.kid.as_deref(),
-            KidChoice::Omit => None,
-            KidChoice::Other(kid) => Some(kid.as_str()),
-        };
-        let jwe = seal_compact(
-            &request.public_key,
-            kid,
-            info.as_bytes(),
-            plaintext.to_string().as_bytes(),
-            &mut UnwrapErr(getrandom::SysRng),
-        )?;
-        Ok(if opts.tamper_ciphertext {
-            tamper_ciphertext(&jwe)
-        } else {
-            jwe
-        })
+        Ok(Value::Object(payload))
     }
 
     /// POSTs `response=<jwe>` as a form to `response_uri`.
@@ -901,6 +946,15 @@ impl WalletSim {
             content_type,
             body,
         })
+    }
+}
+
+/// The JWE protected header `kid` [`SealOptions::kid`] chooses.
+fn kid_header<'a>(request: &'a RequestObject, opts: &'a SealOptions) -> Option<&'a str> {
+    match &opts.kid {
+        KidChoice::Advertised => request.kid.as_deref(),
+        KidChoice::Omit => None,
+        KidChoice::Other(kid) => Some(kid.as_str()),
     }
 }
 
