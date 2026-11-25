@@ -21,9 +21,11 @@
 //! | `{ns}:tr:<route>` / `{ns}:trk:<route>:<kid>` | hash | `consumed` / `expired` counts of held terminal sessions |
 //! | `{ns}:purge` | zset | terminal ids, score = when purge may delete them (`0` for expired, `exp + retention` for consumed) |
 //!
-//! Records written before `b4` existed have no `state` and fail closed on read
-//! (`StoreUnavailable`); there is no migration, so such a deployment starts on a fresh
-//! namespace.
+//! Records written before `b4` existed fail closed on read (`StoreUnavailable`), in both
+//! modes: `b4` is read for every record (a `dc_api.jwt` record must hold it empty). Because a
+//! resolve returns every record on the index it walks, one such record fails every resolve
+//! of its route (and `kid`) until it leaves the index, which on a shared route means every
+//! session there. There is no migration: such a deployment starts on a fresh namespace.
 //!
 //! These mirror the indexes of `MemoryRegistry` one to one. Timestamps are absolute Unix
 //! milliseconds, the unit `PEXPIREAT` takes. Redis-side key expiry is deliberately **not** used
