@@ -51,7 +51,9 @@ use crate::evidence::{
 };
 use crate::jar::{REQUEST_OBJECT_AUD, REQUEST_OBJECT_MEDIA_TYPE, RequestSigner};
 use crate::sd_jwt::TrustedIssuerKey;
-use crate::validate::{self, MAX_RESEARCH_NONCE_LEN, ValidatedResponse, ValidationError};
+use crate::validate::{
+    self, MAX_RESEARCH_NONCE_LEN, MAX_RESEARCH_STATE_LEN, ValidatedResponse, ValidationError,
+};
 
 /// Most digests the replay guard remembers at once, per kind (response and holder proof): four
 /// times session-core's default pending cap. An entry exists only for a response that
@@ -709,14 +711,14 @@ async fn health() -> Response {
 }
 
 /// `POST /lab/v1/sessions` with an optional JSON body `{"route": "unique"|"shared",
-/// "nonce": "..."}`. `route` defaults to `unique`; `shared` and `nonce` (a caller-chosen nonce,
-/// to model a Verifier that reuses nonces) are research-mode only.
+/// "nonce": "...", "state": "..."}`. `route` defaults to `unique`; `shared`, `nonce` and
+/// `state` (caller-chosen values, to model a Verifier that reuses them) are research-mode only.
 async fn create_session(State(state): State<Arc<AppState>>, body: Bytes) -> Response {
-    let (route, nonce) = match parse_create(&state, &body) {
+    let (route, fixed) = match parse_create(&state, &body) {
         Ok(v) => v,
         Err(description) => return error_response(StatusCode::BAD_REQUEST, description),
     };
-    match issue(&state, route, nonce).await {
+    match issue(&state, route, fixed).await {
         Ok(created) => json_response(StatusCode::CREATED, created.to_string()),
         Err(InsertError::Capacity { .. }) => {
             error_response(StatusCode::SERVICE_UNAVAILABLE, "session capacity reached")
@@ -725,19 +727,23 @@ async fn create_session(State(state): State<Arc<AppState>>, body: Bytes) -> Resp
     }
 }
 
-fn parse_create(
-    state: &AppState,
-    body: &[u8],
-) -> Result<(RouteKind, Option<NonceWire>), &'static str> {
+/// Research-mode overrides of the values `issue` otherwise draws fresh.
+#[derive(Default)]
+struct FixedValues {
+    nonce: Option<NonceWire>,
+    state: Option<StateWire>,
+}
+
+fn parse_create(state: &AppState, body: &[u8]) -> Result<(RouteKind, FixedValues), &'static str> {
+    let mut fixed = FixedValues::default();
     if body.is_empty() {
-        return Ok((RouteKind::Unique, None));
+        return Ok((RouteKind::Unique, fixed));
     }
     let Ok(Value::Object(request)) = serde_json::from_slice::<Value>(body) else {
         return Err("body must be a JSON object");
     };
     let research = matches!(state.mode, Mode::Research(_));
     let mut route = RouteKind::Unique;
-    let mut nonce = None;
     for (name, value) in &request {
         match (name.as_str(), value.as_str()) {
             ("route", Some("unique")) => route = RouteKind::Unique,
@@ -749,26 +755,38 @@ fn parse_create(
                 if n.len() > MAX_RESEARCH_NONCE_LEN {
                     return Err("nonce too long");
                 }
-                nonce = Some(NonceWire::new(n).map_err(|_| "invalid nonce")?);
+                fixed.nonce = Some(NonceWire::new(n).map_err(|_| "invalid nonce")?);
+            }
+            ("state", Some(s)) if research => {
+                if s.len() > MAX_RESEARCH_STATE_LEN {
+                    return Err("state too long");
+                }
+                fixed.state = Some(StateWire::new(s).map_err(|_| "invalid state")?);
             }
             _ => return Err("unsupported member"),
         }
     }
-    Ok((route, nonce))
+    Ok((route, fixed))
 }
 
 /// Creates and registers a session; returns the creation response.
 async fn issue(
     state: &AppState,
     route: RouteKind,
-    nonce: Option<NonceWire>,
+    fixed: FixedValues,
 ) -> Result<Value, InsertError> {
     let fail = || InsertError::Unavailable(session_core::StoreUnavailable);
     let random = |n| random_b64(n).ok_or_else(fail);
     let id = SessionId::new(random(SESSION_ID_BYTES)?).map_err(|_| fail())?;
-    let nonce = match nonce {
+    let nonce = match fixed.nonce {
         Some(n) => n,
         None => NonceWire::new(random(NONCE_BYTES)?).map_err(|_| fail())?,
+    };
+    // Fresh per session, on every route and in every mode (OpenID4VP 1.1 §5.2, §14.4.2),
+    // unless a research session fixed it.
+    let response_state = match fixed.state {
+        Some(s) => s,
+        None => StateWire::new(random(STATE_BYTES)?).map_err(|_| fail())?,
     };
     let (registry, route_token, response_uri, key, kid) = match (route, &state.shared) {
         (RouteKind::Shared, Some(shared)) => {
@@ -794,8 +812,6 @@ async fn issue(
         }
     };
     let response_uri = ResponseUriWire::new(response_uri).map_err(|_| fail())?;
-    // Fresh per session, on every route and in every mode (OpenID4VP 1.1 §5.2, §14.4.2).
-    let response_state = StateWire::new(random(STATE_BYTES)?).map_err(|_| fail())?;
     let binding = RequestBinding::DirectPostJwt {
         client_id: state.client_id.clone(),
         nonce,
@@ -883,7 +899,8 @@ impl Lifetime {
     }
 }
 
-/// The request object payload for `binding`: exactly the stored wire values, the HPKE-0 public
+/// The request object payload for `binding`: exactly the stored wire values (`state` included,
+/// OpenID4VP 1.1 §5.2), the HPKE-0 public
 /// key in `client_metadata.jwks`, `aud` (OpenID4VP 1.1 §5.8, Static Discovery), `iat` and `exp`
 /// ([`Lifetime`]). No `iss`: it MAY be present and Wallets MUST ignore it (§5). Signed by
 /// `RequestSigner::sign`.
@@ -897,7 +914,7 @@ fn request_object(
         client_id,
         nonce,
         response_uri,
-        ..
+        state,
     } = binding
     else {
         return Value::Null;
@@ -924,6 +941,7 @@ fn request_object(
         "response_mode": EncryptedResponseMode::DirectPostJwt.as_str(),
         "response_uri": response_uri.as_str(),
         "nonce": nonce.as_str(),
+        "state": state.as_str(),
         "dcql_query": validate::dcql_query(),
         "client_metadata": { "jwks": { "keys": [Value::Object(jwk)] } },
     })
@@ -1188,7 +1206,8 @@ async fn pipeline(
 }
 
 /// Opens the JWE with every candidate's key and `session_info` and validates every plaintext
-/// (holder binding to that candidate's `client_id` and `nonce`).
+/// against that candidate: its `state` first, then holder binding to its `client_id` and
+/// `nonce`.
 /// Never stops at the first match: for bounded trial, a second validating candidate must be
 /// seen to be refused. Only the first validated result is kept; later ones are counted and
 /// dropped, so the work per candidate (and the timing) is the same either way. Unique
