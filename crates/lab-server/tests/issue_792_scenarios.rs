@@ -135,8 +135,9 @@ fn distinct<T: std::hash::Hash + Eq>(values: impl IntoIterator<Item = T>) -> usi
 
 /// #792 "The Verifier is not missing the *values* — it issued all three itself in (1). It
 /// cannot tell **which (1) this (2) is answering**", and "`kid` identifies a *key*, not a
-/// session". With a shared response_uri and a shared key, the sessions' request objects differ
-/// only in `nonce`, and what reaches the Verifier before decryption (POST target and JWE
+/// session". With a shared response_uri and a shared key, the sessions' `session_info` inputs
+/// differ only in `nonce` (their `state`s differ too, inside the ciphertext), and what reaches
+/// the Verifier before decryption (POST target and JWE
 /// protected header) is byte-identical across sessions. The Verifier can only make every live
 /// session a candidate; the nonce inside `session_info` is what lets exactly one of them open.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -165,6 +166,9 @@ async fn issue_792_shared_uri_and_kid_leave_nothing_outside_the_ciphertext_to_co
         1
     );
     assert_eq!(distinct(requests.iter().map(|r| r.nonce.as_str())), n);
+    // `state` differs per session too, but it is not a session_info input and travels only
+    // inside the ciphertext (§8.3), so it is no pre-decryption correlator either.
+    assert_eq!(distinct(requests.iter().map(|r| r.state.as_deref())), n);
 
     // Pre-decryption view of each session's honest response: same path, same protected header
     // bytes (so the same `kid`), and a body that carries `response` only.

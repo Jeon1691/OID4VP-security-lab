@@ -52,7 +52,16 @@ of the Response URI"). Below, section numbers follow the 11 November 2026 draft.
   Authorization Request parameter to add appropriate data to the Authorization Response for
   that purpose, for details see Section 13.3."
 - **§5.2, `state`**: "REQUIRED under the conditions defined in Section 5.3. Otherwise, state is
-  RECOMMENDED, see Section 14.4."
+  RECOMMENDED, see Section 14.4. state values MUST only contain ASCII URL safe characters
+  (uppercase and lowercase letters, decimal digits, hyphen, period, underscore, and tilde)."
+- **§5.3** (when `state` carries the request/response binding): the Verifier MUST "ensure that
+  the value is a cryptographically strong pseudo-random number with at least 128 bits of
+  entropy", "chosen fresh for each Authorization Request", "store it in the Verifier's
+  session state" and "check that the same state value is returned in the Authorization
+  Response".
+- **§8.1**: "The Client MUST ignore any unrecognized parameters."
+- **Appendix A.2** (DC API): "since the state parameter is not defined for the DC API, the
+  Verifier cannot expect it to be included in the response."
 - **§5.2, `nonce`**: "The Verifier MUST create a fresh, cryptographically random number with
   sufficient entropy for every Authorization Request and store it with its current session.
   The nonce SHOULD contain at least 128 bits of entropy."
@@ -92,20 +101,21 @@ and §14.4.2 correlate through `state` (a request-id).
 ## 3. Reproduction status per claim
 
 The test names are the lab's (`cargo test -p lab-server`, plus jose-hpke and session-core).
-New tests are in `crates/lab-server/tests/issue_792_scenarios.rs` and are listed in
-`REQUIRED_TESTS` (`scripts/ci_local.sh`).
+New tests are in `crates/lab-server/tests/issue_792_scenarios.rs` and, for `state`,
+`crates/lab-server/tests/response_state_e2e.rs`; all are listed in `REQUIRED_TESTS`
+(`scripts/ci_local.sh`).
 
 | Claim | Status | Evidence |
 | --- | --- | --- |
 | C1 | **Reproduced** (crypto level and HTTP level) | jose-hpke `direct_post_bound_jwe_opens_only_with_identical_session` and `direct_post_bound_jwe_fails_with_any_single_field_changed`. The second includes empty `info`, which is the "decrypt first" order. HTTP: `jwe_bound_to_another_sessions_values_fails` (each of nonce, client_id and response_uri changed → `Rejection::Decrypt`, 1 attempt, session pending). |
-| C2 | **Reproduced** (the no-correlator part) | New: `issue_792_shared_uri_and_kid_leave_nothing_outside_the_ciphertext_to_correlate_on`. With a shared URI and a shared key, the request objects of N=8 sessions differ only in `nonce`, the protected headers of their honest JWEs are byte-identical, and the resolver must return all N live sessions as candidates. The lab issues no `state` at all. |
+| C2 | **Reproduced** (the no-correlator part) | New: `issue_792_shared_uri_and_kid_leave_nothing_outside_the_ciphertext_to_correlate_on`. With a shared URI and a shared key, the request objects of N=8 sessions differ only in `nonce`, the protected headers of their honest JWEs are byte-identical, and the resolver must return all N live sessions as candidates. Each session also has its own `state`, but it travels only inside the ciphertext (§8.3), so it is no pre-decryption correlator (the test asserts N distinct `state`s next to the identical headers). |
 | C3 | **Partly reproduced** | The HPKE half is covered by C1: the key alone with empty `info` cannot open. The ECDH-ES half is only the G0-D SpruceID round trip (`ecdh_es_direct_post_jwt_round_trip_completes_with_success`). That flow routes by a per-session URL path, not by `state`, so the lab has no 1.0-style "decrypt, then read `state`" Verifier. |
 | C4 | **Reproduced** | Bounded trial: every session shares one `kid`, so `kid` selects nothing (`issue_792_workarounds_compared_on_one_population`: N distinct sessions, 1 distinct `kid`). New: `issue_792_kid_of_another_session_on_the_unique_kid_route_fails_closed` shows that even when `kid` is per session, it is an unauthenticated hint. Note that §5.1 requires a `kid` that is unique "within the context of the request", not across requests, so one key and `kid` shared by every request (bounded trial) is permitted by the text, and `kid` is not specified as a session identifier. |
 | C5 | **Reproduced** (as the consequence of C1 + C2) | The lab can only break the loop with a pre-decryption selector (route token or per-session `kid`) or by trying every candidate. |
 | C6 (1) | **Reproduced** | `unique_uri_among_many_sessions_consumes_only_the_addressed_one` (N=8). New matrix: `issue_792_workarounds_compared_on_one_population` (N=2/8/32: 1 candidate, 1 attempt). Binding strength: the response_uri case of `jwe_bound_to_another_sessions_values_fails`. |
 | C6 (2) | **Reproduced** | `unique_kid_on_shared_route_yields_one_candidate_and_one_attempt`, the matrix test (1 attempt), and the new misdirected-`kid` test. |
 | C6 (3) | **Reproduced**, with the cost measured as an attempt count, never as time | `bounded_trial_succeeds_with_right_session_last_within_budget` (`hpke_attempts == N` for N=2/8/32, no stop-at-first), the matrix test, and `bounded_trial_over_budget_is_rejected_without_decryption`. |
-| C7 | **Consistent** (lab policy) | The lab cannot check `state` before decryption, so it never relies on it. A cleartext `state` next to `response` is refused at admission: new `issue_792_cleartext_state_beside_the_jwe_is_refused_before_decryption`. `state` alone is refused as well: the "missing response" case in `admission_failures_are_rejected_before_decryption`. |
+| C7 | **Reproduced** (`state` works only after decryption) | The lab issues a fresh 128-bit `state` per session on every route, signs it into the Request Object and stores it in the session's `RequestBinding`; the wallet echoes it inside the JWE next to `vp_token` (§8.3). The Verifier can compare it only after HPKE open, per candidate, before holder binding (`crates/lab-server/tests/response_state_e2e.rs`: `state_round_trips_inside_the_jwe_on_every_route`, `response_without_state_is_refused_and_the_honest_response_then_commits`, `state_of_another_live_session_is_refused`, `bounded_trial_jwe_that_opens_for_b_but_carries_a_state_is_refused_for_b`). So `state` cannot select the session for decryption, which is the issue's point; it can still serve §14.4.2 after decryption. A cleartext `state` next to `response` is refused at admission: `issue_792_cleartext_state_beside_the_jwe_is_refused_before_decryption`. `state` alone is refused as well: the "missing response" case in `admission_failures_are_rejected_before_decryption`. |
 | C8 | Not testable in the lab | The lab is HPKE-only on its HTTP path, which is the same situation as the HAIP HPKE profile. HAIP itself is out of scope. |
 | C9 | **Partly** | HPKE fail-closed behaviour: C1 tests. The lab has no Verifier that accepts both ECDH-ES and HPKE. jose-hpke refuses any `alg` other than `HPKE-0` (`rejects_unsupported_alg`), so the downgrade path does not exist on the lab's HTTP route. |
 | C10 | Spec proposal | See §6. The lab supplies the evidence; the wording belongs to the WG. |
@@ -153,12 +163,37 @@ New tests are in `crates/lab-server/tests/issue_792_scenarios.rs` and are listed
 6. **`kid` is attacker-controlled input.** A misdirected `kid` selects a different session,
    whose key fails to open the JWE. Nothing is consumed. (New misdirected-`kid` test;
    `jwe_without_kid_is_rejected_on_every_route` for a missing `kid`.)
+7. **Under HPKE the §14.4.2 `state` check runs only after decryption, and adds nothing
+   against a deliberate sender.** `state` is not a `session_info` input
+   (`state_is_not_a_session_info_input`), so it cannot help select the session to decrypt
+   with; by the time it can be read, `session_info` has already selected the session. And
+   the sender chooses the plaintext: `state` is in the Request Object, so a sender that can
+   seal for a session can echo that session's `state`. In
+   `holder_proof_resealed_for_another_session_is_rejected` the re-sealed payload carries B's
+   own `state`, passes the `state` check, and only the replay guard refuses it. What the check
+   does catch is the inadvertent or misrouted response:
+   - a response that echoes no `state` (`StateMissing`) or another live session's
+     (`StateMismatch`), each refused with the generic 400 and the session left pending;
+   - under bounded trial, A's payload (A's proof and A's `state`) sealed with B's
+     `session_info` opens for B and is refused by B's `state` before any holder-binding work
+     (`StateMismatch`, not `KbNonceMismatch`);
+   - with a reused nonce (the §4 item 3 condition) but a fresh `state`, an honest response
+     opens for both sessions but validates for one, so it commits instead of being refused as
+     `Ambiguous`, and a verbatim replay to the other session is refused as `StateMismatch`
+     before the replay guard is reached
+     (`reused_nonce_with_fresh_state_selects_one_session_and_refuses_a_replay`). The
+     `Ambiguous` and `CrossSessionReplay` evidence now needs a Verifier that reuses the
+     `state` as well (research knob).
 
 ## 5. What the issue covers and the lab does not (gaps)
 
-- **A 1.0 or ECDH-ES Verifier that correlates on `state`.** The lab has none (C3), and the lab
-  issues no `state`, so §14.4.2's SHOULD (check `state`) is never exercised, before or after
-  decryption.
+- **A 1.0 or ECDH-ES Verifier that correlates on `state`.** The lab has none (C3). The lab
+  now issues `state` and checks it after decryption (§14.4.2, C7); a check *before*
+  decryption is impossible under HPKE, and the lab does not model a Verifier that decrypts
+  first and then routes by `state`.
+- **`state` in error responses.** §8.2 shows `state` beside an unencrypted Authorization Error
+  Response; the lab accepts only `response`, so error responses (encrypted or not) are not
+  modelled.
 - **Other HPKE algorithms.** The issue was implemented with `HPKE-0`, `HPKE-1`, `HPKE-2`,
   `HPKE-3`, `HPKE-4` and `HPKE-7`. The lab supports `HPKE-0` only
   (`draft22_hpke7_compact_vector_is_rejected_as_unsupported_alg`). Key Encryption /
@@ -188,6 +223,9 @@ New tests are in `crates/lab-server/tests/issue_792_scenarios.rs` and are listed
   refusing a JWE without one on every route (`jwe_without_kid_is_rejected_on_every_route`)
   follows from these two MUSTs.
 - §14.2.2: every presentation is bound to `client_id` and `nonce` (MUST).
+- §14.4.2: check that the received `state` corresponds to a recent Authorization Request
+  (SHOULD). The lab does, per candidate, after decryption; §5.3's 128 bits and per-request
+  freshness are what it draws.
 
 ### 6.2 Candidate spec text (offered to the WG as input, not decided)
 
@@ -219,6 +257,8 @@ New tests are in `crates/lab-server/tests/issue_792_scenarios.rs` and are listed
 - Unique response_uri per session, as the only strategy in Hardened mode. A shared route exists
   only in Research mode and needs a fixed strategy (`hardened_mode_has_no_shared_route`).
 - Only `response` in the body: a cleartext `state` or `vp_token` is refused at admission.
+- A `state` in every request (§5.2: RECOMMENDED) and required in the decrypted payload; other
+  unrecognized payload members are ignored, as §8.1 requires.
 - A Verifier-wide replay guard on the JWE digest and the holder-proof digest.
 - A hard candidate budget; no stop-at-first under bounded trial.
 - A generic error body for every post-admission failure
@@ -243,19 +283,24 @@ Strategies:
 | S1 | N=2/8/32 | cid | honest | UU: 1 candidate, 1 attempt, only the target consumed | 1/1, others pending (`issue_792_workarounds_compared_on_one_population`; `unique_uri_among_many_sessions_consumes_only_the_addressed_one`) |
 | S2 | N=2/8/32 | cid, uri | honest | UK: 1 candidate, 1 attempt | 1/1 (same matrix test; `unique_kid_on_shared_route_yields_one_candidate_and_one_attempt`) |
 | S3 | N=2/8/32 | cid, uri, key | honest | BT: N candidates, N attempts, exactly 1 opens | N/N, `opened: 1` (matrix test; `bounded_trial_succeeds_with_right_session_last_within_budget`) |
-| S4 | N=8 | cid, uri, key | passive observer of the POST | BT: nothing before decryption tells the sessions apart | identical protected header bytes, request objects differ only in nonce, N candidates (`issue_792_shared_uri_and_kid_leave_nothing_outside_the_ciphertext_to_correlate_on`) |
+| S4 | N=8 | cid, uri, key | passive observer of the POST | BT: nothing before decryption tells the sessions apart | identical protected header bytes, `session_info` inputs differ only in nonce (`state` differs too, inside the ciphertext), N candidates (`issue_792_shared_uri_and_kid_leave_nothing_outside_the_ciphertext_to_correlate_on`) |
 | S5 | N=budget+1 | cid, uri, key | can create sessions | BT: refuse before decryption, 0 attempts | `CandidateBudgetExceeded`, honest response refused, 0 attempts (`bounded_trial_over_budget_is_rejected_without_decryption`) |
 | S6 | 2 | cid, uri, key | adds cleartext `state` beside `response` | lab policy: admission refusal, 0 attempts | 400, `UnexpectedParameter`, session pending, JWE alone then commits (`issue_792_cleartext_state_beside_the_jwe_is_refused_before_decryption`) |
 | S7 | 2 | cid, uri | sets B's `kid` on a JWE for A | UK: selects B, fails to open, nothing consumed | 1 attempt, `Decrypt`, A and B pending (`issue_792_kid_of_another_session_on_the_unique_kid_route_fails_closed`) |
 | S8 | 2 | cid | seals for A's key with B's nonce, a foreign cid, or B's uri | UU: fail closed | 1 attempt, `Decrypt` each (`jwe_bound_to_another_sessions_values_fails`) |
 | S9 | 2 | cid, uri, key | reads B's public request object; seals A's valid proof with B's `session_info` | BT: opens for B, refused by holder binding | 2 attempts, `opened: 1`, `KbNonceMismatch`, both pending; A then commits (`issue_792_trial_opens_the_session_the_sender_bound_and_holder_binding_decides`) |
-| S10 | 2 | cid, uri, key, **nonce** (violates §5.2) | honest | BT: integrity failure, claim nothing | 2 open, 2 validate, `Ambiguous` (`bounded_trial_with_two_validating_sessions_is_an_integrity_failure`) |
-| S11 | 2 sequential | cid, uri, key, **nonce** | replays A's consumed JWE to B | refuse across sessions | `CrossSessionReplay`, B pending (`cross_session_replay_on_shared_route_is_rejected`) |
-| S12 | 2 sequential | cid, uri, key, **nonce** | re-seals A's KB-JWT in a fresh JWE for B | refuse across sessions | `HolderProofReplay`, B pending (`holder_proof_resealed_for_another_session_is_rejected`) |
+| S10 | 2 | cid, uri, key, **nonce** (violates §5.2), **state** | honest | BT: integrity failure, claim nothing | 2 open, 2 validate, `Ambiguous` (`bounded_trial_with_two_validating_sessions_is_an_integrity_failure`) |
+| S11 | 2 sequential | cid, uri, key, **nonce**, **state** | replays A's consumed JWE to B | refuse across sessions | `CrossSessionReplay`, B pending (`cross_session_replay_on_shared_route_is_rejected`) |
+| S12 | 2 sequential | cid, uri, key, **nonce** | re-seals A's KB-JWT in a fresh JWE for B, echoing B's `state` | refuse across sessions | `state` passes, `HolderProofReplay`, B pending (`holder_proof_resealed_for_another_session_is_rejected`) |
 | S13 | 2 | cid | seals A's valid proof for B (fresh nonces) | UU: holder binding refuses | `KbNonceMismatch` (`valid_kb_jwt_replayed_to_another_session_fails_the_nonce_binding`) |
 | S14 | 1 | none | replays one JWE (sequentially / 2-16-128 concurrently) | commit exactly once | (`sequential_replay_is_rejected`, `concurrent_identical_posts_consume_exactly_once`) |
 | S15 | none (crypto) | none | Verifier decrypts with the key and empty `info` (1.0 order) | AEAD failure | `Error::Decryption` (`direct_post_bound_jwe_fails_with_any_single_field_changed`) |
 | S16 | none | none | asks a Hardened server for the shared route | not served | 404, no shared sessions (`hardened_mode_has_no_shared_route`) |
+| S17 | 4 per route | UU / BT / UK as above | honest (echoes the Request Object's `state` inside the JWE) | fresh `state` per session, signed = stored, each commits | 22-character §5.2 values, all distinct, signed bytes = registry bytes (`state_round_trips_inside_the_jwe_on_every_route`; `signed_request_object_binding_bytes_match_stored_session_and_session_info`) |
+| S18 | 2 | cid (UU) / cid, uri, key (BT) | omits `state` from the payload | refuse after decryption, session pending | 1 open, `StateMissing`, generic 400, honest response then commits (`response_without_state_is_refused_and_the_honest_response_then_commits`) |
+| S19 | 2 | cid | seals for A with B's `state`, or a non-string `state` | UU: refuse after decryption | 1 attempt, opens, `StateMismatch`, A and B pending, both then commit (`state_of_another_live_session_is_refused`) |
+| S20 | 2 | cid, uri, key | seals A's proof and A's `state` with B's `session_info` | BT: opens for B, refused by B's `state` before holder binding | 2 attempts, `opened: 1`, `StateMismatch` (not `KbNonceMismatch`), nothing claimed, both then commit (`bounded_trial_jwe_that_opens_for_b_but_carries_a_state_is_refused_for_b`) |
+| S21 | 2 | cid, uri, key, **nonce** (violates §5.2); `state` fresh | honest, then replays A's JWE to B | BT: `state` selects A; replay refused by B's `state` | 2 open, 1 validates, A committed; replay 1 open, `StateMismatch`, B pending (`reused_nonce_with_fresh_state_selects_one_session_and_refuses_a_replay`) |
 
 ## 8. Open questions
 
@@ -264,5 +309,6 @@ Strategies:
   note covers.
 - Should the lab add a 1.0-style ECDH-ES shared-key Verifier, to observe that every candidate
   decrypts (§4 item 1 is currently an inference)?
-- Should the lab issue `state` inside the JWE and check it after decryption, to exercise
-  §14.4.2?
+- ~~Should the lab issue `state` inside the JWE and check it after decryption, to exercise
+  §14.4.2?~~ Resolved: it does (C7, §4 item 7, S17-S21). Under HPKE the check comes after
+  decryption and helps only against inadvertent or misrouted responses.
