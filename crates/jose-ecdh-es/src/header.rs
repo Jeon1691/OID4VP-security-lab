@@ -10,7 +10,8 @@
 //! 5. `enc` present, a string, `A128GCM` or `A256GCM`.
 //! 6. `epk` present: an object with exactly `kty` = `EC`, `crv` = `P-256`, `x`, `y` (32-byte
 //!    canonical base64url each) forming a point on P-256; `d` is refused first.
-//! 7. `apu` / `apv`, when present, canonical base64url strings, and not equal to each other.
+//! 7. `apu` / `apv`, when present, canonical base64url strings of at least one byte, whose
+//!    decoded values differ from each other.
 //! 8. `kid`, `typ`, `cty`, when present, strings; `kid` satisfies `protocol_model::KeyId` and
 //!    `typ`/`cty` are non-empty visible ASCII (`%x21-7E`).
 //!
@@ -166,16 +167,26 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<ProtectedHeader, Error> {
         Some(Value::String(s)) => Ok(Some(s.as_str())),
         Some(_) => Err(Error::HeaderParameterType(name)),
     };
-    // RFC 7518 §4.6.1.2-3: "represented as a base64url-encoded string".
+    // RFC 7518 §4.6.1.2-3: "represented as a base64url-encoded string". An empty value is
+    // refused (lab policy): it feeds the KDF exactly like an absent one (Datalen 0, §4.6.2), so
+    // it would be a second spelling of "absent".
     let party_info = |name: &'static str| {
         string(name)?
-            .map(|v| b64::decode(v).ok_or(Error::HeaderParameterValue(name)))
+            .map(|v| {
+                b64::decode(v)
+                    .filter(|data| !data.is_empty())
+                    .ok_or(Error::HeaderParameterValue(name))
+            })
             .transpose()
     };
     let apu = party_info(APU)?;
     let apv = party_info(APV)?;
-    // RFC 7518 §4.6.2: "The "apu" and "apv" values MUST be distinct, when used."
-    if apu.is_some() && apu == apv {
+    // RFC 7518 §4.6.2: "The "apu" and "apv" values MUST be distinct, when used." That is a
+    // producer requirement; refusing it here is lab enforcement. Compared on the decoded bytes,
+    // i.e. the PartyUInfo / PartyVInfo Data that enters the KDF.
+    if let (Some(apu), Some(apv)) = (&apu, &apv)
+        && apu == apv
+    {
         return Err(Error::HeaderParameterValue(APV));
     }
     let kid = string(KID)?

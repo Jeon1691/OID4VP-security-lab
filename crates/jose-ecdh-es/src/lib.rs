@@ -41,7 +41,8 @@
 //! | JWE Encrypted Key not empty | Spec: RFC 7518 §4.6, RFC 7516 §5.2 step 10 |
 //! | IV not 96 bits, tag not 128 bits | Spec: RFC 7518 §5.3 |
 //! | `apu`/`apv` not base64url strings | Spec: RFC 7518 §4.6.1.2-3 |
-//! | `apu` equal to `apv` | Spec: RFC 7518 §4.6.2 "MUST be distinct, when used" |
+//! | `apu` and `apv` with equal decoded bytes | Lab enforcement of a producer requirement: RFC 7518 §4.6.2 "MUST be distinct, when used" binds the sender; a recipient may refuse |
+//! | `apu` or `apv` decoding to the empty octet sequence | Lab policy: the KDF input is the same as when absent (§4.6.2 Datalen 0), so it would be a second spelling of "absent" |
 //! | Header not UTF-8 JSON object, or a duplicate member name in any object | Spec: RFC 7516 §5.2 steps 3-4 (duplicates inside `epk` are lab policy) |
 //! | `crit` present | Spec: no extension is understood (RFC 7516 §4.1.13 / RFC 7515 §4.1.11) |
 //! | Padding, whitespace, line breaks, wrong alphabet | Spec: RFC 7516 §5.2 step 2, RFC 7515 §2 |
