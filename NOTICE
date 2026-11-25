@@ -73,3 +73,29 @@ BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
 CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
 DAMAGE.
+
+-------------------------------------------------------------------------------
+crates/jose-ecdh-es/tests/fixtures/openid4vp_1_0_section_8_3_example.json
+
+Example values extracted from "OpenID for Verifiable Presentations 1.0", Section 8.3
+(https://openid.net/specs/openid-4-verifiable-presentations-1_0.html): the encrypted
+Authorization Response, the recipient JWK, the decoded protected header and the
+payload. The values are unchanged except that display line breaks in the JWE are
+removed; they are restructured into a lab JSON schema. The OpenID Foundation is the
+source of this material; this attribution does not indicate an endorsement by the
+OpenID Foundation.
+
+This extract is not covered by the Apache License 2.0 of this repository. It is used
+under the licence in Appendix G ("Notices") of that specification:
+
+Copyright (c) 2025 The OpenID Foundation.
+
+The OpenID Foundation (OIDF) grants to any Contributor, developer, implementer, or
+other interested party a non-exclusive, royalty free, worldwide copyright license to
+reproduce, prepare derivative works from, distribute, perform and display, this
+Implementers Draft, Final Specification, or Final Specification Incorporating Errata
+Corrections solely for the purposes of (i) developing specifications, and (ii)
+implementing Implementers Drafts, Final Specifications, and Final Specification
+Incorporating Errata Corrections based on such documents, provided that attribution
+be made to the OIDF as the source of the material, but that such attribution does
+not indicate an endorsement by the OIDF.
