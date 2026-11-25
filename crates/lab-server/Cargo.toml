@@ -46,6 +46,9 @@ async-trait = { workspace = true }
 axum = { workspace = true }
 base64 = { workspace = true }
 form_urlencoded = { workspace = true }
+# Interop test only (tests/ecdh_es_spruce_jwe_interop.rs): opens SpruceID's ECDH-ES responses.
+# No `test-support`; the Verifier build does not depend on jose-ecdh-es at all.
+jose-ecdh-es = { workspace = true }
 josekit = { workspace = true }
 # Self dev-dependency: integration tests drive the server with the wallet simulator.
 lab-server = { path = ".", features = ["wallet-sim", "lab-instrumentation"] }
