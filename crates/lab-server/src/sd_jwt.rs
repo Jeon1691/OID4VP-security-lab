@@ -1087,6 +1087,50 @@ mod tests {
         );
     }
 
+    /// The OIDF suite's PID credential shape (conformance plan, suite facts): `iss`, a
+    /// permanent `status.status_list` claim, no `_sd_alg` (default sha-256), three decoys,
+    /// further selectively disclosable claims that are not presented, and only the requested
+    /// Disclosures presented. The lab accepts it without fetching the status list (status is
+    /// out of lab scope) and commits only the requested claims.
+    #[test]
+    fn suite_shaped_pid_credential_with_status_and_decoys_is_accepted() {
+        const PID_VCT: &str = "urn:eudi:pid:1";
+        let given = name_disclosure("given_name", json!("Jean"));
+        let family = name_disclosure("family_name", json!("Dupont"));
+        let birth = name_disclosure("birthdate", json!("1980-05-23"));
+        let unrequested = name_disclosure("nationalities", json!(["FR"]));
+        let mut digests: Vec<String> = [&given, &family, &birth, &unrequested]
+            .iter()
+            .map(|d| disclosure_digest(d))
+            .collect();
+        digests.extend(["decoy-1", "decoy-2", "decoy-3"].map(|d| jose::sha256_b64(d.as_bytes())));
+        let p = payload(json!({
+            "iss": "https://localhost:8443/test/a/lab-synthetic",
+            "vct": PID_VCT,
+            "status": { "status_list": { "idx": 0, "uri": "https://status.lab.invalid/1" } },
+            "_sd": digests,
+        }));
+        let query = CredentialQuery {
+            vct: PID_VCT,
+            claims: &["given_name", "family_name", "birthdate"],
+        };
+        let ok = verify_sd_jwt_vc(
+            &present(&issuer_jwt(&p), &[&given, &family, &birth]),
+            &trusted(),
+            &query,
+            &context(),
+        )
+        .expect("suite-shaped presentation");
+        assert_eq!(
+            ok.claims,
+            [
+                ("given_name".to_owned(), json!("Jean")),
+                ("family_name".to_owned(), json!("Dupont")),
+                ("birthdate".to_owned(), json!("1980-05-23")),
+            ]
+        );
+    }
+
     #[test]
     fn sd_jwt_vc_profile_enforces_vct_and_exactly_the_requested_claims() {
         let given = name_disclosure("given_name", json!("Alex"));
