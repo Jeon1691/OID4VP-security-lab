@@ -92,6 +92,17 @@ zeroize = "1.9.2"
 # hpke's HKDF already pulls in, so no new crate enters the tree; `oid` is not needed.
 sha2 = { version = "0.11.1", default-features = false }
 
+# lab-server `conformance` feature only (docs/adr/0002-conformance-mode.md): HTTPS on loopback
+# and X.509 client identifiers. All three are already in the tree (reqwest's rustls stack under
+# openid4vp / ssi), so no new crate enters Cargo.lock. Defaults are off: the ring provider only
+# (no aws-lc-rs / aws-lc-sys in the conformance build), TLS 1.3 only (no `tls12`), no `log`.
+# rustls-webpki verifies the leaf against the trust anchor, its SAN and its key at start.
+# Licenses: rustls Apache-2.0 OR ISC OR MIT, tokio-rustls MIT OR Apache-2.0, rustls-webpki ISC,
+# ring Apache-2.0 AND ISC.
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring"] }
+rustls-webpki = { version = "0.103.17", default-features = false, features = ["ring", "std"] }
+
 # Workspace crates.
 protocol-model = { path = "crates/protocol-model" }
 jose-hpke = { path = "crates/jose-hpke" }

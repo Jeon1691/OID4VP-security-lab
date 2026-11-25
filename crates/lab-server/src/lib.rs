@@ -1,6 +1,9 @@
 //! Lab Verifier HTTP server for OpenID4VP 1.1 HPKE-0 `direct_post.jwt` responses (IMP-008
 //! orchestration, IMP-009 HTTP, IMP-010 wallet simulator). Synthetic data, loopback only in
-//! every mode (ADR-005); serving a non-loopback address needs an explicit future ADR.
+//! every mode (ADR-005); serving a non-loopback address needs an explicit future ADR. The
+//! time-boxed OIDF conformance mode (feature `conformance`, docs/adr/0002-conformance-mode.md)
+//! still binds loopback only but serves HTTPS under a public origin that local containers reach
+//! through the host's loopback forwarding.
 //!
 //! `tests/spruce_api_smoke.rs` (G0-C) and `tests/ecdh_es_direct_post_jwt_e2e.rs` (G0-D) cover
 //! the pinned SpruceID `openid4vp`; the HPKE-0 path here does not use it.
@@ -9,9 +12,9 @@
 //!
 //! | Method and path | Purpose |
 //! | --- | --- |
-//! | `POST /lab/v1/sessions` | Create a synthetic session; optional JSON `{"route": "unique"\|"shared", "nonce": "...", "state": "..."}` (`shared`, `nonce` and `state` research mode only; caller-chosen values model a Verifier that reuses them, bounded by [`MAX_RESEARCH_NONCE_LEN`] / [`MAX_RESEARCH_STATE_LEN`]). Returns `client_id` (the Authorization Request parameter), `request_uri`, `response_uri` and `result_uri`; the result token in `result_uri` is returned only here |
-//! | `GET /lab/v1/requests/{id}` | Signed Request Object (JAR), body = compact JWS, `Content-Type: application/oauth-authz-req+jwt`. Payload: exact `client_id`, `nonce`, `state` (fresh per session, 128 random bits as base64url in the §5.2 charset, unless a research session fixed it), `response_uri`, `response_mode=direct_post.jwt`, `aud`, `dcql_query` (one `dc+sd-jwt` query for [`SYNTHETIC_CREDENTIAL_VCT`] and [`REQUESTED_CLAIMS`]), `client_metadata.jwks` with the HPKE-0 key (`alg` `HPKE-0`, `kid`) |
-//! | `POST /lab/v1/response/{token}` | Unique response_uri (unique-uri strategy) |
+//! | `POST /lab/v1/sessions` | Create a synthetic session; optional JSON `{"route": "unique"\|"shared", "nonce": "...", "state": "..."}` (`shared`, `nonce` and `state` research mode only; caller-chosen values model a Verifier that reuses them, bounded by [`MAX_RESEARCH_NONCE_LEN`] / [`MAX_RESEARCH_STATE_LEN`]). Returns `client_id` (the Authorization Request parameter), `request_uri`, `response_uri`, `result_uri` and `authorization_request` (`<LabConfig::authorization_endpoint>?client_id=...&request_uri=...`, default endpoint `openid4vp://`); the result token in `result_uri` is returned only here |
+//! | `GET /lab/v1/requests/{id}` | Signed Request Object (JAR), body = compact JWS, `Content-Type: application/oauth-authz-req+jwt`. Payload: exact `client_id`, `nonce`, `state` (fresh per session, 128 random bits as base64url in the §5.2 charset, unless a research session fixed it), `response_uri`, `response_mode=direct_post.jwt`, `aud`, `dcql_query` (one `dc+sd-jwt` query, [`LabConfig::credential_request`]; default [`SYNTHETIC_CREDENTIAL_VCT`] and [`REQUESTED_CLAIMS`]), `client_metadata.jwks` with the HPKE-0 key (`alg` `HPKE-0`, `kid`); in conformance mode the ECDH-ES key, both `enc` values and `vp_formats_supported` instead, and an `x5c` header |
+//! | `POST /lab/v1/response/{token}` | Unique response_uri (unique-uri strategy); HPKE-0, or in conformance mode ECDH-ES with a key per session (module `conformance`) |
 //! | `POST /lab/v1/response/shared` | Shared response_uri, research mode only (404 in hardened mode) |
 //! | `POST /lab/v1/response/ecdh-es` | `ecdh-es-research` feature only: the OpenID4VP 1.0-style ECDH-ES route, served only in research mode with `LabConfig::ecdh_es_route` set (404 otherwise, and `{"route": "ecdh_es_shared"}` is refused). One ECDH-ES P-256 key and `kid` for every session on it; its Request Objects advertise that key (`alg` `ECDH-ES`, `use` `enc`, `kid`) and `encrypted_response_enc_values_supported` `["A128GCM","A256GCM"]` instead of the HPKE-0 key (docs/adr/0001-ecdh-es-research-route.md) |
 //! | `GET /lab/v1/results/{result_token}` | `pending` / `consumed` (with the committed `credential`: requested claims, `vct`, holder key thumbprint, disclosed claim names) / `expired`. The request id does not unlock it |
@@ -65,6 +68,13 @@
 //!   `LabConfig::ecdh_es_route` it also serves the ECDH-ES route, whose sessions live in a
 //!   third registry with their own shared ECDH-ES key; it is a separate route, never a
 //!   fallback for the HPKE-0 ones.
+//!
+//! * `Mode::Conformance` (`conformance` feature; docs/adr/0002-conformance-mode.md): HTTPS
+//!   (rustls) on the loopback bind under `ConformanceConfig::public_origin`, an `x509_san_dns`
+//!   / `x509_hash` client id checked against the synthetic leaf at start and signed with an
+//!   `x5c` header, the OpenID4VP 1.0 Final Request Object, and ECDH-ES on the unique route with
+//!   a fresh key and `kid` per session. No shared or research route, no HPKE-0, never a
+//!   fallback; it needs its full configuration and stops after its maximum runtime.
 //!
 //! Every mode refuses a non-loopback bind before binding (`IpAddr::is_loopback`: `127.0.0.0/8`
 //! and `::1`; `0.0.0.0`, `::` and IPv4-mapped `::ffff:127.0.0.1` are refused).
@@ -233,13 +243,19 @@
 //! `wallet-sim` also its sealing `test-support`). The default build, including the
 //! `lab-server` binary, has none of them and does not depend on `jose-ecdh-es`; the gate step
 //! `verifier_without_sealing` checks it, and that the `ecdh-es-research` build reaches
-//! `jose-ecdh-es` without `test-support`. The binary has no flag for the ECDH-ES route; it is
+//! `jose-ecdh-es` without `test-support`. `conformance` enables `Mode::Conformance` and with it
+//! `jose-ecdh-es` (opening only), rustls / tokio-rustls / rustls-webpki with the ring provider,
+//! and with `wallet-sim` the simulator's HTTPS client and x509 Request Object checks; the gate
+//! step `conformance_without_sealing` checks that build, and `verifier_without_sealing` that the
+//! default build has none of it. The binary has no flag for the ECDH-ES route; it is
 //! exercised by tests (`tests/ecdh_es_research_route.rs`). Release artifacts must come from a plain
 //! `cargo build -p lab-server` (`--release`): a build that also compiles test targets (e.g.
 //! `cargo build --workspace --all-targets`) unifies the self dev-dependency's `wallet-sim`
 //! feature into the library the binary links.
 
 mod config;
+#[cfg(feature = "conformance")]
+mod conformance;
 #[cfg(feature = "ecdh-es-research")]
 mod ecdh_es;
 mod evidence;
@@ -252,10 +268,15 @@ mod validate;
 pub mod wallet_sim;
 
 pub use config::{
-    DEFAULT_CLIENT_ID, DEFAULT_HEADER_READ_TIMEOUT, DEFAULT_MAX_CONCURRENT_DECRYPTIONS,
-    DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_IN_FLIGHT_REQUESTS, DEFAULT_REQUEST_TIMEOUT,
-    DEFAULT_SESSION_TTL, DEFAULT_SHUTDOWN_DRAIN, DEFAULT_SWEEP_INTERVAL, LabConfig,
-    MAX_RESPONSE_BODY_BYTES, Mode, RouteKind, SharedRouteStrategy, StartError,
+    DEFAULT_AUTHORIZATION_ENDPOINT, DEFAULT_CLIENT_ID, DEFAULT_HEADER_READ_TIMEOUT,
+    DEFAULT_MAX_CONCURRENT_DECRYPTIONS, DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_IN_FLIGHT_REQUESTS,
+    DEFAULT_REQUEST_TIMEOUT, DEFAULT_SESSION_TTL, DEFAULT_SHUTDOWN_DRAIN, DEFAULT_SWEEP_INTERVAL,
+    LabConfig, MAX_RESPONSE_BODY_BYTES, Mode, RouteKind, SharedRouteStrategy, StartError,
+};
+#[cfg(feature = "conformance")]
+pub use conformance::{
+    ConformanceConfig, DEFAULT_CONFORMANCE_MAX_RUNTIME, MAX_CHAIN_CERTIFICATES, PublicOrigin,
+    X509_HASH_PREFIX, X509_SAN_DNS_PREFIX, X509Credentials, X509Error,
 };
 pub use evidence::{
     AdmissionError, CommitResult, CryptoResult, EvidenceLog, EvidenceRecord, MAX_EVIDENCE_RECORDS,

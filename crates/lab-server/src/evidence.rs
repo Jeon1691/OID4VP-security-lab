@@ -50,9 +50,10 @@ pub enum Rejection {
     /// [`jose_hpke::CompactJwe::parse`] refused the JWE (structure or header policy). On the
     /// HPKE-0 routes every `alg` but `HPKE-0` ends here, `ECDH-ES` included: no fallback.
     JweParse(jose_hpke::Error),
-    /// ECDH-ES research route: `jose_ecdh_es::CompactJwe::parse` refused the JWE. Every `alg`
-    /// but `ECDH-ES` ends here, `HPKE-0` included: the route never falls back either.
-    #[cfg(feature = "ecdh-es-research")]
+    /// ECDH-ES research route, or the unique route in conformance mode:
+    /// `jose_ecdh_es::CompactJwe::parse` refused the JWE. Every `alg` but `ECDH-ES` ends here,
+    /// `HPKE-0` included: these routes never fall back either.
+    #[cfg(any(feature = "ecdh-es-research", feature = "conformance"))]
     EcdhEsJweParse(jose_ecdh_es::Error),
     /// The JWE protected header has no `kid`. Every lab key is advertised with one and
     /// OpenID4VP 1.1 §8.3 ties the JWE `kid` to the chosen JWK, so every route requires it.

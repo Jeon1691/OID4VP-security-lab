@@ -40,6 +40,8 @@ pub(crate) const DECENTRALIZED_IDENTIFIER_PREFIX: &str = "decentralized_identifi
 /// `redirect_uri` requests cannot be signed at all; `openid_federation`, `verifier_attestation`,
 /// `x509_san_dns` and `x509_hash` need trust material (entity statements, an attestation JWT,
 /// an `x5c` chain) the lab does not have; `origin` is reserved for the DC API (Appendix A).
+/// Only the `conformance` feature's `Mode::Conformance` signs for the two x509 prefixes, with
+/// its synthetic certificate (`conformance::check`); every other mode refuses them here.
 const UNSIGNABLE_CLIENT_ID_PREFIXES: [&str; 6] = [
     "redirect_uri:",
     "openid_federation:",
@@ -135,6 +137,14 @@ impl RequestSigningKey {
         Ok(Self { key })
     }
 
+    /// ES256 over `message` (RFC 7518 §3.4, `R || S`), so a start check can prove this key is
+    /// the one in a certificate without parsing the certificate's key itself.
+    #[cfg(feature = "conformance")]
+    pub(crate) fn sign_probe(&self, message: &[u8]) -> Vec<u8> {
+        let signature: Signature = self.key.sign(message);
+        signature.to_bytes().to_vec()
+    }
+
     /// The parsed key, for the wallet simulator's synthetic issuer.
     #[cfg(feature = "wallet-sim")]
     pub(crate) fn into_signing_key(self) -> SigningKey {
@@ -186,19 +196,36 @@ pub(crate) fn request_kid(
     Ok(None)
 }
 
+/// How the Request Object JWS header identifies the signing key, fixed at start.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum KeyHint {
+    /// A pre-registered client (§5.9.2): nothing, the wallet knows the key.
+    None,
+    /// `kid`: the did:key verification method ([`request_kid`]).
+    Kid(String),
+    /// `x5c` (`x509_san_dns` / `x509_hash`, OpenID4VP 1.0 §5.9.3): the certificate chain, leaf
+    /// first, each certificate as standard base64 (not base64url) of its DER (RFC 7515
+    /// §4.1.6); the trust anchor is never included (HAIP 1.0 §5).
+    #[cfg(feature = "conformance")]
+    X5c(Vec<String>),
+}
+
 /// Signs request objects for one `client_id`: the protected header is fixed at start.
 pub(crate) struct RequestSigner {
     key: SigningKey,
-    /// base64url of `{"alg":"ES256","typ":"oauth-authz-req+jwt"[,"kid":...]}`.
+    /// base64url of `{"alg":"ES256","typ":"oauth-authz-req+jwt"[,"kid":...|,"x5c":[...]]}`.
     header_b64: String,
 }
 
 impl RequestSigner {
-    /// `kid` from [`request_kid`] (checked before the server binds).
-    pub(crate) fn new(key: RequestSigningKey, kid: Option<String>) -> Self {
+    /// `hint` from `config::check` (checked before the server binds).
+    pub(crate) fn new(key: RequestSigningKey, hint: KeyHint) -> Self {
         let mut header = json!({ "alg": REQUEST_OBJECT_ALG, "typ": REQUEST_OBJECT_TYP });
-        if let Some(kid) = kid {
-            header["kid"] = kid.into();
+        match hint {
+            KeyHint::None => {}
+            KeyHint::Kid(kid) => header["kid"] = kid.into(),
+            #[cfg(feature = "conformance")]
+            KeyHint::X5c(chain) => header["x5c"] = chain.into(),
         }
         Self {
             key: key.key,

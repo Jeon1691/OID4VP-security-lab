@@ -59,10 +59,8 @@ use axum::extract::State;
 use axum::extract::rejection::BytesRejection;
 use axum::http::HeaderMap;
 use axum::response::Response;
-use jose_ecdh_es::rand_core::UnwrapErr;
-use jose_ecdh_es::{ALG_ECDH_ES, CompactJwe, ENC_A128GCM, ENC_A256GCM, RecipientPrivateKey};
+use jose_ecdh_es::CompactJwe;
 use protocol_model::KeyId;
-use serde_json::{Value, json};
 use session_core::{
     Candidate, CandidateBudget, Clock as _, IngressHint, MAX_CANDIDATE_BUDGET, MemoryRegistry,
     RegistryConfig, ResolutionStrategy, RoutePolicy, RouteToken, SessionStore, SystemClock,
@@ -70,9 +68,7 @@ use session_core::{
 
 use crate::config::{RouteKind, StartError};
 use crate::evidence::{EvidenceRecord, Rejection};
-use crate::server::{
-    self, AppState, JWK_USE_ENC, KID_BYTES, LabKey, MILLIS_PER_SECOND, Registry, SessionKey, Trial,
-};
+use crate::server::{self, AppState, KID_BYTES, MILLIS_PER_SECOND, Registry, SessionKey, Trial};
 use crate::validate::{self, Acceptance, ValidationError};
 
 /// Last path segment of the ECDH-ES route. Never a valid route token (wrong length), so it
@@ -86,10 +82,6 @@ pub(crate) const ECDH_ES_ROUTE_NAME: &str = "ecdh_es_shared";
 /// POST as bounded trial. The registry refuses further sessions at the cap (503 at creation), so
 /// a POST never meets more live sessions than the budget.
 pub(crate) const MAX_ECDH_ES_SESSIONS: usize = MAX_CANDIDATE_BUDGET;
-
-/// `client_metadata` member listing the content encryption algorithms (OpenID4VP 1.0 §5.1 and
-/// §8.3: "MUST be present for anything other than the default single value of `A128GCM`").
-const ENC_VALUES_SUPPORTED: &str = "encrypted_response_enc_values_supported";
 
 /// The route: its fixed route token, the one key and `kid` every session on it shares, and
 /// its registry (`RoutePolicy::Shared`, at most [`MAX_ECDH_ES_SESSIONS`] pending).
@@ -106,10 +98,9 @@ impl EcdhEsRoute {
     pub(crate) fn new() -> Result<Self, StartError> {
         let kid = KeyId::new(server::random_b64(KID_BYTES).ok_or(StartError::Rng)?)
             .map_err(|_| StartError::Rng)?;
-        let key = RecipientPrivateKey::generate(&mut UnwrapErr(getrandom::SysRng));
         Ok(Self {
             token: RouteToken::generate().map_err(|_| StartError::Rng)?,
-            key: Arc::new(LabKey::EcdhEs(key)),
+            key: server::ecdh_es_key(),
             kid,
             registry: MemoryRegistry::with_config(
                 Arc::new(SystemClock),
@@ -134,33 +125,6 @@ const BUDGET: CandidateBudget = match CandidateBudget::new(MAX_ECDH_ES_SESSIONS)
     Ok(budget) => budget,
     Err(_) => panic!("MAX_ECDH_ES_SESSIONS must be a valid candidate budget"),
 };
-
-impl LabKey {
-    /// The ECDH-ES key, if this is one.
-    const fn ecdh_es(&self) -> Option<&RecipientPrivateKey> {
-        match self {
-            Self::EcdhEs(key) => Some(key),
-            Self::Hpke(_) => None,
-        }
-    }
-}
-
-/// `client_metadata` of an ECDH-ES session (OpenID4VP 1.0 §5.1, §8.3): `jwks` with the route's
-/// public key (`alg` `ECDH-ES`, `use` `enc`, `kid`; the 1.0 §8.3 example's members) and
-/// `encrypted_response_enc_values_supported` = [`ENC_A128GCM`, `ENC_A256GCM`], the two `enc`
-/// values jose-ecdh-es implements.
-pub(crate) fn client_metadata(key: &RecipientPrivateKey, kid: &KeyId) -> Value {
-    let mut jwk = key.public_key().to_jwk();
-    if let Some(members) = jwk.as_object_mut() {
-        members.insert("use".into(), JWK_USE_ENC.into());
-        members.insert("alg".into(), ALG_ECDH_ES.into());
-        members.insert("kid".into(), kid.as_str().into());
-    }
-    json!({
-        "jwks": { "keys": [jwk] },
-        ENC_VALUES_SUPPORTED: [ENC_A128GCM, ENC_A256GCM],
-    })
-}
 
 /// `POST /lab/v1/response/ecdh-es` (research mode only; not routed otherwise).
 pub(crate) async fn post_ecdh_es(
