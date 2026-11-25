@@ -119,8 +119,8 @@ pub enum WalletError {
     /// Sealing failed.
     #[error("seal: {0}")]
     Seal(#[from] jose_hpke::Error),
-    /// ECDH-ES sealing failed (`ecdh-es-research` only).
-    #[cfg(feature = "ecdh-es-research")]
+    /// ECDH-ES sealing failed (`ecdh-es-research` or `conformance` only).
+    #[cfg(any(feature = "ecdh-es-research", feature = "conformance"))]
     #[error("seal ECDH-ES: {0}")]
     SealEcdhEs(jose_ecdh_es::Error),
     /// The Request Object did not verify; nothing from it was used.
@@ -157,6 +157,9 @@ pub enum RequestRejection {
     Audience,
     /// `exp` missing, not a NumericDate, or not after now (RFC 7519 §4.1.4).
     Expired,
+    /// x509 trust: `x5c` missing or malformed, or its leaf does not chain to the trust anchor
+    /// now (OpenID4VP 1.0 §5.9.3: "the Wallet MUST validate the signature and the trust chain").
+    X5c,
 }
 
 /// Which key the wallet accepts Request Object signatures from.
@@ -167,6 +170,10 @@ enum VerifierTrust {
     DidKey,
     /// A public key known in advance (a pre-registered client, §5.9.2); `kid` is ignored.
     Pinned(Box<JWK>),
+    /// `x509_san_dns` / `x509_hash` (OpenID4VP 1.0 §5.9.3): the key is the `x5c` leaf's, the
+    /// leaf must chain to this trust anchor (DER), and the client id must match the leaf.
+    #[cfg(feature = "conformance")]
+    X509(Vec<u8>),
 }
 
 /// A session created through `POST /lab/v1/sessions`.
@@ -182,6 +189,8 @@ pub struct CreatedSession {
     pub response_uri: String,
     /// Where the outcome is read; carries the result token (only returned here).
     pub result_uri: String,
+    /// The Authorization Request by reference: `<endpoint>?client_id=...&request_uri=...`.
+    pub authorization_request: String,
 }
 
 /// The values of a fetched request object the wallet uses.
@@ -419,6 +428,8 @@ struct Credential {
 #[derive(Clone)]
 pub struct WalletSim {
     http: reqwest::Client,
+    /// Conformance mode: the public host name the client resolves to a loopback socket.
+    resolved_host: Option<String>,
     trust: VerifierTrust,
     /// This wallet's holder key (the credential's `cnf.jwk`).
     holder: SigningKey,
@@ -465,10 +476,69 @@ impl WalletSim {
             .redirect(reqwest::redirect::Policy::none())
             .timeout(HTTP_TIMEOUT)
             .build()?;
+        Self::with_client(http, None, trust, issuer)
+    }
+
+    /// A simulator for a conformance-mode lab (`conformance`): an HTTPS client that trusts only
+    /// `trust_anchor_pem` for TLS and resolves `public_host` to `loopback` (no other name, and
+    /// only a loopback socket), and that trusts Request Objects whose `x5c` leaf chains to that
+    /// anchor and matches their `x509_san_dns` / `x509_hash` client id (OpenID4VP 1.0 §5.9.3).
+    ///
+    /// # Errors
+    /// The anchor is not a certificate PEM, `loopback` is not loopback, the HTTP client cannot
+    /// be built, or the RNG fails.
+    #[cfg(feature = "conformance")]
+    pub fn with_x509_trust(
+        trust_anchor_pem: &[u8],
+        public_host: &str,
+        loopback: std::net::SocketAddr,
+        issuer: &SyntheticIssuer,
+    ) -> Result<Self, WalletError> {
+        use rustls::pki_types::CertificateDer;
+        use rustls::pki_types::pem::PemObject as _;
+        if !loopback.ip().is_loopback() {
+            return Err(WalletError::NonLoopback);
+        }
+        let anchor = CertificateDer::from_pem_slice(trust_anchor_pem)
+            .map_err(|_| WalletError::Malformed("trust anchor"))?;
+        let mut roots = rustls::RootCertStore::empty();
+        roots
+            .add(anchor.clone())
+            .map_err(|_| WalletError::Malformed("trust anchor"))?;
+        let tls = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .map_err(|_| WalletError::Malformed("tls config"))?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+        let http = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(HTTP_TIMEOUT)
+            .use_preconfigured_tls(tls)
+            .https_only(true)
+            .resolve(public_host, loopback)
+            .build()?;
+        Self::with_client(
+            http,
+            Some(public_host.to_owned()),
+            VerifierTrust::X509(anchor.as_ref().to_vec()),
+            issuer,
+        )
+    }
+
+    fn with_client(
+        http: reqwest::Client,
+        resolved_host: Option<String>,
+        trust: VerifierTrust,
+        issuer: &SyntheticIssuer,
+    ) -> Result<Self, WalletError> {
         let holder = random_signing_key()?;
         let credential = issuer.issue(holder.verifying_key(), now_secs()?)?;
         Ok(Self {
             http,
+            resolved_host,
             trust,
             holder,
             credential,
@@ -665,6 +735,7 @@ impl WalletSim {
             request_uri: field("request_uri")?,
             response_uri: field("response_uri")?,
             result_uri: field("result_uri")?,
+            authorization_request: field("authorization_request")?,
         })
     }
 
@@ -741,8 +812,22 @@ impl WalletSim {
         if header.get(HEADER_ALG).and_then(Value::as_str) != Some(REQUEST_OBJECT_ALG) {
             return Err(reject(RequestRejection::Alg));
         }
+        let signing_input = format!("{header_b64}.{payload_b64}");
+        #[cfg(feature = "conformance")]
+        if let VerifierTrust::X509(anchor) = &self.trust {
+            let signature = URL_SAFE_NO_PAD
+                .decode(signature_b64)
+                .map_err(|_| reject(RequestRejection::Signature))?;
+            let leaf = x509::verified_leaf(&header, anchor)?;
+            leaf.verify(signing_input.as_bytes(), &signature)?;
+            let request = self.verified_payload(payload_b64, client_id, None)?;
+            leaf.check_client_id(client_id, &request.response_uri)?;
+            return Ok(request);
+        }
         let (jwk, signer_did) = match &self.trust {
             VerifierTrust::Pinned(jwk) => ((**jwk).clone(), None),
+            #[cfg(feature = "conformance")]
+            VerifierTrust::X509(_) => return Err(reject(RequestRejection::X5c)),
             VerifierTrust::DidKey => {
                 let kid = header
                     .get(HEADER_KID)
@@ -764,7 +849,6 @@ impl WalletSim {
         let signature = URL_SAFE_NO_PAD
             .decode(signature_b64)
             .map_err(|_| reject(RequestRejection::Signature))?;
-        let signing_input = format!("{header_b64}.{payload_b64}");
         ssi::claims::jws::verify_bytes(
             Algorithm::ES256,
             signing_input.as_bytes(),
@@ -772,14 +856,23 @@ impl WalletSim {
             &signature,
         )
         .map_err(|_| reject(RequestRejection::Signature))?;
+        self.verified_payload(payload_b64, client_id, signer_did.as_deref())
+    }
 
-        // Verified: from here on every value comes from the signed payload.
+    /// The checks after the signature: from here on every value comes from the signed payload.
+    fn verified_payload(
+        &self,
+        payload_b64: &str,
+        client_id: &str,
+        signer_did: Option<&str>,
+    ) -> Result<RequestObject, WalletError> {
+        let reject = WalletError::Rejected;
         let object = decode_object(payload_b64)?;
         if object.get("client_id").and_then(Value::as_str) != Some(client_id) {
             return Err(reject(RequestRejection::ClientId));
         }
         if let Some(did) = signer_did
-            && client_id.strip_prefix(DECENTRALIZED_IDENTIFIER_PREFIX) != Some(did.as_str())
+            && client_id.strip_prefix(DECENTRALIZED_IDENTIFIER_PREFIX) != Some(did)
         {
             return Err(reject(RequestRejection::ClientId));
         }
@@ -832,7 +925,8 @@ impl WalletSim {
         })
     }
 
-    /// The OpenID4VP 1.0-style counterpart of [`Self::seal`] (`ecdh-es-research` only): the same
+    /// The OpenID4VP 1.0-style counterpart of [`Self::seal`] (`ecdh-es-research` or
+    /// `conformance`): the same
     /// payload, sealed as an `ECDH-ES` (Direct Key Agreement) JWE with `enc` to the request's
     /// advertised P-256 key, `kid` per [`SealOptions::kid`] (1.0 §8.3). ECDH-ES has no
     /// `session_info`, so the `session_info_*` knobs have no effect here. The request's key is
@@ -840,7 +934,7 @@ impl WalletSim {
     ///
     /// # Errors
     /// A presentation or sealing failure.
-    #[cfg(feature = "ecdh-es-research")]
+    #[cfg(any(feature = "ecdh-es-research", feature = "conformance"))]
     pub fn seal_ecdh_es(
         &self,
         request: &RequestObject,
@@ -940,11 +1034,14 @@ impl WalletSim {
         body: Option<(&str, Vec<u8>)>,
     ) -> Result<HttpReply, WalletError> {
         let url = reqwest::Url::parse(url).map_err(|_| WalletError::Malformed("url"))?;
-        let loopback = url
-            .host_str()
-            .map(|h| h.trim_start_matches('[').trim_end_matches(']'))
-            .and_then(|h| h.parse::<IpAddr>().ok())
-            .is_some_and(|ip| ip.is_loopback());
+        let host = url.host_str();
+        // The resolver override maps `resolved_host` to a loopback socket and nothing else.
+        let resolved = host.is_some() && host == self.resolved_host.as_deref();
+        let loopback = resolved
+            || host
+                .map(|h| h.trim_start_matches('[').trim_end_matches(']'))
+                .and_then(|h| h.parse::<IpAddr>().ok())
+                .is_some_and(|ip| ip.is_loopback());
         if !loopback {
             return Err(WalletError::NonLoopback);
         }
@@ -1154,4 +1251,112 @@ fn tamper_segment(compact: &str, index: usize) -> String {
         segment.replace_range(..first.len_utf8(), replacement);
     }
     segments.join(".")
+}
+
+/// x509 Request Object trust (`conformance`; OpenID4VP 1.0 §5.9.3, HAIP 1.0 §5).
+#[cfg(feature = "conformance")]
+mod x509 {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+    use rustls::pki_types::{CertificateDer, DnsName, ServerName, UnixTime};
+    use serde_json::{Map, Value};
+    use sha2::{Digest as _, Sha256};
+    use webpki::{EndEntityCert, KeyUsage};
+
+    use super::{RequestRejection, WalletError};
+    use crate::conformance::{JwsEs256, X509_HASH_PREFIX, X509_SAN_DNS_PREFIX};
+
+    /// JWS header parameter carrying the certificate chain (RFC 7515 §4.1.6).
+    const HEADER_X5C: &str = "x5c";
+    const RESPONSE_URI_SCHEME: &str = "https://";
+
+    /// The `x5c` leaf after its chain verified.
+    pub(super) struct Leaf {
+        der: CertificateDer<'static>,
+    }
+
+    fn reject(why: RequestRejection) -> WalletError {
+        WalletError::Rejected(why)
+    }
+
+    /// Decodes `x5c` (standard base64 DER, leaf first) and verifies that the leaf chains to
+    /// `anchor` now, for `serverAuth`, through the other entries.
+    pub(super) fn verified_leaf(
+        header: &Map<String, Value>,
+        anchor: &[u8],
+    ) -> Result<Leaf, WalletError> {
+        let chain: Vec<CertificateDer<'static>> = header
+            .get(HEADER_X5C)
+            .and_then(Value::as_array)
+            .ok_or(reject(RequestRejection::X5c))?
+            .iter()
+            .map(|cert| {
+                cert.as_str()
+                    .and_then(|b64| STANDARD.decode(b64).ok())
+                    .map(CertificateDer::from)
+                    .ok_or(reject(RequestRejection::X5c))
+            })
+            .collect::<Result<_, _>>()?;
+        let (leaf, intermediates) = chain.split_first().ok_or(reject(RequestRejection::X5c))?;
+        let anchor = CertificateDer::from(anchor.to_vec());
+        let anchor =
+            webpki::anchor_from_trusted_cert(&anchor).map_err(|_| reject(RequestRejection::X5c))?;
+        let cert = EndEntityCert::try_from(leaf).map_err(|_| reject(RequestRejection::X5c))?;
+        cert.verify_for_usage(
+            &[webpki::ring::ECDSA_P256_SHA256],
+            &[anchor],
+            intermediates,
+            UnixTime::now(),
+            KeyUsage::server_auth(),
+            None,
+            None,
+        )
+        .map_err(|_| reject(RequestRejection::X5c))?;
+        Ok(Leaf { der: leaf.clone() })
+    }
+
+    impl Leaf {
+        /// The parsed leaf (it parsed in `verified_leaf`, so this does not fail in practice).
+        fn cert(&self) -> Result<EndEntityCert<'_>, WalletError> {
+            EndEntityCert::try_from(&self.der).map_err(|_| reject(RequestRejection::X5c))
+        }
+
+        /// The JWS signature (`R || S`) over `input` with the leaf's key.
+        pub(super) fn verify(&self, input: &[u8], signature: &[u8]) -> Result<(), WalletError> {
+            self.cert()?
+                .verify_signature(&JwsEs256, input, signature)
+                .map_err(|_| reject(RequestRejection::Signature))
+        }
+
+        /// `x509_san_dns:<dns>`: `<dns>` is a dNSName SAN of the leaf and the FQDN of
+        /// `response_uri`; `x509_hash:<hash>`: the base64url SHA-256 of the leaf DER. Any other
+        /// prefix is not x509 trust.
+        pub(super) fn check_client_id(
+            &self,
+            client_id: &str,
+            response_uri: &str,
+        ) -> Result<(), WalletError> {
+            let ok = if let Some(dns) = client_id.strip_prefix(X509_SAN_DNS_PREFIX) {
+                let in_san = DnsName::try_from(dns).is_ok_and(|name| {
+                    self.cert().is_ok_and(|cert| {
+                        cert.verify_is_valid_for_subject_name(&ServerName::DnsName(name))
+                            .is_ok()
+                    })
+                });
+                let fqdn = response_uri
+                    .strip_prefix(RESPONSE_URI_SCHEME)
+                    .and_then(|rest| rest.split(['/', ':']).next());
+                in_san && fqdn == Some(dns)
+            } else if let Some(hash) = client_id.strip_prefix(X509_HASH_PREFIX) {
+                hash == URL_SAFE_NO_PAD.encode(Sha256::digest(self.der.as_ref()))
+            } else {
+                false
+            };
+            if ok {
+                Ok(())
+            } else {
+                Err(reject(RequestRejection::ClientId))
+            }
+        }
+    }
 }
