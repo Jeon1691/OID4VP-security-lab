@@ -105,23 +105,25 @@ and §14.4.2 correlate through `state` (a request-id).
 ## 3. Reproduction status per claim
 
 The test names are the lab's (`cargo test -p lab-server`, plus jose-hpke and session-core).
-New tests are in `crates/lab-server/tests/issue_792_scenarios.rs` and, for `state`,
-`crates/lab-server/tests/response_state_e2e.rs`; all are listed in `REQUIRED_TESTS`
+New tests are in `crates/lab-server/tests/issue_792_scenarios.rs`, for `state`
+`crates/lab-server/tests/response_state_e2e.rs`, and for the OpenID4VP 1.0-style ECDH-ES
+research route (feature `ecdh-es-research`, `docs/adr/0001-ecdh-es-research-route.md`)
+`crates/lab-server/tests/ecdh_es_research_route.rs`; all are listed in `REQUIRED_TESTS`
 (`scripts/ci_local.sh`).
 
 | Claim | Status | Evidence |
 | --- | --- | --- |
 | C1 | **Reproduced** (crypto level and HTTP level) | jose-hpke `direct_post_bound_jwe_opens_only_with_identical_session` and `direct_post_bound_jwe_fails_with_any_single_field_changed`. The second includes empty `info`, which is the "decrypt first" order. HTTP: `jwe_bound_to_another_sessions_values_fails` (each of nonce, client_id and response_uri changed → `Rejection::Decrypt`, 1 attempt, session pending). |
 | C2 | **Reproduced** (the no-correlator part) | New: `issue_792_shared_uri_and_kid_leave_nothing_outside_the_ciphertext_to_correlate_on`. With a shared URI and a shared key, the request objects of N=8 sessions differ only in `nonce`, the protected headers of their honest JWEs are byte-identical, and the resolver must return all N live sessions as candidates. Each session also has its own `state`, but it travels only inside the ciphertext (§8.3), so it is no pre-decryption correlator (the test asserts N distinct `state`s next to the identical headers). |
-| C3 | **Partly reproduced** | The HPKE half is covered by C1: the key alone with empty `info` cannot open. The ECDH-ES half is only the G0-D SpruceID round trip (`ecdh_es_direct_post_jwt_round_trip_completes_with_success`). That flow routes by a per-session URL path, not by `state`, so the lab has no 1.0-style "decrypt, then read `state`" Verifier. |
+| C3 | **Reproduced** | The HPKE half is covered by C1: the key alone with empty `info` cannot open. The ECDH-ES half now runs on the research route `POST /lab/v1/response/ecdh-es` (one ECDH-ES P-256 key and `kid` for every session, research mode only), a 1.0-style Verifier that goes `kid` → key → decrypt → `state` → session: `ecdh_es_shared_key_opens_for_every_live_session_and_only_state_selects` (N=8: every response opens for all live sessions, `state` selects one), `ecdh_es_honest_round_trip_commits_the_session_named_by_state` (`A128GCM` and `A256GCM`). The G0-D SpruceID round trip (`ecdh_es_direct_post_jwt_round_trip_completes_with_success`) routes by a per-session URL path and stays as the interop check. |
 | C4 | **Reproduced** | Bounded trial: every session shares one `kid`, so `kid` selects nothing (`issue_792_workarounds_compared_on_one_population`: N distinct sessions, 1 distinct `kid`). New: `issue_792_kid_of_another_session_on_the_unique_kid_route_fails_closed` shows that even when `kid` is per session, it is an unauthenticated hint. Note that §5.1 requires a `kid` that is unique "within the context of the request", not across requests, so one key and `kid` shared by every request (bounded trial) is permitted by the text, and `kid` is not specified as a session identifier. |
 | C5 | **Reproduced** (as the consequence of C1 + C2) | The lab can only break the loop with a pre-decryption selector (route token or per-session `kid`) or by trying every candidate. |
 | C6 (1) | **Reproduced** | `unique_uri_among_many_sessions_consumes_only_the_addressed_one` (N=8). New matrix: `issue_792_workarounds_compared_on_one_population` (N=2/8/32: 1 candidate, 1 attempt). Binding strength: the response_uri case of `jwe_bound_to_another_sessions_values_fails`. |
 | C6 (2) | **Reproduced** | `unique_kid_on_shared_route_yields_one_candidate_and_one_attempt`, the matrix test (1 attempt), and the new misdirected-`kid` test. |
 | C6 (3) | **Reproduced**, with the cost measured as an attempt count, never as time | `bounded_trial_succeeds_with_right_session_last_within_budget` (`hpke_attempts == N` for N=2/8/32, no stop-at-first), the matrix test, and `bounded_trial_over_budget_is_rejected_without_decryption`. |
 | C7 | **Reproduced** (`state` works only after decryption) | The lab issues a fresh 128-bit `state` per session on every route, signs it into the Request Object and stores it in the session's `RequestBinding`; the wallet echoes it inside the JWE next to `vp_token` (§8.3). The Verifier can compare it only after HPKE open, per candidate, before holder binding (`crates/lab-server/tests/response_state_e2e.rs`: `state_round_trips_inside_the_jwe_on_every_route`, `response_without_state_is_refused_and_the_honest_response_then_commits`, `state_of_another_live_session_is_refused`, `bounded_trial_jwe_that_opens_for_b_but_carries_a_state_is_refused_for_b`). So `state` cannot select the session for decryption, which is the issue's point; it can still serve §14.4.2 after decryption. A cleartext `state` next to `response` is refused at admission: `issue_792_cleartext_state_beside_the_jwe_is_refused_before_decryption`. `state` alone is refused as well: the "missing response" case in `admission_failures_are_rejected_before_decryption`. |
-| C8 | Not testable in the lab | The lab is HPKE-only on its HTTP path, which is the same situation as the HAIP HPKE profile. HAIP itself is out of scope. |
-| C9 | **Partly** | HPKE fail-closed behaviour: C1 tests. The lab has no Verifier that accepts both ECDH-ES and HPKE. jose-hpke refuses any `alg` other than `HPKE-0` (`rejects_unsupported_alg`), so the downgrade path does not exist on the lab's HTTP route. |
+| C8 | Not testable in the lab | The lab's default Verifier build (and binary) is HPKE-only, which is the same situation as the HAIP HPKE profile. The ECDH-ES route is a separate research route behind a non-default feature, not a HAIP profile; HAIP itself is out of scope. |
+| C9 | **Reproduced** (both halves, on separate routes) | HPKE fail-closed behaviour: C1 tests. The ECDH-ES half, measured: on the research route the shared key opens every session's response, so nothing in decryption fails closed for a misdirected response; what refuses it is `state` plus holder binding and the replay guard (`ecdh_es_state_swap_routes_to_the_named_session_and_fails_its_nonce`, `ecdh_es_replays_commit_once_and_reused_values_hit_the_replay_guard`, `ecdh_es_two_live_sessions_sharing_nonce_and_state_are_ambiguous`). Downgrade: the lab has no route that accepts both. The HPKE-0 routes refuse `ECDH-ES` JWEs at parse and the ECDH-ES route refuses `HPKE-0` JWEs (`ecdh_es_and_hpke_routes_never_accept_each_others_jwes`; jose-hpke `rejects_unsupported_alg`, jose-ecdh-es `ecdh_es_rejects_key_wrapping_hpke_dir_and_every_other_alg`), so the downgrade path C9 describes does not exist in the lab. |
 | C10 | Spec proposal | See §6. The lab supplies the evidence; the wording belongs to the WG. |
 
 ## 4. What the lab shows that the issue does not
@@ -131,8 +133,13 @@ New tests are in `crates/lab-server/tests/issue_792_scenarios.rs` and, for `stat
    session. The fresh per-request `nonce` (a §5.2 MUST) is then the only part of
    `session_info` that differs, and exactly one of N candidates opens
    (`CryptoResult::Opened { opened: 1 }` in the C2 and C6 tests). The issue treats trial
-   decryption only as a cost. *Inference, not tested:* with ECDH-ES and a shared key, every
-   candidate would decrypt, so trial decryption could not select a session at all.
+   decryption only as a cost. **Measured** on the ECDH-ES research route: with ECDH-ES and a
+   shared key, every candidate decrypts, so trial decryption cannot select a session at all.
+   In `ecdh_es_shared_key_opens_for_every_live_session_and_only_state_selects`, eight live
+   sessions answer one after another; each honest response is tried against every live
+   session's key and opens for all of them (8/8, then 7/7, ... 1/1 attempts/opened), and only
+   the decrypted `state` selects the one session that validates (`validated: 1`). The same
+   test's HPKE-0 shared-key route, same N=8, records 8 attempts and `opened: 1`.
 2. **A successful decryption does not show which session a response belongs to.** All three
    `session_info` inputs are in the Request Object, which anyone holding the `request_uri` can
    fetch, and HPKE encrypts to a public key (§14.7). A sender can therefore make a response
@@ -191,12 +198,24 @@ New tests are in `crates/lab-server/tests/issue_792_scenarios.rs` and, for `stat
      `Ambiguous` and `CrossSessionReplay` evidence now needs a Verifier that reuses the
      `state` as well (research knob).
 
+   Under ECDH-ES (research route) the same `state` is not a check after selection but the
+   selector itself, and it is still not authentication: A's valid holder proof sent with B's
+   `state` is routed to B and refused only by B's KB-JWT nonce binding (`KbNonceMismatch`,
+   `ecdh_es_state_swap_routes_to_the_named_session_and_fails_its_nonce`); a `state` that names
+   no live session (missing, unknown, non-string, another route's) is refused with nothing
+   consumed (`ecdh_es_missing_unknown_or_foreign_state_is_refused_and_consumes_nothing`); and
+   with a reused nonce and `state`, two live sessions are `Ambiguous`, and a consumed session's
+   proof validates for the next one and only the replay guard refuses it
+   (`ecdh_es_two_live_sessions_sharing_nonce_and_state_are_ambiguous`,
+   `ecdh_es_replays_commit_once_and_reused_values_hit_the_replay_guard`).
+
 ## 5. What the issue covers and the lab does not (gaps)
 
-- **A 1.0 or ECDH-ES Verifier that correlates on `state`.** The lab has none (C3). The lab
-  now issues `state` and checks it after decryption (§14.4.2, C7); a check *before*
-  decryption is impossible under HPKE, and the lab does not model a Verifier that decrypts
-  first and then routes by `state`.
+- **A 1.0 or ECDH-ES Verifier that correlates on `state`.** Closed by the ECDH-ES research
+  route (C3, ADR 0001). What it still does not model: OpenID4VP 1.0's optional `state`
+  (§5.2; the lab always issues and requires one), `apu`/`apv` from a real wallet, `enc`
+  values other than `A128GCM`/`A256GCM`, and a Verifier that serves ECDH-ES on its production
+  path. It is research mode only and absent from the binary.
 - **`state` in error responses.** §8.2 shows `state` beside an unencrypted Authorization Error
   Response; the lab accepts only `response`, so error responses (encrypted or not) are not
   modelled.
@@ -207,7 +226,9 @@ New tests are in `crates/lab-server/tests/issue_792_scenarios.rs` and, for `stat
 - **`dc_api.jwt`.** The `session_info` form is tested only at the crypto level
   (`dc_api_session_info_matches_openid4vp_example`,
   `direct_post_and_dc_api_session_info_never_cross_open`). The lab has no DC API flow.
-- **ECDH-ES/HPKE coexistence and HAIP 1.1 profiles** (C8, C9).
+- **ECDH-ES/HPKE coexistence and HAIP 1.1 profiles** (C8). The lab has both algorithms only
+  on separate routes and refuses each on the other's; a Verifier that negotiates between them
+  for one request, as a HAIP 1.0 / 1.1 transition might, is not modelled.
 - **Cross-implementation interop** (the issue used a Go wallet and a TypeScript verifier).
   The lab has Rust plus the pinned SpruceID tree. The Python baseline comparison (INTEROP-02)
   is planned in `oidf-conformance-plan.md` §6.
@@ -289,6 +310,8 @@ Strategies:
 - **UU**: unique URI (Hardened).
 - **UK**: unique kid (Research, shared URI).
 - **BT**: bounded trial (Research, shared URI and key).
+- **EE**: the ECDH-ES research route (Research, `ecdh-es-research`; shared URI, one ECDH-ES
+  key and `kid`; the decrypted `state` selects).
 
 | ID | Sessions | Shared attributes | Sender capability | Expected Verifier behaviour | Observed (test) |
 | --- | --- | --- | --- | --- | --- |
@@ -314,14 +337,27 @@ Strategies:
 | S20 | 2 | cid, uri, key | seals A's proof and A's `state` with B's `session_info` | BT: opens for B, refused by B's `state` before holder binding | 2 attempts, `opened: 1`, `StateMismatch` (not `KbNonceMismatch`), nothing claimed, both then commit (`bounded_trial_jwe_that_opens_for_b_but_carries_a_state_is_refused_for_b`) |
 | S21 | 2 | cid, uri, key, **nonce** (violates §5.2); `state` fresh | honest, then replays A's JWE to B | BT: `state` selects A; replay refused by B's `state` | 2 open, 1 validates, A committed; replay 1 open, `StateMismatch`, B pending (`reused_nonce_with_fresh_state_selects_one_session_and_refuses_a_replay`) |
 | S22 | 2 | cid, uri, key, **nonce** (violates §5.2); `state` fresh | honest response for B, the second-inserted session | BT: A, tried first, opens and fails its `state`; B validates | 2 open, `validated: 1`, B committed, A pending (`state_mismatching_candidate_tried_first_does_not_stop_the_validating_one`) |
+| S23 | N=8 (EE) and N=8 (BT) | cid, uri, key | honest, one session after another | EE: every live session's key opens the response, `state` selects one; BT: exactly 1 opens | EE: attempts = opened = live (8/8 ... 1/1), `validated: 1`, each commits its own session; BT: 8 attempts, `opened: 1` (`ecdh_es_shared_key_opens_for_every_live_session_and_only_state_selects`) |
+| S24 | 2 (EE) | cid, uri, key | reads the Request Object | EE: advertise the shared ECDH-ES key and both `enc` values (1.0 §5.1, §8.3), with `state` and `nonce` | one JWK for both sessions (`alg` `ECDH-ES`, `use` `enc`, `kid`), `encrypted_response_enc_values_supported` `["A128GCM","A256GCM"]` (`ecdh_es_request_object_advertises_the_shared_key_and_both_enc_values`) |
+| S25 | 2 (EE) | cid, uri, key | honest, `A128GCM` and `A256GCM` | EE: commit exactly the session named by `state` | 2 open, target committed, other pending (`ecdh_es_honest_round_trip_commits_the_session_named_by_state`) |
+| S26 | 2 (EE) | cid, uri, key | seals A's valid proof with B's `state` | EE: routed to B by `state`, refused by B's holder binding | 2 open, `KbNonceMismatch`, both pending, A then commits (`ecdh_es_state_swap_routes_to_the_named_session_and_fails_its_nonce`) |
+| S27 | 1 (EE) + 1 UU + 1 BT | cid | missing, unknown, non-string or another route's `state`; foreign or missing `kid` | EE: refuse, nothing consumed | 1 open, `StateMissing` / `StateUnknown`; `kid`: `NoCandidate` / `MissingKid`, 0 attempts; then commits (`ecdh_es_missing_unknown_or_foreign_state_is_refused_and_consumes_nothing`) |
+| S28 | 2 (EE) | cid, uri, key | replays A's consumed JWE (another session live; then none) | EE: commit once | `StateUnknown` (1 open); with no live session `Resolve(Replay)`, 0 attempts (`ecdh_es_replays_commit_once_and_reused_values_hit_the_replay_guard`) |
+| S29 | 2 sequential (EE) | cid, uri, key, **nonce**, **state** | replays A's JWE to B; re-seals A's KB-JWT in a fresh ECDH-ES JWE for B | EE: refuse across sessions | `validated: 1`, then `CrossSessionReplay` / `HolderProofReplay`, B pending (same test) |
+| S30 | 2 (EE) | cid, uri, key, **nonce**, **state** | honest | EE: integrity failure, claim nothing | 2 open, 2 validate, `Ambiguous` (`ecdh_es_two_live_sessions_sharing_nonce_and_state_are_ambiguous`) |
+| S31 | 1 EE + 1 UU + 1 BT | cid | HPKE-0 JWE to EE; ECDH-ES JWE (either key, either `enc`) to UU and BT | no downgrade, no cross-route acceptance | `EcdhEsJweParse(UnsupportedAlg)` / `JweParse(UnsupportedAlg)`, 0 attempts, all pending, each then commits on its own route (`ecdh_es_and_hpke_routes_never_accept_each_others_jwes`) |
+| S32 | 1 (EE) | none | plaintext `vp_token`, alone or beside `response` | admission refusal | 400, `PlaintextVpToken`, 0 attempts, pending (`ecdh_es_route_refuses_plaintext_vp_token_at_admission`) |
+| S33 | none | none | asks a Hardened server for the ECDH-ES route or an ECDH-ES session | not served | 404 without an evidence record; creation 400 (`hardened_mode_has_no_ecdh_es_route_and_refuses_ecdh_es_sessions`) |
 
 ## 8. Open questions
 
 - Will the WG close #792 with normative text (§8.3.1 MUST/SHOULD), a note, or a cross-reference
   only? Issue #793 (the scope of the redirect form) affects which Response Modes the ordering
   note covers.
-- Should the lab add a 1.0-style ECDH-ES shared-key Verifier, to observe that every candidate
-  decrypts (§4 item 1 is currently an inference)?
+- ~~Should the lab add a 1.0-style ECDH-ES shared-key Verifier, to observe that every candidate
+  decrypts (§4 item 1 is currently an inference)?~~ Resolved: it has one, research mode only
+  and behind the non-default `ecdh-es-research` feature (ADR 0001; C3, C9, §4 item 1,
+  S23-S33). Every candidate decrypts; `state` is the only selector.
 - ~~Should the lab issue `state` inside the JWE and check it after decryption, to exercise
   §14.4.2?~~ Resolved: it does (C7, §4 item 7, S17-S22). Under HPKE the check comes after
   decryption and helps only against inadvertent or misrouted responses.

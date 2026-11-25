@@ -158,6 +158,16 @@ None of these is in scope for G7. Each needs its own decision record.
    that line. An ECDH-ES implementation would need RustCrypto code (no advisory tree) and an
    ADR. It must be a separate mode, never a fallback on the HPKE route, because a fallback
    would be the downgrade that #792 C9 describes.
+
+   *Update 2026-11-25:* the RustCrypto codec exists (`crates/jose-ecdh-es`), and a research
+   route uses it: `POST /lab/v1/response/ecdh-es`, one ECDH-ES P-256 key advertised with
+   `alg` `ECDH-ES` and `encrypted_response_enc_values_supported` `["A128GCM","A256GCM"]`
+   (`docs/adr/0001-ecdh-es-research-route.md`). It is research mode only, behind the
+   non-default lab-server feature `ecdh-es-research`, absent from the binary, and refuses
+   HPKE-0 JWEs as the HPKE routes refuse ECDH-ES ones (`verifier_without_sealing` now checks
+   the feature's build instead of pinning jose-ecdh-es out). It exists to observe #792 C3/C9;
+   it is **not** the conformance mode. Whether and how a conformance mode serves ECDH-ES
+   (TLS front, x509 client id, kill switch) remains the undecided C2 ADR below.
 4. **Configurable DCQL query.** Allow vct `urn:eudi:pid:1` and the claim paths the suite's
    credential carries. Which PID claims the suite discloses is **UNKNOWN**. Also allow a
    configurable trusted issuer key, set from the synthetic `credential.signing_jwk` given to the
