@@ -152,6 +152,10 @@ EXPECTED_NOTES = {
     "FAILED": "expected: the lab has no status-list support, and the module fails any verifier "
               "that does not fetch the status list",
 }
+# Suite conditions whose finding has a known lab-side cause.
+KNOWN_FINDINGS = {
+    "EnsureVerifierFetchedRevocationList": "the lab does not fetch status lists, out of lab scope",
+}
 
 # The suite's nginx serves a throwaway self-signed certificate on host loopback (README §2).
 SUITE_TLS = ssl.create_default_context()
@@ -612,6 +616,10 @@ def cmd_run(args):
 
 # --- summary ------------------------------------------------------------------------------------
 
+def explain(sources: list) -> str:
+    return ", ".join(f"{s} ({KNOWN_FINDINGS[s]})" if s in KNOWN_FINDINGS else s for s in sources)
+
+
 def cmd_summarize(args):
     run = Path(args.run_dir)
     plans = {k: json.loads((run / k / "results.json").read_text()) for k in PLANS if (run / k).is_dir()}
@@ -625,6 +633,7 @@ def cmd_summarize(args):
              for m in p["modules"]] for k, p in plans.items()}, indent=1) + "\n")
     (run / "manifest.json").write_text(json.dumps(
         {"lab_commit": commits.pop(), "plans": {k: f"{k}/manifest.json" for k in plans},
+         "summarized_with_driver_sha256": sha256_file(Path(__file__).resolve()),
          "files_sha256": {str(p.relative_to(run)): sha256_file(p) for p in sorted(run.rglob("*"))
                           if p.is_file() and not (p.parent == run and p.name in ("manifest.json", "summary.md"))}},
         indent=1) + "\n")
@@ -651,19 +660,24 @@ def cmd_summarize(args):
                 warn = sorted({f["src"] for f in m["findings"] if f["result"] == "WARNING"})
                 fail = sorted({f["src"] for f in m["findings"] if f["result"] == "FAILURE"})
                 if fail:
-                    reason += f"; FAILURE: {', '.join(fail)}"
+                    reason += f"; FAILURE: {explain(fail)}"
                 if warn:
-                    reason += f"; WARNING: {', '.join(warn)}"
+                    reason += f"; WARNING: {explain(warn)}"
             test = m.get("lab_test")
             if test and short == "happy-flow" and key == "c4":
                 test = {"file": CONF, "test": HAPPY_FLOW_C4_TEST}
             link = f"[`{test['test']}`]({depth}{test['file']})" if test else "none"
             lines.append(f"| [{short}]({key}/{m['log']}) | {m['status']} | {m['result']} | "
                          f"{m['expected']} | {reason.strip('; ')} | {link} |")
-        jwes = {json.dumps(m["response_jwe"], sort_keys=True) for m in plan["modules"] if m.get("response_jwe")}
+        jwes = [m["response_jwe"] for m in plan["modules"] if m.get("response_jwe")]
+        algs = sorted({f"{j.get('alg')} / {j.get('enc')}" for j in jwes})
+        kids = {j.get("kid") for j in jwes}
         tls = {json.dumps(m["lab_tls"], sort_keys=True) for m in plan["modules"] if m.get("lab_tls")}
-        lines += ["", f"Response JWE headers seen in the suite log: {', '.join(sorted(jwes)) or 'none logged'}.",
-                  f"Driver-to-lab TLS: {', '.join(sorted(tls))}.", ""]
+        lines += ["", f"Encrypted responses in the suite log: {len(jwes)}, `alg` / `enc` {', '.join(algs) or 'none'}, "
+                      f"{len(kids)} distinct `kid` values (one fresh lab key per session).",
+                  "Suite (JVM in the server container) to lab: every `request_uri` GET and `response_uri` POST "
+                  "completed over the lab's TLS 1.3-only listener (see the HTTP entries in each log).",
+                  f"Driver to lab: {', '.join(sorted(tls))}.", ""]
     (run / "summary.md").write_text("\n".join(lines))
     print(f"wrote {run}/summary.md, results.json, manifest.json")
 
