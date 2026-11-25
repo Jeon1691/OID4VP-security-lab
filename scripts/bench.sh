@@ -29,6 +29,16 @@ if [[ $# -gt 0 ]]; then
   fi
   shift
 fi
+# The wrapper owns the run directory and id: a forwarded --out / --run-id would override them
+# in the runner and split the results from this run's log and manifest.
+for arg in "$@"; do
+  case "$arg" in
+    --out | --out=* | --run-id | --run-id=*)
+      echo "scripts/bench.sh sets ${arg%%=*} itself; use OUT_ROOT / BENCH_RUN_ID instead" >&2
+      exit "$EXIT_BROKEN"
+      ;;
+  esac
+done
 SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || echo nogit)"
 RUN_ID="${BENCH_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-${SHA}}"
 OUT="${OUT_ROOT}/${RUN_ID}"
