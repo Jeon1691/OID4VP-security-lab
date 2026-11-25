@@ -87,6 +87,32 @@ REQUIRED_TESTS=(
   dc_api_bound_jwe_fails_with_any_single_field_changed
   direct_post_and_dc_api_session_info_never_cross_open
   state_is_not_a_session_info_input
+  # jose-ecdh-es (OpenID4VP 1.0-style ECDH-ES, research only): RFC 7518 Appendix C, josekit and
+  # SpruceID interop, and the fail-closed header / segment checks.
+  rfc7518_appendix_c_concat_kdf_matches_vector
+  rfc7518_appendix_c_key_agreement_yields_the_printed_key
+  josekit_ecdh_es_a128gcm_and_a256gcm_jwes_open
+  josekit_jwes_with_apu_and_apv_open
+  sealed_jwes_decrypt_with_josekit
+  sealed_jwes_with_apu_and_apv_decrypt_with_josekit
+  spruce_ecdh_es_direct_post_jwt_response_opens_with_jose_ecdh_es
+  ecdh_es_shared_key_opens_every_candidate_response
+  ecdh_es_tampered_ciphertext_tag_or_iv_fails_decryption
+  ecdh_es_tampered_protected_header_fails_decryption
+  ecdh_es_wrong_recipient_key_fails_decryption
+  ecdh_es_rejects_key_wrapping_hpke_dir_and_every_other_alg
+  ecdh_es_rejects_unsupported_enc
+  ecdh_es_rejects_off_curve_epk
+  ecdh_es_rejects_wrong_curve_or_key_type_epk
+  ecdh_es_rejects_epk_with_private_key
+  ecdh_es_rejects_non_empty_encrypted_key
+  ecdh_es_rejects_zip_header_parameter
+  ecdh_es_rejects_crit_header_parameter
+  ecdh_es_rejects_duplicate_header_parameter
+  ecdh_es_rejects_duplicate_epk_member
+  ecdh_es_rejects_bad_base64url_segments
+  ecdh_es_rejects_wrong_iv_length
+  ecdh_es_rejects_wrong_tag_length
   # session-core (IMP-007/011/012): strategies, exactly-once claim, state machine.
   unique_uri_yields_exactly_one_candidate_among_sessions_sharing_kid
   unique_kid_yields_exactly_one_candidate_among_sessions_sharing_route
@@ -398,12 +424,23 @@ advisory_baseline_sync() { diff <(deny_ids) <(audit_ids); }
 # named crates, so check the resolved graph itself). evidence-report (G6) is a plain library and
 # held to the same rule; scenario-runner is not, it drives lab-server's wallet simulator (ssi).
 CORE_CRATES=(protocol-model jose-hpke session-core session-redis evidence-report)
+# jose-ecdh-es is held to the same rule for its normal and build dependencies. Its interop tests
+# use josekit (the JWE code SpruceID encrypts with) as a dev-dependency, so dev edges are not
+# checked for it; deny.toml [bans] still keeps openid4vp and ssi out of its graph.
+CORE_CRATES_NORMAL_ONLY=(jose-ecdh-es)
 SPRUCE_TREE_RE='^(openid4vp|josekit|ssi|ssi-[a-z0-9-]+|did-[a-z0-9-]+|rsa|im|sized-chunks|bitmaps|smallstr|serde_cbor|derivative|clear_on_drop|proc-macro-error|chrono) '
 core_containment() {
   local c tree hits=0
   for c in "${CORE_CRATES[@]}"; do
     # Resolve first: a failing `cargo tree` must fail the step, not read as "no match".
     tree="$(cargo tree --locked -p "$c" -e normal,build,dev --prefix none)" || return 1
+    if grep -E "$SPRUCE_TREE_RE" <<<"$tree"; then
+      echo "containment violated by $c"
+      hits=1
+    fi
+  done
+  for c in "${CORE_CRATES_NORMAL_ONLY[@]}"; do
+    tree="$(cargo tree --locked -p "$c" -e normal,build --prefix none)" || return 1
     if grep -E "$SPRUCE_TREE_RE" <<<"$tree"; then
       echo "containment violated by $c"
       hits=1
@@ -416,13 +453,17 @@ core_containment() {
 # sender-side sealing (jose-hpke `test-support`, the wallet simulator's HTTP client), the
 # SpruceID tree (`openid4vp`, `ssi*`: the wallet simulator's Request Object verification) or the
 # decryption pause lever. Both are only reachable through the `wallet-sim` /
-# `lab-instrumentation` features that tests enable via the self dev-dependency.
+# `lab-instrumentation` features that tests enable via the self dev-dependency. jose-ecdh-es
+# `test-support` (ECDH-ES sealing) must not be reachable either; lab-server has no normal
+# dependency on jose-ecdh-es yet, so that query prints nothing until the research route lands.
 verifier_without_sealing() {
-  local features own normal
+  local features ecdh_es own normal
   features="$(cargo tree --locked -p lab-server -e normal,features -i jose-hpke)" || return 1
+  ecdh_es="$(cargo tree --locked -p lab-server -e normal,features -i jose-ecdh-es)" || return 1
   own="$(cargo tree --locked -p lab-server -e normal,features -i lab-server)" || return 1
   normal="$(cargo tree --locked -p lab-server -e normal --prefix none)" || return 1
   if grep -F 'feature "test-support"' <<<"$features" \
+    || grep -F 'feature "test-support"' <<<"$ecdh_es" \
     || grep -E 'lab-server feature "(wallet-sim|lab-instrumentation)"' <<<"$own" \
     || grep -E '^(reqwest|openid4vp|ssi|ssi-[a-z0-9-]+) ' <<<"$normal"; then
     echo "test-only feature reachable from the default lab-server build"
@@ -445,15 +486,24 @@ verifier_without_store_backend() {
 # A plain `cargo build` / `cargo run` at the root builds the workspace default members. They must
 # leave lab-server a Verifier build: scenario-runner (G6) enables `wallet-sim` as a normal
 # dependency and is therefore kept out of `default-members`. This fails if it (or any other
-# crate that turns on a test-only lab-server feature) re-enters them. `--workspace` builds
-# are never Verifier builds.
+# crate that turns on a test-only lab-server feature) re-enters them, or if any default member
+# turns on a codec's sealing `test-support` (jose-hpke, jose-ecdh-es) as a normal dependency.
+# `--workspace` builds are never Verifier builds.
 default_members_are_verifier_builds() {
-  local own
+  local own codec sealing=0
   own="$(cargo tree --locked -e normal,features -i lab-server)" || return 1
   if grep -E 'lab-server feature "(wallet-sim|lab-instrumentation)"' <<<"$own"; then
     echo "a default workspace member enables a test-only lab-server feature"
     return 1
   fi
+  for codec in jose-hpke jose-ecdh-es; do
+    own="$(cargo tree --locked -e normal,features -i "$codec")" || return 1
+    if grep -F "$codec feature \"test-support\"" <<<"$own"; then
+      echo "a default workspace member enables $codec test-support"
+      sealing=1
+    fi
+  done
+  return "$sealing"
 }
 
 stage_supply_chain() {
