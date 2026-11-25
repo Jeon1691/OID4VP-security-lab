@@ -209,6 +209,18 @@ REQUIRED_TESTS=(
   research_state_knob_is_research_only_bounded_and_charset_checked
   unrecognized_payload_members_are_ignored
   state_mismatching_candidate_tried_first_does_not_stop_the_validating_one
+  # lab-server ECDH-ES research route (`ecdh-es-research`, ADR 0001): #792 C3/C9 observed
+  # directly, experiments E1-E7 (docs/interop/issue-792-reproduction.md §7, S23-S33).
+  ecdh_es_shared_key_opens_for_every_live_session_and_only_state_selects
+  ecdh_es_request_object_advertises_the_shared_key_and_both_enc_values
+  ecdh_es_honest_round_trip_commits_the_session_named_by_state
+  ecdh_es_state_swap_routes_to_the_named_session_and_fails_its_nonce
+  ecdh_es_missing_unknown_or_foreign_state_is_refused_and_consumes_nothing
+  ecdh_es_replays_commit_once_and_reused_values_hit_the_replay_guard
+  ecdh_es_two_live_sessions_sharing_nonce_and_state_are_ambiguous
+  ecdh_es_and_hpke_routes_never_accept_each_others_jwes
+  ecdh_es_route_refuses_plaintext_vp_token_at_admission
+  hardened_mode_has_no_ecdh_es_route_and_refuses_ecdh_es_sessions
   # lab-server holder binding (Evidence level 3): SD-JWT VC + KB-JWT (OpenID4VP 1.1 B.3;
   # RFC 9901 §7.1/§7.3; draft-ietf-oauth-sd-jwt-vc-27), over HTTP and against RFC 9901 vectors.
   request_object_dcql_query_requests_the_sd_jwt_vc_and_its_claims
@@ -465,28 +477,45 @@ core_containment() {
 # decryption pause lever. Both are only reachable through the `wallet-sim` /
 # `lab-instrumentation` features that tests enable via the self dev-dependency.
 #
-# jose-ecdh-es (ECDH-ES, research only) is pinned out of lab-server's normal graph under every
-# feature combination (`--all-features`), so an optional dependency behind a lab-server feature
-# trips it too. The PR that adds the research route must replace this pin with a real check
-# that the route's build reaches jose-ecdh-es without `test-support`; a query that prints
-# nothing would otherwise pass silently forever.
+# jose-ecdh-es (ECDH-ES) is reachable only through the research feature `ecdh-es-research`
+# (docs/adr/0001-ecdh-es-research-route.md). The default build, and so the binary, must not
+# depend on it at all. The `ecdh-es-research` build must reach it (so the check below inspects
+# a real graph, not an empty query that passes silently) without its sealing `test-support`, and
+# must not pull in the test-only lab-server features or their SpruceID / HTTP-client tree.
 verifier_without_sealing() {
-  local features ecdh_es own normal
+  local features ecdh_es research research_own research_normal own normal
   features="$(cargo tree --locked -p lab-server -e normal,features -i jose-hpke)" || return 1
   # stderr carries only cargo's "nothing to print" note; a cargo failure still fails the step.
-  ecdh_es="$(cargo tree --locked -p lab-server --all-features -e normal -i jose-ecdh-es 2>/dev/null)" \
-    || return 1
+  ecdh_es="$(cargo tree --locked -p lab-server -e normal -i jose-ecdh-es 2>/dev/null)" || return 1
   if [[ -n "$ecdh_es" ]]; then
-    echo "lab-server now depends on jose-ecdh-es: replace this pin with the test-support check" \
-      "for the route's build/feature"
+    echo "the default lab-server build depends on jose-ecdh-es"
+    return 1
+  fi
+  research="$(cargo tree --locked -p lab-server --features ecdh-es-research -e normal,features \
+    -i jose-ecdh-es)" || return 1
+  if ! grep -Eq '^jose-ecdh-es v' <<<"$research"; then
+    echo "the ecdh-es-research build does not reach jose-ecdh-es; this check would be vacuous"
+    return 1
+  fi
+  if grep -F 'feature "test-support"' <<<"$research"; then
+    echo "the ecdh-es-research build enables jose-ecdh-es test-support (sealing)"
+    return 1
+  fi
+  research_own="$(cargo tree --locked -p lab-server --features ecdh-es-research \
+    -e normal,features -i lab-server)" || return 1
+  research_normal="$(cargo tree --locked -p lab-server --features ecdh-es-research -e normal \
+    --prefix none)" || return 1
+  if grep -E 'lab-server feature "(wallet-sim|lab-instrumentation)"' <<<"$research_own" \
+    || grep -E '^(reqwest|openid4vp|ssi|ssi-[a-z0-9-]+) ' <<<"$research_normal"; then
+    echo "test-only feature reachable from the ecdh-es-research build"
     return 1
   fi
   own="$(cargo tree --locked -p lab-server -e normal,features -i lab-server)" || return 1
   normal="$(cargo tree --locked -p lab-server -e normal --prefix none)" || return 1
   if grep -F 'feature "test-support"' <<<"$features" \
-    || grep -E 'lab-server feature "(wallet-sim|lab-instrumentation)"' <<<"$own" \
+    || grep -E 'lab-server feature "(wallet-sim|lab-instrumentation|ecdh-es-research)"' <<<"$own" \
     || grep -E '^(reqwest|openid4vp|ssi|ssi-[a-z0-9-]+) ' <<<"$normal"; then
-    echo "test-only feature reachable from the default lab-server build"
+    echo "test-only or research feature reachable from the default lab-server build"
     return 1
   fi
 }
@@ -506,14 +535,14 @@ verifier_without_store_backend() {
 # A plain `cargo build` / `cargo run` at the root builds the workspace default members. They must
 # leave lab-server a Verifier build: scenario-runner (G6) enables `wallet-sim` as a normal
 # dependency and is therefore kept out of `default-members`. This fails if it (or any other
-# crate that turns on a test-only lab-server feature) re-enters them, or if any default member
-# turns on a codec's sealing `test-support` (jose-hpke, jose-ecdh-es) as a normal dependency.
-# `--workspace` builds are never Verifier builds.
+# crate that turns on a test-only lab-server feature, or the ECDH-ES research route) re-enters
+# them, or if any default member turns on a codec's sealing `test-support` (jose-hpke,
+# jose-ecdh-es) as a normal dependency. `--workspace` builds are never Verifier builds.
 default_members_are_verifier_builds() {
   local own codec sealing=0
   own="$(cargo tree --locked -e normal,features -i lab-server)" || return 1
-  if grep -E 'lab-server feature "(wallet-sim|lab-instrumentation)"' <<<"$own"; then
-    echo "a default workspace member enables a test-only lab-server feature"
+  if grep -E 'lab-server feature "(wallet-sim|lab-instrumentation|ecdh-es-research)"' <<<"$own"; then
+    echo "a default workspace member enables a test-only or research lab-server feature"
     return 1
   fi
   for codec in jose-hpke jose-ecdh-es; do
