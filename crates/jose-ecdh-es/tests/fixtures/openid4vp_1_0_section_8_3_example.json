@@ -1,0 +1,32 @@
+{
+  "source": "OpenID for Verifiable Presentations 1.0, Section 8.3 (encrypted response example)",
+  "jwe_compact": "eyJhbGciOiJFQ0RILUVTIiwiZW5jIjoiQTEyOEdDTSIsImtpZCI6ImFjIiwiZXBrIjp7Imt0eSI6IkVDIiwieCI6Im5ubVZwbTNWM2piaGNhZlFhUkJrU1ZOSGx3Wkh3dC05ck9wSnVmeVlJdWsiLCJ5IjoicjRmakRxd0p5czlxVU9QLV9iM21SNVNaRy0tQ3dPMm1pYzVWU05UWU45ZyIsImNydiI6IlAtMjU2In19..uAYcHRUSSn2X0WPX.yVzlGSYG4qbg0bq18JcUiDRw56yVnbKR8E7S7YlEtzT00RqE3Pw5oTpUG3hdLN4taHZ9gC1kwak8JOnJgQ.1wR024_3-qtAlx1oFIUpQQ",
+  "recipient_jwk": {
+    "kty": "EC",
+    "kid": "ac",
+    "use": "enc",
+    "crv": "P-256",
+    "alg": "ECDH-ES",
+    "x": "YO4epjifD-KWeq1sL2tNmm36BhXnkJ0He-WqMYrp9Fk",
+    "y": "Hekpm0zfK7C-YccH5iBjcIXgf6YdUvNUac_0At55Okk",
+    "d": "Et-3ce0omz8_TuZ96Df9lp0GAaaDoUnDe6X-CRO7Aww"
+  },
+  "decoded_protected_header": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "ac",
+    "epk": {
+      "kty": "EC",
+      "x": "nnmVpm3V3jbhcafQaRBkSVNHlwZHwt-9rOpJufyYIuk",
+      "y": "r4fjDqwJys9qUOP-_b3mR5SZG--CwO2mic5VSNTYN9g",
+      "crv": "P-256"
+    }
+  },
+  "payload": {
+    "vp_token": {
+      "example_credential_id": [
+        "eyJhb...YMetA"
+      ]
+    }
+  }
+}
