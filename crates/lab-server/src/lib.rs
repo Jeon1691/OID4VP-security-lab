@@ -9,8 +9,8 @@
 //!
 //! | Method and path | Purpose |
 //! | --- | --- |
-//! | `POST /lab/v1/sessions` | Create a synthetic session; optional JSON `{"route": "unique"\|"shared", "nonce": "..."}` (`shared` and `nonce` research mode only). Returns `client_id` (the Authorization Request parameter), `request_uri`, `response_uri` and `result_uri`; the result token in `result_uri` is returned only here |
-//! | `GET /lab/v1/requests/{id}` | Signed Request Object (JAR), body = compact JWS, `Content-Type: application/oauth-authz-req+jwt`. Payload: exact `client_id`, `nonce`, `response_uri`, `response_mode=direct_post.jwt`, `aud`, `dcql_query` (one `dc+sd-jwt` query for [`SYNTHETIC_CREDENTIAL_VCT`] and [`REQUESTED_CLAIMS`]), `client_metadata.jwks` with the HPKE-0 key (`alg` `HPKE-0`, `kid`) |
+//! | `POST /lab/v1/sessions` | Create a synthetic session; optional JSON `{"route": "unique"\|"shared", "nonce": "...", "state": "..."}` (`shared`, `nonce` and `state` research mode only; caller-chosen values model a Verifier that reuses them, bounded by [`MAX_RESEARCH_NONCE_LEN`] / [`MAX_RESEARCH_STATE_LEN`]). Returns `client_id` (the Authorization Request parameter), `request_uri`, `response_uri` and `result_uri`; the result token in `result_uri` is returned only here |
+//! | `GET /lab/v1/requests/{id}` | Signed Request Object (JAR), body = compact JWS, `Content-Type: application/oauth-authz-req+jwt`. Payload: exact `client_id`, `nonce`, `state` (fresh per session: 128 random bits as base64url, §5.2 charset), `response_uri`, `response_mode=direct_post.jwt`, `aud`, `dcql_query` (one `dc+sd-jwt` query for [`SYNTHETIC_CREDENTIAL_VCT`] and [`REQUESTED_CLAIMS`]), `client_metadata.jwks` with the HPKE-0 key (`alg` `HPKE-0`, `kid`) |
 //! | `POST /lab/v1/response/{token}` | Unique response_uri (unique-uri strategy) |
 //! | `POST /lab/v1/response/shared` | Shared response_uri, research mode only (404 in hardened mode) |
 //! | `GET /lab/v1/results/{result_token}` | `pending` / `consumed` (with the committed `credential`: requested claims, `vct`, holder key thumbprint, disclosed claim names) / `expired`. The request id does not unlock it |
@@ -35,8 +35,9 @@
 //! Each object is signed once, when its session is issued, over the JSON built from the
 //! session's `RequestBinding`, which is then moved into the registry; `GET` serves those stored
 //! bytes. So the signed `client_id` / `nonce` / `response_uri` are byte-for-byte the values the
-//! registry holds and `SessionInfo::from_binding` decrypts with, and no code path can change
-//! them after signing (`tests/signed_request_object_e2e.rs` checks this on every route).
+//! registry holds and `SessionInfo::from_binding` decrypts with, the signed `state` is the one
+//! the decrypted response is checked against, and no code path can change them after signing
+//! (`tests/signed_request_object_e2e.rs` checks this on every route).
 //!
 //! The key is [`LabConfig::request_signing_key`] ([`RequestSigningKey::from_jwk`]); the lab
 //! ships none. For [`DEFAULT_CLIENT_ID`] it is the synthetic SpruceID fixture
@@ -77,12 +78,16 @@
 //! 5. `kid` required on every route (every lab key is advertised with one; OpenID4VP 1.1 §8.3).
 //! 6. Ingress hint: route token from the path, `kid` from the protected header.
 //! 7. `resolve` with the route's strategy.
-//! 8. For each candidate: HPKE open with its key and `SessionInfo::from_binding`, then
-//!    holder-binding validation (SD-JWT VC + KB-JWT against that candidate's `client_id` and
-//!    `nonce`, see below), on the blocking pool behind
-//!    [`LabConfig::max_concurrent_decryptions`]. All candidates are tried; with bounded trial,
-//!    more than one that validates is an integrity failure (reject, claim nothing, record it).
-//!    Only the first validated result is kept.
+//! 8. For each candidate: HPKE open with its key and `SessionInfo::from_binding`; then the
+//!    decrypted payload's `state` against that candidate's stored `state` (OpenID4VP 1.1
+//!    §14.4.2; missing → `ValidationError::StateMissing`, not a string or another value →
+//!    `ValidationError::StateMismatch`), before any holder-binding work; then holder-binding
+//!    validation (SD-JWT VC + KB-JWT against that candidate's `client_id` and `nonce`, see
+//!    below). On the blocking pool behind [`LabConfig::max_concurrent_decryptions`]. All
+//!    candidates are tried, and each is checked against its own values, so a candidate whose
+//!    `state` differs simply does not validate; with bounded trial, more than one that
+//!    validates is an integrity failure (reject, claim nothing, record it). Only the first
+//!    validated result is kept.
 //! 9. Verifier-wide replay guard: a response whose `SHA-256(compact JWE)` already validated
 //!    for a *different* session is refused (`Rejection::CrossSessionReplay`), and so is one
 //!    whose verified holder proof (`SHA-256` of the KB-JWT signing input, signature excluded
@@ -131,6 +136,12 @@
 //!   With a reused nonce and the same `client_id` the holder proof itself is valid for both
 //!   sessions, so re-sealing it into a fresh JWE gets past the JWE digest; the guard therefore
 //!   also binds each verified KB-JWT to its first session (`HolderProofReplay`, PR #10).
+//! * `state` (§14.4.2) is inside the JWE, so it is checked only after decryption, and the
+//!   sender chooses the plaintext: anyone who can fetch a Request Object reads its `state` and
+//!   can echo it. Against a deliberate sender it adds nothing to the `session_info` selection
+//!   and holder binding; it catches inadvertent responses (a payload meant for another
+//!   request, a verbatim replay to another session, a wallet that echoes no `state`). A
+//!   cleartext `state` beside `response` is refused at admission (step 3).
 //! * Results are readable only with the result token, so the request id (visible to the
 //!   wallet and anyone who sees the `request_uri`) does not reveal the outcome.
 //! * Consumed records retain only the bounded [`ValidatedResponse`], never decrypted input or
