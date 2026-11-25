@@ -44,9 +44,12 @@ against the new source (every condition cited there can change between releases)
 cd tools/oidf-suite
 docker --context orbstack compose up -d          # pulls the pinned digests on first use
 curl -sk https://localhost:8443/api/currentuser  # [run] 200 {"sub":"developer",…,"isAdmin":true} once booted (10–25 s observed)
-...                                              # run the plan (section 5e), driver via curl/HTTP only
-curl -sk -o oid4vp-lab-c3.zip https://localhost:8443/api/plan/export/<planId>   # export BEFORE stopping (git-ignored)
-docker --context orbstack compose down           # removes containers and network; nothing persists
+cd ../.. && cargo build -p lab-server --features conformance --locked
+RUN="evidence/oidf/$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)"
+python3 -I tools/oidf-suite/driver/run_plan.py run --plan c3 --out "$RUN/c3"   # starts and stops the lab itself
+python3 -I tools/oidf-suite/driver/run_plan.py run --plan c4 --out "$RUN/c4"   # export zip -> tools/oidf-suite/ (git-ignored)
+python3 -I tools/oidf-suite/driver/run_plan.py summarize "$RUN"
+docker --context orbstack compose -f tools/oidf-suite/docker-compose.yml down   # removes containers and network; nothing persists
 ```
 
 - **No login.** The server runs the `dev` Spring profile, which sets `fintechlabs.devmode=true`
@@ -371,10 +374,12 @@ accepts `{}` [run]. The suite does not follow `redirect_uri`; it lists it as a U
   | evidence | `GET /api/log/<testId>`, `GET /api/plan/export/<planId>` (zip of signed JSON logs) [run] |
   | clean up | `DELETE /api/runner/<testId>` (stop), `DELETE /api/plan/<planId>` |
 
-**Minimal driver design** (not implemented here):
+**Driver design**, implemented by `driver/run_plan.py` (section 7; its docstring lists exactly
+what it does, including the lab command line it starts):
 
 1. Preconditions: suite up and `/api/currentuser` 200; lab conformance mode up on
-   `127.0.0.1:<port>` with TLS; synthetic reader CA, leaf and issuer key generated once per run.
+   `127.0.0.1:<port>` with TLS; the committed synthetic reader CA, leaf and issuer key (ADR 0002;
+   the driver adds a throwaway self-signed `x5c` certificate for the issuer key per run).
    Render the plan config from the committed template into `config/<name>.local.json` or
    `evidence/local/` (both git-ignored), never editing the template. Fill the `LAB:`
    placeholders, including a fresh random alias such as `oid4vp-lab-c3-<16 hex>` per run
@@ -385,9 +390,10 @@ accepts `{}` [run]. The suite does not follow `redirect_uri`; it lists it as a U
    state and ECDH-ES key) and build `client_id` + `request_uri`; GET the authorization endpoint;
    wait; if `uploadsRequired` > 0, render the lab's verdict for that session to PNG and upload
    it; wait for FINISHED; fetch `/api/info` and `/api/log`.
-4. Write `evidence/<run>/`: per-module result and log, the plan export, and a manifest with all
-   pins and the SHA-256 of every file (the export's own signatures are not provenance,
-   section 2). Map REVIEW (positive) and PASSED (negative) to "as expected"; FAILED and any
+4. Write `evidence/<run>/`: per-module result and sanitized log, and a manifest with all pins
+   and the SHA-256 of every file (the export's own signatures are not provenance, section 2).
+   The plan export holds the issuer private key: it stays in `tools/oidf-suite/` (git-ignored),
+   only its SHA-256 goes into the manifest. Map REVIEW (positive) and PASSED (negative) to "as expected"; FAILED and any
    WARNING to triage.
 5. Stop the stack (`compose down`) straight away.
 
@@ -417,3 +423,47 @@ All of this runs over HTTP from the driver; no browser is involved (section 2).
 - Whether the hosted demo server runs code newer than `release-v5.3.5` (deliberately not checked).
 - Nothing in this plan's modules was observed to depend on `client.client_id` being blank,
   `iss` in the request object, or `verifier_info`; those paths were read only.
+
+## 7. Results: the lab against both plans
+
+Run `evidence/oidf/20261125T044623Z-61dbb05/` (`summary.md` has the per-module table with
+reasons and the lab test covering each module; `manifest.json` per plan has the lab commit,
+`Cargo.lock` hash, image digests, alias, Docker / OrbStack / Java versions). One run per plan,
+both at lab commit `61dbb05` (clean tree), suite stack freshly started, driven by
+`driver/run_plan.py` only, with no browser. Lab in conformance mode with the committed synthetic
+fixtures, time box 3600 s, bound to 127.0.0.1:18444, public origin
+`https://host.docker.internal:18444`; DCQL `urn:eudi:pid:1` with `given_name`, `family_name`,
+`birthdate`; issuer key `lab_issuer.jwk` (public half to the lab, private JWK to the suite).
+
+| Module | C3 plain (`x509_san_dns`) | C4 HAIP (`x509_hash`, `redirect_uri`) |
+| --- | --- | --- |
+| happy-flow, minimal-cnf-jwk, request-uri-fetched-twice | REVIEW, 1 WARNING (status list not fetched) | same |
+| present-credential-without-status | REVIEW | REVIEW |
+| invalid-kb-jwt-signature, invalid-credential-signature, invalid-sd-hash, invalid-kb-jwt-nonce, invalid-kb-jwt-aud, kb-jwt-iat-in-past, kb-jwt-iat-in-future, wrong-vct | PASSED (lab answered the generic 400) | same |
+| request-uri-method-post | SKIPPED (no `request_uri_method=post`) | same |
+| present-revoked-credential | FAILED, expected (`EnsureVerifierFetchedRevocationList`: the lab has no status-list support) | same |
+
+- **Every module ended as expected; no lab bug was found**, so no lab code changed. No other
+  WARNING or FAILURE appeared: the request object, `x5c` chain (strict PKIX to the trust anchor
+  in C4), `client_metadata`, DCQL, nonce and the 200 / 400 answers met every condition the
+  modules run, and under HAIP `ValidateVpClientMetadataEncryptionForHaip` passed, the
+  per-session ECDH-ES keys passed `VP1FinalCheckEncryptionKeyNotReused` and the `redirect_uri` (with a fresh `response_code`)
+  passed `VP1FinalEnsureDirectPostResponseHasRedirectUriForHaip`.
+- **REVIEW is not PASSED.** It is the best result a positive module can reach (section 5d); the
+  uploaded image is a rendering of the lab's own result endpoint JSON for that session
+  (`consumed`, the three claims, `vct`, holder key thumbprint), made by the driver, not a
+  browser screenshot. Each one is in the run's `screenshots/`.
+- **TLS:** the suite's JVM (Temurin 21.0.13) completed every `request_uri` GET and
+  `response_uri` POST against the lab's TLS 1.3-only rustls listener; the driver's own
+  connections negotiated TLS 1.3 (`TLS_AES_256_GCM_SHA384`).
+- **`enc`:** the suite encrypted every response with ECDH-ES + `A128GCM`, the first value the lab
+  lists (section 5c). `A256GCM` is therefore not exercised by the suite; the lab test
+  `conformance_round_trip_with_x509_hash_a256gcm_and_redirect_uri` covers it.
+- **Not a certification.** Nothing was submitted to the OpenID Foundation, and the hosted
+  servers were not used. The suite has no OpenID4VP 1.1 or HPKE plan, so the lab's primary
+  HPKE-0 path, `session_info` and the #792 shared-route scenarios are not covered by these
+  results.
+- **Evidence hygiene:** logs are the suite's `/api/log` entries with every private JWK member
+  and the issuer private scalar replaced by `REDACTED` (the driver refuses to write a file that
+  still contains the scalar). The raw exports (`*.zip`, git-ignored) were not committed.
+  The suite stack was taken down and the lab stopped after the run.

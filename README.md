@@ -20,7 +20,8 @@ evidence.
 | `crates/lab-server` | axum lab Verifier for HPKE-0 `direct_post.jwt` (IMP-008..010) with SD-JWT VC + KB-JWT holder binding (Evidence level 3), wallet simulator and synthetic issuer (`wallet-sim` feature), OpenID4VP 1.0-style ECDH-ES research route (`ecdh-es-research` feature, research mode only, not in the binary), time-boxed OIDF conformance mode (`conformance` feature, ADR 0002); G0-C API smoke test, G0-D ECDH-ES loopback e2e |
 | `docs/adr/` | Lab design decisions (`0001-ecdh-es-research-route.md`) |
 | `docs/interop/` | G7: OIDF #792 reproduction map (`issue-792-reproduction.md`), OIDF conformance-suite plan and INTEROP-02 outline (`oidf-conformance-plan.md`) |
-| `tools/oidf-suite/` | Self-hosted OIDF conformance suite for C3/C4: digest-pinned compose file, runbook, plan configs, suite-side findings, suite-observation stand-in (not a verifier) |
+| `tools/oidf-suite/` | Self-hosted OIDF conformance suite for C3/C4: digest-pinned compose file, runbook, plan configs, suite-side findings, suite-observation stand-in (not a verifier), plan driver (`driver/run_plan.py`) |
+| `evidence/oidf/` | C3/C4 runs of the OIDF suite against conformance mode, one directory per run (`summary.md`, `results.json`, manifests, sanitized logs). **Status (run `20261125T044623Z-61dbb05`):** both plans, 14 modules each, every module ended as expected: 8 PASSED (negative), 4 REVIEW (positive; REVIEW is not PASSED), 1 SKIPPED (`request_uri_method=post`), 1 FAILED (`present-revoked-credential`: no status-list support). Not a certification; nothing submitted to the OIDF; HPKE-0 / OpenID4VP 1.1 not covered by the suite |
 | `scripts/` | Gate stages (shared by local and CI), upstream reproduction, evidence manifest, OIDF suite reachability probe |
 | `.github/workflows/` | `ci.yml` PR/main gate, `security.yml` daily advisory scan, `bench.yml` manual G6 benchmark |
 | `docs/benchmarks.md` | G6 methodology, metrics, invariants, caveats, how to reproduce |
