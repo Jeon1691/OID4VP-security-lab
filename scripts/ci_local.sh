@@ -163,6 +163,12 @@ REQUIRED_TESTS=(
   issue_792_workarounds_compared_on_one_population
   issue_792_kid_of_another_session_on_the_unique_kid_route_fails_closed
   issue_792_trial_opens_the_session_the_sender_bound_and_holder_binding_decides
+  # lab-server `state` per session, inside the JWE, checked after decryption (OpenID4VP 1.1
+  # §5.2, §8.3, §14.4.2).
+  state_round_trips_inside_the_jwe_on_every_route
+  response_without_state_is_refused_and_the_honest_response_then_commits
+  state_of_another_live_session_is_refused
+  bounded_trial_jwe_that_opens_for_b_but_carries_a_state_is_refused_for_b
   # lab-server holder binding (Evidence level 3): SD-JWT VC + KB-JWT (OpenID4VP 1.1 B.3;
   # RFC 9901 §7.1/§7.3; draft-ietf-oauth-sd-jwt-vc-27), over HTTP and against RFC 9901 vectors.
   request_object_dcql_query_requests_the_sd_jwt_vc_and_its_claims

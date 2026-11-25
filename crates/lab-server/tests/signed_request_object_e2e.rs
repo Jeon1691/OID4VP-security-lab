@@ -30,7 +30,7 @@ use lab_server::{
     RouteKind, SharedRouteStrategy, StartError, TrustedIssuerKey,
 };
 use openid4vp::verifier::request_signer::{P256Signer, RequestSigner as _};
-use protocol_model::{ClientIdWire, NonceWire, RequestBinding, ResponseUriWire};
+use protocol_model::{ClientIdWire, NonceWire, RequestBinding, ResponseUriWire, StateWire};
 use serde_json::{Value, json};
 use session_core::CandidateBudget;
 
@@ -220,14 +220,16 @@ fn jar_header() -> Value {
     json!({ "alg": ES256, "typ": JAR_TYP, "kid": VERIFIER_DID_VM })
 }
 
-fn binding_parts(binding: &RequestBinding) -> (&ClientIdWire, &NonceWire, &ResponseUriWire) {
+fn binding_parts(
+    binding: &RequestBinding,
+) -> (&ClientIdWire, &NonceWire, &ResponseUriWire, &StateWire) {
     match binding {
         RequestBinding::DirectPostJwt {
             client_id,
             nonce,
             response_uri,
-            ..
-        } => (client_id, nonce, response_uri),
+            state,
+        } => (client_id, nonce, response_uri, state),
         RequestBinding::DcApiJwt { .. } => panic!("lab issues direct_post.jwt only"),
     }
 }
@@ -296,8 +298,9 @@ async fn lab_request_signature_is_byte_identical_to_spruce_p256_signer() {
 
 /// The invariant JAR signing must keep: on every route, the signed `client_id` / `nonce` /
 /// `response_uri` bytes == the stored `RequestBinding` bytes == the `SessionInfo::from_binding`
-/// inputs; the wallet's verified values are those bytes, and a response sealed from them is
-/// accepted.
+/// inputs, and the signed `state` == the stored `state` the decrypted response is checked
+/// against (OpenID4VP 1.1 §14.4.2); the wallet's verified values are those bytes, and a
+/// response sealed from them is accepted.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn signed_request_object_binding_bytes_match_stored_session_and_session_info() {
     let cases = [
@@ -325,10 +328,11 @@ async fn signed_request_object_binding_bytes_match_stored_session_and_session_in
             .server
             .stored_binding(&session.session_id)
             .expect("session is stored");
-        let (client_id, nonce, response_uri) = binding_parts(&binding);
+        let (client_id, nonce, response_uri, state) = binding_parts(&binding);
         assert_eq!(signed("client_id"), client_id.as_bytes(), "{route:?}");
         assert_eq!(signed("nonce"), nonce.as_bytes(), "{route:?}");
         assert_eq!(signed("response_uri"), response_uri.as_bytes(), "{route:?}");
+        assert_eq!(signed("state"), state.as_bytes(), "{route:?}");
         assert_eq!(session.response_uri.as_bytes(), response_uri.as_bytes());
 
         let from_signed = SessionInfo::direct_post_jwt(
@@ -353,6 +357,10 @@ async fn signed_request_object_binding_bytes_match_stored_session_and_session_in
         assert_eq!(request.client_id.as_bytes(), client_id.as_bytes());
         assert_eq!(request.nonce.as_bytes(), nonce.as_bytes());
         assert_eq!(request.response_uri.as_bytes(), response_uri.as_bytes());
+        assert_eq!(
+            request.state.as_deref().map(str::as_bytes),
+            Some(state.as_bytes())
+        );
 
         let jwe = lab
             .wallet
@@ -405,7 +413,7 @@ async fn served_request_object_is_signed_once_and_never_changes() {
         .server
         .stored_binding(&session.session_id)
         .expect("consumed session is still stored");
-    let (_, nonce, _) = binding_parts(&binding);
+    let (_, nonce, _, _) = binding_parts(&binding);
     assert_eq!(
         decode_json(segments(&first)[JWS_PAYLOAD])["nonce"].as_str(),
         Some(nonce.as_str())

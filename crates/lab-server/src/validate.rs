@@ -46,6 +46,9 @@ pub const SYNTHETIC_CREDENTIAL_QUERY: CredentialQuery<'static> = CredentialQuery
 };
 /// Authorization Response parameter carrying the presentations (OpenID4VP 1.1 §8.1).
 pub(crate) const VP_TOKEN: &str = "vp_token";
+/// Request parameter and response member `state` (OpenID4VP 1.1 §5.2; RFC 6749 §4.1.1,
+/// §4.1.2).
+pub(crate) const RESPONSE_STATE: &str = "state";
 /// DCQL members (OpenID4VP 1.1 §6, §6.1, §6.3, B.3.5).
 pub(crate) const DCQL_CREDENTIALS: &str = "credentials";
 pub(crate) const DCQL_ID: &str = "id";
@@ -111,6 +114,13 @@ pub enum ValidationError {
     /// The plaintext is not a JSON object with unique member names.
     #[error("payload is not a JSON object")]
     NotJsonObject,
+    /// No `state` member, although the session's request carried one (RFC 6749 §4.1.2;
+    /// OpenID4VP 1.1 §14.4.2).
+    #[error("payload has no state")]
+    StateMissing,
+    /// `state` is not a string, or not this session's `state` (§14.4.2).
+    #[error("state does not match the session")]
+    StateMismatch,
     /// No `vp_token` object member (OpenID4VP 1.1 §8.1).
     #[error("payload has no vp_token object")]
     MissingVpToken,
