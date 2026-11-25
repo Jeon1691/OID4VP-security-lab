@@ -18,6 +18,12 @@ use zeroize::Zeroizing;
 /// SHA-256 output length in bytes (the Concat KDF hash length, RFC 7518 §4.6.2 "SHA-256").
 const SHA256_OUTPUT_LEN: usize = 32;
 
+// Fails to compile if sha2's `zeroize` feature is ever dropped from this crate's manifest.
+const _: fn() = || {
+    fn zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+    zeroize_on_drop::<Sha256>();
+};
+
 /// Derives `key_len` bytes from `z`. `algorithm_id`, `apu` and `apv` are the raw Data parts;
 /// this function adds their length prefixes.
 pub(crate) fn concat_kdf(
@@ -31,6 +37,8 @@ pub(crate) fn concat_kdf(
     let rounds = key_len.div_ceil(SHA256_OUTPUT_LEN);
     let mut key = Zeroizing::new(Vec::with_capacity(rounds * SHA256_OUTPUT_LEN));
     for round in 1..=rounds {
+        // sha2's `zeroize` feature (this crate's manifest) wipes the hash state and the block
+        // buffer, which hold Z, when `hash` is consumed by `finalize`.
         let mut hash = Sha256::new();
         hash.update(len32(round));
         hash.update(z);
