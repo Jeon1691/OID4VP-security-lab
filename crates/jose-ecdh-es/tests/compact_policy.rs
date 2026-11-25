@@ -21,6 +21,15 @@ const KID: &str = "verifier-ecdh-es-1";
 const ENC: ContentEncryption = ContentEncryption::A128Gcm;
 /// `Error::EphemeralKeyParameter` value for an `epk` member outside kty/crv/x/y.
 const EPK_UNKNOWN_MEMBER: &str = "(unknown member)";
+/// The member name `kid` with its `i` written as the JSON escape backslash-u-0069 (RFC 8259
+/// §7). Built from `\u{5c}` (a backslash) so the source holds no ambiguous escape sequence.
+const ESCAPED_KID: &str = "k\u{5c}u0069d";
+/// The P-256 field prime p = 2^256 - 2^224 + 2^192 + 2^96 - 1 (SEC 2 §2.4.2 / FIPS 186-5
+/// curve P-256), big-endian.
+const P256_P: [u8; 32] = [
+    0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+];
 /// Segment indices (RFC 7516 §7.1 order).
 const PROTECTED: usize = 0;
 const ENCRYPTED_KEY: usize = 1;
@@ -339,11 +348,29 @@ fn ecdh_es_rejects_duplicate_header_parameter() {
         |epk| format!(r#"{{"alg":"ECDH-ES","alg":"ECDH-ES","enc":"A128GCM","epk":{epk}}}"#),
         |epk| format!(r#"{{"alg":"ECDH-ES","enc":"A128GCM","epk":{epk},"epk":{epk}}}"#),
         // The same member spelled with a JSON escape is still the same name.
-        |epk| format!(r#"{{"alg":"ECDH-ES","enc":"A128GCM","epk":{epk},"kid":"a","kid":"b"}}"#),
+        |epk| {
+            format!(
+                r#"{{"alg":"ECDH-ES","enc":"A128GCM","epk":{epk},"kid":"a","{ESCAPED_KID}":"b"}}"#
+            )
+        },
     ];
     for case in cases {
         assert_eq!(raw_err(case), Error::HeaderJson);
     }
+    // The escaped spelling really is an escape (a backslash, not the letters `kid`) ...
+    assert!(ESCAPED_KID.starts_with("k\\") && ESCAPED_KID != "kid");
+    // ... and on its own decodes to `kid`, so the last case above is a real duplicate.
+    let (sk, compact) = sealed(|epk| {
+        format!(r#"{{"alg":"ECDH-ES","enc":"A128GCM","epk":{epk},"{ESCAPED_KID}":"b"}}"#)
+    });
+    assert!(
+        String::from_utf8(b64(&split(&compact)[PROTECTED]))
+            .expect("utf8")
+            .contains(ESCAPED_KID)
+    );
+    let jwe = CompactJwe::parse(&compact).expect("escaped member name parses");
+    assert_eq!(jwe.header().kid().map(|k| k.as_str()), Some("b"));
+    assert_eq!(jwe.open(&sk).expect("opens"), PLAINTEXT);
 }
 
 #[test]
@@ -391,8 +418,27 @@ fn ecdh_es_rejects_off_curve_epk() {
         e.insert("y".into(), b64e(&y).into());
     });
     assert_eq!(err, Error::EphemeralKeyPoint);
-    // (0, 0) is not on P-256 (b != 0); all-ones coordinates are >= p.
-    for (x, y) in [([0u8; 32], [0u8; 32]), ([0xff; 32], [0xff; 32])] {
+    // Classic invalid-curve points (RFC 8725 §2.5): points of order 2 (y = 0) on curves
+    // y^2 = x^3 - 3x + b' that share P-256's a = -3 but not its b. ECDH with them would leak the
+    // static key modulo 2 if the point were not validated.
+    //   (0, 0)   lies on b' = 0;
+    //   (1, 0)   lies on b' = 2   (1 - 3 + 2 = 0);
+    //   (p-1, 0) lies on b' = -2  (-1 + 3 - 2 = 0).
+    let p_minus_1 = {
+        let mut v = P256_P;
+        v[31] -= 1;
+        v
+    };
+    let mut one = [0u8; 32];
+    one[31] = 1;
+    // Coordinates equal to p, or all ones (> p), are not field elements at all.
+    for (x, y) in [
+        ([0u8; 32], [0u8; 32]),
+        (one, [0u8; 32]),
+        (p_minus_1, [0u8; 32]),
+        (P256_P, [0u8; 32]),
+        ([0xff; 32], [0xff; 32]),
+    ] {
         let err = epk_edited_err(|e| {
             e.insert("x".into(), b64e(&x).into());
             e.insert("y".into(), b64e(&y).into());
@@ -536,8 +582,9 @@ fn ecdh_es_rejects_bad_base64url_segments() {
 
 #[test]
 fn ecdh_es_rejects_equal_or_malformed_apu_apv() {
-    // RFC 7518 §4.6.2: "The "apu" and "apv" values MUST be distinct, when used."
-    for v in [b64e(b"same"), String::new()] {
+    // RFC 7518 §4.6.2: "The "apu" and "apv" values MUST be distinct, when used." Compared on
+    // the decoded bytes that enter the KDF.
+    for v in [b64e(b"same"), b64e(&[0]), b64e(&[0xff; 64])] {
         assert_eq!(
             edited_err(|h| {
                 h.insert("apu".into(), v.clone().into());
@@ -546,8 +593,25 @@ fn ecdh_es_rejects_equal_or_malformed_apu_apv() {
             Error::HeaderParameterValue("apv")
         );
     }
+    // Empty is refused on its own, alone or next to a non-empty partner (lab policy: it would
+    // be a second spelling of "absent").
+    for (apu, apv) in [("", None), ("", Some(b64e(b"v")))] {
+        assert_eq!(
+            edited_err(|h| {
+                h.insert("apu".into(), apu.into());
+                if let Some(apv) = apv {
+                    h.insert("apv".into(), apv.into());
+                }
+            }),
+            Error::HeaderParameterValue("apu")
+        );
+    }
+    assert_eq!(
+        edited_err(|h| _ = h.insert("apv".into(), "".into())),
+        Error::HeaderParameterValue("apv")
+    );
     for name in ["apu", "apv"] {
-        for bad in ["QWxpY2U=", "QWxp Y2U", "QWxpY2U+", "QWxpY2V"] {
+        for bad in ["", "QWxpY2U=", "QWxp Y2U", "QWxpY2U+", "QWxpY2V"] {
             assert_eq!(
                 edited_err(|h| _ = h.insert(name.into(), bad.into())),
                 Error::HeaderParameterValue(name),
