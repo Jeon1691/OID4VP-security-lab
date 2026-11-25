@@ -162,7 +162,7 @@ None of these is in scope for G7. Each needs its own decision record.
    *Update 2026-11-25:* the RustCrypto codec exists (`crates/jose-ecdh-es`), and a research
    route uses it: `POST /lab/v1/response/ecdh-es`, one ECDH-ES P-256 key advertised with
    `alg` `ECDH-ES` and `encrypted_response_enc_values_supported` `["A128GCM","A256GCM"]`
-   (`docs/adr/0001-ecdh-es-research-route.md`). It is research mode only, behind the
+   (`docs/adr/0001-ecdh-es-research-route.md`). It is research mode only, opt-in per server, behind the
    non-default lab-server feature `ecdh-es-research`, absent from the binary, and refuses
    HPKE-0 JWEs as the HPKE routes refuse ECDH-ES ones (`verifier_without_sealing` now checks
    the feature's build instead of pinning jose-ecdh-es out). It exists to observe #792 C3/C9;
