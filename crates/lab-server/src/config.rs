@@ -98,6 +98,11 @@ pub enum RouteKind {
     Unique,
     /// `POST /lab/v1/response/shared`: one route for many sessions (research mode only).
     Shared,
+    /// `POST /lab/v1/response/ecdh-es`: the OpenID4VP 1.0-style ECDH-ES route, one shared key
+    /// and `kid` for every session on it, correlated by the decrypted `state` (research mode
+    /// only, `ecdh-es-research` feature; docs/adr/0001-ecdh-es-research-route.md).
+    #[cfg(feature = "ecdh-es-research")]
+    EcdhEs,
 }
 
 /// Strategy of the shared research route. Fixed when the server starts, never per request.
@@ -124,10 +129,11 @@ impl SharedRouteStrategy {
 /// Server mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
-    /// Default: unique-uri routes only; the shared route does not exist (404).
+    /// Default: unique-uri routes only; the shared route (and, with `ecdh-es-research`, the
+    /// ECDH-ES route) does not exist (404).
     Hardened,
-    /// Adds the shared route with the given strategy. Unique-uri routes keep working as in
-    /// hardened mode.
+    /// Adds the shared route with the given strategy, and with the `ecdh-es-research` feature
+    /// the ECDH-ES route. Unique-uri routes keep working as in hardened mode.
     Research(SharedRouteStrategy),
 }
 
