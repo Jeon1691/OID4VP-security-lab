@@ -21,6 +21,10 @@
 //! | `{ns}:tr:<route>` / `{ns}:trk:<route>:<kid>` | hash | `consumed` / `expired` counts of held terminal sessions |
 //! | `{ns}:purge` | zset | terminal ids, score = when purge may delete them (`0` for expired, `exp + retention` for consumed) |
 //!
+//! Records written before `b4` existed have no `state` and fail closed on read
+//! (`StoreUnavailable`); there is no migration, so such a deployment starts on a fresh
+//! namespace.
+//!
 //! These mirror the indexes of `MemoryRegistry` one to one. Timestamps are absolute Unix
 //! milliseconds, the unit `PEXPIREAT` takes. Redis-side key expiry is deliberately **not** used
 //! for session state: it would skip the `Expired` state (a late response would read as unknown

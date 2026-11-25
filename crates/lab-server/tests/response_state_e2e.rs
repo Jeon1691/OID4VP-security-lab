@@ -32,7 +32,7 @@ use std::collections::HashSet;
 
 use lab_server::wallet_sim::{
     CreatedSession, PresentationTamper, RequestObject, SealOptions, StateChoice, SyntheticIssuer,
-    WalletError, WalletSim,
+    WalletSim,
 };
 use lab_server::{
     CommitResult, CryptoResult, EvidenceRecord, GENERIC_REJECTION_BODY, LabConfig, LabServer,
@@ -60,6 +60,9 @@ const REUSED_NONCE: &str = "lab-reused-nonce";
 const NOT_URL_SAFE_STATE: &str = "a b";
 /// One character, repeated to build research states at and beyond the length cap.
 const STATE_CHAR: &str = "s";
+/// Session-creation endpoint (lab infrastructure) and the media type of its body.
+const SESSIONS_PATH: &str = "/lab/v1/sessions";
+const JSON: &str = "application/json";
 
 /// Synthetic SpruceID fixture key that signs every request object (its did:key is the default
 /// `client_id`), and the synthetic SD-JWT VC issuer (private for the wallet, public for the
@@ -430,22 +433,24 @@ async fn reused_nonce_with_fresh_state_selects_one_session_and_refuses_a_replay(
 /// state at the cap is signed, echoed and commits.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn research_state_knob_is_research_only_bounded_and_charset_checked() {
-    let refused = |result: Result<CreatedSession, WalletError>| match result {
-        Err(WalletError::Status(BAD_REQUEST)) => {}
-        other => panic!("fixed state accepted: {other:?}"),
-    };
-    let hardened = Lab::start(Mode::Hardened).await;
-    refused(
-        hardened
+    // Each refusal must be the one its input calls for, not just any 400.
+    async fn refused(lab: &Lab, route: &str, state: &str, want: &str) {
+        let body = json!({ "route": route, "state": state }).to_string();
+        let reply = lab
             .wallet
-            .create_research_session(
-                &hardened.server.base_url(),
-                RouteKind::Unique,
-                None,
-                Some(STATE_CHAR),
+            .post_raw(
+                &format!("{}{SESSIONS_PATH}", lab.server.base_url()),
+                JSON,
+                body.into_bytes(),
             )
-            .await,
-    );
+            .await
+            .expect("sessions endpoint answers");
+        assert_eq!(reply.status, BAD_REQUEST, "{state:?}");
+        let answer: serde_json::Value = serde_json::from_slice(&reply.body).expect("JSON body");
+        assert_eq!(answer["error_description"], want, "{state:?}");
+    }
+    let hardened = Lab::start(Mode::Hardened).await;
+    refused(&hardened, "unique", STATE_CHAR, "unsupported member").await;
     hardened.server.shutdown().await;
 
     let lab = Lab::start(shared_key(PAIR)).await;
@@ -460,12 +465,8 @@ async fn research_state_knob_is_research_only_bounded_and_charset_checked() {
     lab.honest_commits(&session).await;
 
     let too_long = STATE_CHAR.repeat(MAX_RESEARCH_STATE_LEN + 1);
-    for bad in [too_long.as_str(), NOT_URL_SAFE_STATE, ""] {
-        refused(
-            lab.wallet
-                .create_research_session(&base, RouteKind::Shared, None, Some(bad))
-                .await,
-        );
-    }
+    refused(&lab, "shared", &too_long, "state too long").await;
+    refused(&lab, "shared", NOT_URL_SAFE_STATE, "invalid state").await;
+    refused(&lab, "shared", "", "invalid state").await;
     lab.server.shutdown().await;
 }
