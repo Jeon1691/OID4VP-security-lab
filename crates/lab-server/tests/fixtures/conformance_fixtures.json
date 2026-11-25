@@ -5,6 +5,7 @@
     "host.docker.internal",
     "localhost"
   ],
+  "wildcard_leaf_san": "*.docker.internal",
   "client_id_x509_san_dns": "x509_san_dns:host.docker.internal",
   "client_id_x509_hash": "x509_hash:u84GnwYsxIzaMIop_GNsNmSPi-KqkDE301hxQA6_HJA",
   "leaf_validity": [
@@ -19,6 +20,8 @@
     "conformance_ca.pem": "e29114f7a872f9a64faf0a6e1c0d252ecbb805be4c24dae159a947cf901c9f4e",
     "conformance_leaf.pem": "ffa4cb72b4c39f59adb2625b724082998d5fcf7d6a841674186bbfbc270e5d3a",
     "conformance_leaf.key.pem": "84f7d691840f657b9075a6646548d21984fa503854be610c1968f6b29d15e858",
-    "conformance_leaf.jwk": "541484aca71c8174f82a40e83ace9cfbcfa69ce4b3e273d369e439accfc3ab96"
+    "conformance_leaf.jwk": "541484aca71c8174f82a40e83ace9cfbcfa69ce4b3e273d369e439accfc3ab96",
+    "conformance_wildcard_leaf.pem": "a0baf472d91a11f2f6da12d15ecd4f0fca520522d2267b48d402ce00f6db395c",
+    "conformance_foreign_ca.pem": "52a9848b1716a1bdf3f277c7302a1cbfd5cfa043a165b87bd5d40f6f33a96eb7"
   }
 }
