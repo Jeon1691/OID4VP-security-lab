@@ -12,11 +12,20 @@ publish.workspace = true
 # sealing code. Tests enable it through the self dev-dependency below.
 # It also verifies signed Request Objects with ssi (did:key resolution, ES256), which is
 # therefore never in the default build either.
-wallet-sim = ["dep:reqwest", "dep:ssi", "jose-hpke/test-support"]
+# With `ecdh-es-research` also on, it seals ECDH-ES responses too (`jose-ecdh-es?/test-support`:
+# the `?` adds the feature only where jose-ecdh-es is already a dependency, so `wallet-sim` alone
+# never pulls jose-ecdh-es in).
+wallet-sim = ["dep:reqwest", "dep:ssi", "jose-hpke/test-support", "jose-ecdh-es?/test-support"]
 # Research instrumentation (`LabServer::pause_decryptions` / `parked_trials`): an in-process
 # lever that halts decryption, for deterministic race and shutdown scenarios. Never in the
 # default (Verifier) build; tests enable it through the self dev-dependency.
 lab-instrumentation = []
+# OpenID4VP 1.0-style ECDH-ES research route (docs/adr/0001-ecdh-es-research-route.md):
+# `POST /lab/v1/response/ecdh-es`, one ECDH-ES P-256 key and `kid` shared by every session on it,
+# served in research mode only and never a fallback for the HPKE-0 routes. Off by default, so the
+# default (Verifier) build and the binary contain no ECDH-ES code; it enables jose-ecdh-es
+# without `test-support` (opening only). Tests enable it through the self dev-dependency.
+ecdh-es-research = ["dep:jose-ecdh-es"]
 
 [dependencies]
 axum = { workspace = true }
@@ -26,6 +35,7 @@ form_urlencoded = { workspace = true }
 getrandom = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
+jose-ecdh-es = { workspace = true, optional = true }
 jose-hpke = { workspace = true }
 p256 = { workspace = true }
 protocol-model = { workspace = true }
@@ -46,12 +56,12 @@ async-trait = { workspace = true }
 axum = { workspace = true }
 base64 = { workspace = true }
 form_urlencoded = { workspace = true }
-# Interop test only (tests/ecdh_es_spruce_jwe_interop.rs): opens SpruceID's ECDH-ES responses.
-# No `test-support`; the Verifier build does not depend on jose-ecdh-es at all.
+# Interop test (tests/ecdh_es_spruce_jwe_interop.rs) opens SpruceID's ECDH-ES responses with it
+# directly. No `test-support` here; the default Verifier build does not depend on jose-ecdh-es.
 jose-ecdh-es = { workspace = true }
 josekit = { workspace = true }
 # Self dev-dependency: integration tests drive the server with the wallet simulator.
-lab-server = { path = ".", features = ["wallet-sim", "lab-instrumentation"] }
+lab-server = { path = ".", features = ["wallet-sim", "lab-instrumentation", "ecdh-es-research"] }
 openid4vp = { workspace = true }
 p256-spruce = { workspace = true }
 reqwest = { workspace = true }

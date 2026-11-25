@@ -46,8 +46,13 @@ pub enum AdmissionError {
 pub enum Rejection {
     /// Admission control (body, media type, form).
     Admission(AdmissionError),
-    /// [`jose_hpke::CompactJwe::parse`] refused the JWE (structure or header policy).
+    /// [`jose_hpke::CompactJwe::parse`] refused the JWE (structure or header policy). On the
+    /// HPKE-0 routes every `alg` but `HPKE-0` ends here, `ECDH-ES` included: no fallback.
     JweParse(jose_hpke::Error),
+    /// ECDH-ES research route: `jose_ecdh_es::CompactJwe::parse` refused the JWE. Every `alg`
+    /// but `ECDH-ES` ends here, `HPKE-0` included: the route never falls back either.
+    #[cfg(feature = "ecdh-es-research")]
+    EcdhEsJweParse(jose_ecdh_es::Error),
     /// The JWE protected header has no `kid`. Every lab key is advertised with one and
     /// OpenID4VP 1.1 §8.3 ties the JWE `kid` to the chosen JWK, so every route requires it.
     MissingKid,
@@ -80,7 +85,7 @@ pub enum Rejection {
     Claim(ClaimError),
 }
 
-/// HPKE outcome over all candidates.
+/// Decryption outcome over all candidates (HPKE, or ECDH-ES on that research route).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CryptoResult {
     /// No HPKE open was attempted.
@@ -89,7 +94,8 @@ pub enum CryptoResult {
     NoneOpened,
     /// This many candidates opened.
     Opened {
-        /// Candidates whose key and `session_info` opened the JWE.
+        /// Candidates whose key and `session_info` (HPKE) or key alone (ECDH-ES) opened the
+        /// JWE.
         opened: usize,
     },
 }
@@ -130,7 +136,9 @@ pub struct EvidenceRecord {
     pub strategy: ResolutionStrategy,
     /// Candidates `resolve` returned (0 when rejected earlier).
     pub candidate_count: usize,
-    /// HPKE open attempts made for this request.
+    /// Decryption attempts made for this request: HPKE opens, or on the ECDH-ES research route
+    /// ECDH-ES opens (one per live session on the route; `crypto_result` then shows how many
+    /// opened).
     pub hpke_attempts: usize,
     /// Wall time of the trial on the blocking pool: every HPKE open and the validation of
     /// each opened plaintext, without the wait for a decryption slot. Zero when no trial ran.

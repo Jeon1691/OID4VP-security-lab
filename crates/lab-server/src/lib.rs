@@ -13,6 +13,7 @@
 //! | `GET /lab/v1/requests/{id}` | Signed Request Object (JAR), body = compact JWS, `Content-Type: application/oauth-authz-req+jwt`. Payload: exact `client_id`, `nonce`, `state` (fresh per session, 128 random bits as base64url in the §5.2 charset, unless a research session fixed it), `response_uri`, `response_mode=direct_post.jwt`, `aud`, `dcql_query` (one `dc+sd-jwt` query for [`SYNTHETIC_CREDENTIAL_VCT`] and [`REQUESTED_CLAIMS`]), `client_metadata.jwks` with the HPKE-0 key (`alg` `HPKE-0`, `kid`) |
 //! | `POST /lab/v1/response/{token}` | Unique response_uri (unique-uri strategy) |
 //! | `POST /lab/v1/response/shared` | Shared response_uri, research mode only (404 in hardened mode) |
+//! | `POST /lab/v1/response/ecdh-es` | `ecdh-es-research` feature only: the OpenID4VP 1.0-style ECDH-ES route, research mode only (404 in hardened mode, which also refuses `{"route": "ecdh_es_shared"}`). One ECDH-ES P-256 key and `kid` for every session on it; its Request Objects advertise that key (`alg` `ECDH-ES`, `use` `enc`, `kid`) and `encrypted_response_enc_values_supported` `["A128GCM","A256GCM"]` instead of the HPKE-0 key (docs/adr/0001-ecdh-es-research-route.md) |
 //! | `GET /lab/v1/results/{result_token}` | `pending` / `consumed` (with the committed `credential`: requested claims, `vct`, holder key thumbprint, disclosed claim names) / `expired`. The request id does not unlock it |
 //! | `GET /health` | Liveness; exempt from the in-flight limit and request timeout |
 //!
@@ -60,7 +61,9 @@
 //!   ([`SharedRouteStrategy`]): `BoundedTrial(budget)` with one key and `kid` shared by every
 //!   session on the route (the OIDF #792 shape), or `UniqueKid` with a key and `kid` per
 //!   session. Shared-route sessions live in a separate `RoutePolicy::Shared` registry, so
-//!   unique-uri sessions keep the hardened guarantees.
+//!   unique-uri sessions keep the hardened guarantees. With the `ecdh-es-research` feature it
+//!   also serves the ECDH-ES route, whose sessions live in a third registry with their own
+//!   shared ECDH-ES key; it is a separate route, never a fallback for the HPKE-0 ones.
 //!
 //! Every mode refuses a non-loopback bind before binding (`IpAddr::is_loopback`: `127.0.0.0/8`
 //! and `::1`; `0.0.0.0`, `::` and IPv4-mapped `::ffff:127.0.0.1` are refused).
@@ -94,6 +97,17 @@
 //!    because ECDSA signatures are malleable) did, even inside a fresh JWE
 //!    (`Rejection::HolderProofReplay`); see [`MAX_REMEMBERED_DIGESTS`].
 //! 10. `claim` with that digest as the response digest.
+//!
+//! The ECDH-ES research route (`ecdh-es-research`) runs the OpenID4VP 1.0 correlation order
+//! instead (module `ecdh_es`): steps 1-3 as above; `jose_ecdh_es::CompactJwe::parse` (every
+//! `alg` but `ECDH-ES`, `HPKE-0` included, is `Rejection::EcdhEsJweParse`); `kid` required;
+//! resolve every live session on the route (bounded trial, at most 256: they share route token,
+//! `kid` and key, so this selects nothing); open with each one's key, i.e. the route's key
+//! alone, which opens for all of them or none (recorded as `hpke_attempts` / `opened`); then
+//! the decrypted `state` selects: `validate` checks it first, a session it does not name is
+//! skipped, a `state` that names no live session is `ValidationError::StateUnknown` (missing:
+//! `StateMissing`), and holder binding runs for the named session only; then steps 9-10. The
+//! HPKE-0 routes, conversely, refuse an `ECDH-ES` JWE at step 4 (`Rejection::JweParse`).
 //!
 //! Around every route except `/health`: [`LabConfig::max_in_flight_requests`] (503 above it,
 //! no queue) and [`LabConfig::request_timeout`] (408). Below that, the listener accepts at
@@ -150,6 +164,13 @@
 //!   response is credited to. That is the same power a sender already has with fresh nonces,
 //!   where the `session_info` it seals with decides; not a regression. Holder binding and the
 //!   replay guard still apply to the session it picked.
+//! * ECDH-ES research route (`ecdh-es-research`): no `session_info` exists, so the shared key
+//!   opens a response for every session on the route, and the sender-chosen `state` (readable
+//!   in every Request Object) alone decides which session it is credited to. `state` is a
+//!   correlator, not authentication: A's holder proof sent with B's `state` is refused by B's
+//!   KB-JWT nonce binding, and a reused nonce and `state` (research knobs) is refused by the
+//!   replay guard or as `Ambiguous`, as on the shared HPKE-0 route. Every POST costs one ECDH
+//!   per live session on the route. Research mode only; the default build has no such route.
 //! * Results are readable only with the result token, so the request id (visible to the
 //!   wallet and anyone who sees the `request_uri`) does not reveal the outcome.
 //! * Consumed records retain only the bounded [`ValidatedResponse`], never decrypted input or
@@ -200,13 +221,20 @@
 //! `wallet-sim` enables `wallet_sim` and with it `jose-hpke/test-support` (sealing), `ssi`
 //! (did:key resolution and ES256 verification of Request Objects), the synthetic SD-JWT VC
 //! issuer and the holder-side KB-JWT signing; `lab-instrumentation`
-//! enables the decryption pause lever and `LabServer::stored_binding`. The default build, including the
-//! `lab-server` binary, has neither; the gate step `verifier_without_sealing` checks it. Release artifacts must come from a plain
+//! enables the decryption pause lever and `LabServer::stored_binding`; `ecdh-es-research`
+//! enables the ECDH-ES research route and with it `jose-ecdh-es` (opening only; with
+//! `wallet-sim` also its sealing `test-support`). The default build, including the
+//! `lab-server` binary, has none of them and does not depend on `jose-ecdh-es`; the gate step
+//! `verifier_without_sealing` checks it, and that the `ecdh-es-research` build reaches
+//! `jose-ecdh-es` without `test-support`. The binary has no flag for the ECDH-ES route; it is
+//! exercised by tests (`tests/ecdh_es_research_route.rs`). Release artifacts must come from a plain
 //! `cargo build -p lab-server` (`--release`): a build that also compiles test targets (e.g.
 //! `cargo build --workspace --all-targets`) unifies the self dev-dependency's `wallet-sim`
 //! feature into the library the binary links.
 
 mod config;
+#[cfg(feature = "ecdh-es-research")]
+mod ecdh_es;
 mod evidence;
 mod jar;
 mod jose;

@@ -139,6 +139,13 @@ pub enum ValidationError {
     /// `state` is not a string, or not this session's `state` (§14.4.2).
     #[error("state does not match the session")]
     StateMismatch,
+    /// ECDH-ES research route: the decrypted `state` names no live session on the route (not a
+    /// string, unknown, consumed or another route's). Under ECDH-ES the key opens the response
+    /// for every session, so `state` is the only selector and this is where an unmatched one
+    /// ends (OpenID4VP 1.0 correlation; docs/adr/0001-ecdh-es-research-route.md).
+    #[cfg(feature = "ecdh-es-research")]
+    #[error("state names no live session on the route")]
+    StateUnknown,
     /// No `vp_token` object member (OpenID4VP 1.1 §8.1).
     #[error("payload has no vp_token object")]
     MissingVpToken,

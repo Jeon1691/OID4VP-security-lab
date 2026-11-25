@@ -130,16 +130,18 @@ impl ReplayGuard {
     }
 }
 
-/// Result of one HPKE trial over a resolve's candidates.
-struct Trial {
-    attempts: usize,
-    opened: usize,
+/// Result of one decryption trial over a resolve's candidates (HPKE, or ECDH-ES on that
+/// research route).
+#[derive(Default)]
+pub(crate) struct Trial {
+    pub(crate) attempts: usize,
+    pub(crate) opened: usize,
     /// Candidates that validated (all are tried; only the first result is kept).
-    validated: usize,
+    pub(crate) validated: usize,
     /// Index and result of the first validating candidate.
-    first: Option<(usize, validate::Validated)>,
+    pub(crate) first: Option<(usize, validate::Validated)>,
     /// First validation error among opened candidates.
-    first_error: Option<ValidationError>,
+    pub(crate) first_error: Option<ValidationError>,
 }
 
 /// The one body answered for every resolve, parse, decrypt, validate and claim failure, so the
@@ -150,7 +152,7 @@ pub const GENERIC_REJECTION_BODY: &str = r#"{"error":"invalid_request"}"#;
 /// Path prefixes and routes (lab infrastructure, not standard OpenID4VP endpoints).
 const SESSIONS_PATH: &str = "/lab/v1/sessions";
 const REQUESTS_PATH: &str = "/lab/v1/requests";
-const RESPONSE_PATH: &str = "/lab/v1/response";
+pub(crate) const RESPONSE_PATH: &str = "/lab/v1/response";
 const RESULTS_PATH: &str = "/lab/v1/results";
 /// Last path segment of the shared research route. Never a valid route token (wrong length),
 /// so it cannot collide with a unique route.
@@ -174,23 +176,46 @@ const STATE_BYTES: usize = 16;
 /// Random bytes in a session id and in a per-session `kid`: 128 bits, so ids never collide
 /// and unique-kid resolution is never ambiguous by accident.
 const SESSION_ID_BYTES: usize = 16;
-const KID_BYTES: usize = 16;
+pub(crate) const KID_BYTES: usize = 16;
 
 /// JWK members for the advertised HPKE-0 key (RFC 7517 / RFC 7518 §6.2, draft-22 §5.1).
 pub(crate) const JWK_KTY_EC: &str = "EC";
 pub(crate) const JWK_CRV_P256: &str = "P-256";
-const JWK_USE_ENC: &str = "enc";
+pub(crate) const JWK_USE_ENC: &str = "enc";
 /// SEC1 uncompressed point: `0x04 || x || y` with 32-byte P-256 coordinates (SEC1 §2.3.3).
 pub(crate) const SEC1_UNCOMPRESSED_TAG: u8 = 0x04;
 pub(crate) const P256_COORDINATE_BYTES: usize = 32;
 /// JWT NumericDates are whole seconds (RFC 7519 §2); session-core timestamps are milliseconds.
-const MILLIS_PER_SECOND: u64 = 1000;
+pub(crate) const MILLIS_PER_SECOND: u64 = 1000;
 /// OpenID4VP `response_type` of every lab request (§5.2).
 const RESPONSE_TYPE_VP_TOKEN: &str = "vp_token";
 
-/// Private-key handle stored per session; shared across sessions in bounded-trial mode.
-type SessionKey = Arc<RecipientPrivateKey>;
-type Registry = MemoryRegistry<SessionKey, ValidatedResponse>;
+/// A session's decryption key. Each route stores one kind; a candidate whose key is not of the
+/// kind its route decrypts with never opens (fail closed), so no route can fall back to the
+/// other algorithm.
+pub(crate) enum LabKey {
+    /// HPKE-0 (`alg` `HPKE-0`): the unique and shared routes.
+    Hpke(RecipientPrivateKey),
+    /// ECDH-ES (`alg` `ECDH-ES`): the research route of `ecdh-es-research` only.
+    #[cfg(feature = "ecdh-es-research")]
+    EcdhEs(jose_ecdh_es::RecipientPrivateKey),
+}
+
+impl LabKey {
+    /// The HPKE-0 key, if this is one.
+    const fn hpke(&self) -> Option<&RecipientPrivateKey> {
+        match self {
+            Self::Hpke(key) => Some(key),
+            #[cfg(feature = "ecdh-es-research")]
+            Self::EcdhEs(_) => None,
+        }
+    }
+}
+
+/// Private-key handle stored per session; shared across sessions in bounded-trial mode and on
+/// the ECDH-ES research route.
+pub(crate) type SessionKey = Arc<LabKey>;
+pub(crate) type Registry = MemoryRegistry<SessionKey, ValidatedResponse>;
 
 /// The shared research route.
 struct SharedRoute {
@@ -227,19 +252,22 @@ struct Limits {
     timeout: Duration,
 }
 
-struct AppState {
+pub(crate) struct AppState {
     mode: Mode,
     client_id: ClientIdWire,
     /// Signs each request object once, at issue time.
     signer: RequestSigner,
     /// Verifies the issuer signature of every presented SD-JWT VC.
-    trusted_issuer: TrustedIssuerKey,
+    pub(crate) trusted_issuer: TrustedIssuerKey,
     session_ttl: Duration,
     base_url: String,
     /// Unique-uri sessions; `RoutePolicy::UniquePerSession`, in every mode.
     unique: Registry,
     /// Research mode only; `RoutePolicy::Shared`.
     shared: Option<SharedRoute>,
+    /// Research mode only: the ECDH-ES route (`RoutePolicy::Shared`, one key and `kid`).
+    #[cfg(feature = "ecdh-es-research")]
+    pub(crate) ecdh_es: Option<crate::ecdh_es::EcdhEsRoute>,
     /// Request objects and result tokens of held sessions. Entries are added only after the
     /// registry accepted the session (so its capacity bounds the maps) and pruned by the sweep
     /// after a purge.
@@ -265,6 +293,8 @@ impl AppState {
         match route {
             RouteKind::Unique => Some(&self.unique),
             RouteKind::Shared => self.shared.as_ref().map(|s| &s.registry),
+            #[cfg(feature = "ecdh-es-research")]
+            RouteKind::EcdhEs => self.ecdh_es.as_ref().map(|e| &e.registry),
         }
     }
 
@@ -274,12 +304,14 @@ impl AppState {
         self.issued.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Expires and purges both registries, then drops request objects of purged sessions.
+    /// Expires and purges every registry, then drops request objects of purged sessions.
     /// A store failure just skips the round; the next tick retries.
     fn sweep(&self) {
         for registry in [
             Some(&self.unique),
             self.shared.as_ref().map(|s| &s.registry),
+            #[cfg(feature = "ecdh-es-research")]
+            self.ecdh_es.as_ref().map(|e| &e.registry),
         ]
         .into_iter()
         .flatten()
@@ -422,7 +454,7 @@ impl LabServer {
                     SharedRouteStrategy::BoundedTrial(_) => {
                         let kid = KeyId::new(random_b64(KID_BYTES).ok_or(StartError::Rng)?)
                             .map_err(|_| StartError::Rng)?;
-                        Some((Arc::new(generate_key()), kid))
+                        Some((hpke_key(), kid))
                     }
                     SharedRouteStrategy::UniqueKid => None,
                 };
@@ -445,6 +477,11 @@ impl LabServer {
             base_url: base_url.clone(),
             unique: registry(RoutePolicy::UniquePerSession),
             shared,
+            #[cfg(feature = "ecdh-es-research")]
+            ecdh_es: match config.mode {
+                Mode::Hardened => None,
+                Mode::Research(_) => Some(crate::ecdh_es::EcdhEsRoute::new()?),
+            },
             issued: Mutex::new(Issued::default()),
             decryptions: Arc::new(Semaphore::new(config.max_concurrent_decryptions)),
             #[cfg(feature = "lab-instrumentation")]
@@ -651,12 +688,14 @@ fn registry(route_policy: RoutePolicy) -> Registry {
 
 /// A fresh HPKE-0 key pair from the OS CSPRNG. `UnwrapErr` panics if the OS RNG fails, which
 /// fails closed (no key is ever made from bad randomness).
-fn generate_key() -> RecipientPrivateKey {
-    RecipientPrivateKey::generate(&mut UnwrapErr(getrandom::SysRng))
+fn hpke_key() -> SessionKey {
+    Arc::new(LabKey::Hpke(RecipientPrivateKey::generate(&mut UnwrapErr(
+        getrandom::SysRng,
+    ))))
 }
 
 /// `bytes` random bytes from the OS CSPRNG as unpadded base64url; `None` if the RNG fails.
-fn random_b64(bytes: usize) -> Option<String> {
+pub(crate) fn random_b64(bytes: usize) -> Option<String> {
     let mut buf = vec![0u8; bytes];
     getrandom::fill(&mut buf).ok()?;
     Some(URL_SAFE_NO_PAD.encode(buf))
@@ -673,6 +712,13 @@ fn router(state: Arc<AppState>, limits: Arc<Limits>) -> Router {
         app = app.route(
             &format!("{RESPONSE_PATH}/{SHARED_SEGMENT}"),
             post(post_shared),
+        );
+    }
+    #[cfg(feature = "ecdh-es-research")]
+    if state.ecdh_es.is_some() {
+        app = app.route(
+            &format!("{RESPONSE_PATH}/{}", crate::ecdh_es::ECDH_ES_SEGMENT),
+            post(crate::ecdh_es::post_ecdh_es),
         );
     }
     let limited = app
@@ -716,7 +762,8 @@ async fn health() -> Response {
 
 /// `POST /lab/v1/sessions` with an optional JSON body `{"route": "unique"|"shared",
 /// "nonce": "...", "state": "..."}`. `route` defaults to `unique`; `shared`, `nonce` and
-/// `state` (caller-chosen values, to model a Verifier that reuses them) are research-mode only.
+/// `state` (caller-chosen values, to model a Verifier that reuses them) are research-mode only,
+/// and so is `"route": "ecdh_es_shared"` (the ECDH-ES route, `ecdh-es-research` builds only).
 async fn create_session(State(state): State<Arc<AppState>>, body: Bytes) -> Response {
     let (route, fixed) = match parse_create(&state, &body) {
         Ok(v) => v,
@@ -752,6 +799,10 @@ fn parse_create(state: &AppState, body: &[u8]) -> Result<(RouteKind, FixedValues
         match (name.as_str(), value.as_str()) {
             ("route", Some("unique")) => route = RouteKind::Unique,
             ("route", Some("shared")) if research => route = RouteKind::Shared,
+            #[cfg(feature = "ecdh-es-research")]
+            ("route", Some(crate::ecdh_es::ECDH_ES_ROUTE_NAME)) if research => {
+                route = RouteKind::EcdhEs;
+            }
             ("route", _) => return Err("unsupported route"),
             (REQUEST_NONCE, n) if research => {
                 let n = n.ok_or("invalid nonce")?;
@@ -799,12 +850,29 @@ async fn issue(
             let (key, kid) = match &shared.shared_key {
                 Some((key, kid)) => (Arc::clone(key), kid.clone()),
                 None => (
-                    Arc::new(generate_key()),
+                    hpke_key(),
                     KeyId::new(random(KID_BYTES)?).map_err(|_| fail())?,
                 ),
             };
             let uri = format!("{}{RESPONSE_PATH}/{SHARED_SEGMENT}", state.base_url);
             (&shared.registry, shared.token.clone(), uri, key, kid)
+        }
+        #[cfg(feature = "ecdh-es-research")]
+        (RouteKind::EcdhEs, _) => {
+            // `parse_create` admits this route in research mode only, where it always exists.
+            let ecdh_es = state.ecdh_es.as_ref().ok_or_else(fail)?;
+            let uri = format!(
+                "{}{RESPONSE_PATH}/{}",
+                state.base_url,
+                crate::ecdh_es::ECDH_ES_SEGMENT
+            );
+            (
+                &ecdh_es.registry,
+                ecdh_es.token.clone(),
+                uri,
+                Arc::clone(&ecdh_es.key),
+                ecdh_es.kid.clone(),
+            )
         }
         _ => {
             let token = RouteToken::generate().map_err(|_| fail())?;
@@ -814,7 +882,7 @@ async fn issue(
                 token.to_url_segment()
             );
             let kid = KeyId::new(random(KID_BYTES)?).map_err(|_| fail())?;
-            (&state.unique, token, uri, Arc::new(generate_key()), kid)
+            (&state.unique, token, uri, hpke_key(), kid)
         }
     };
     let response_uri = ResponseUriWire::new(response_uri).map_err(|_| fail())?;
@@ -847,7 +915,7 @@ async fn issue(
     // published below only once signed; `request_uri` serves these bytes unchanged.
     let lifetime = Lifetime::for_session(issued_at, stored.expires_at());
     let request_object = state.signer.sign(
-        request_object(stored.binding(), &key, &kid, lifetime)
+        request_object(stored.binding(), client_metadata(&key, &kid), lifetime)
             .to_string()
             .as_bytes(),
     );
@@ -861,6 +929,8 @@ async fn issue(
     let route_name = match route {
         RouteKind::Unique => "unique",
         RouteKind::Shared => "shared",
+        #[cfg(feature = "ecdh-es-research")]
+        RouteKind::EcdhEs => crate::ecdh_es::ECDH_ES_ROUTE_NAME,
     };
     // `client_id` is what the Authorization Request carries next to `request_uri`; the Request
     // Object's `client_id` must equal it (OpenID4VP 1.1 §5.10.1).
@@ -905,17 +975,22 @@ impl Lifetime {
     }
 }
 
+/// The `client_metadata` advertising the session's encryption key: the HPKE-0 public key in
+/// `jwks` (`alg` `HPKE-0`, `use` `enc`, `kid`), or on the ECDH-ES research route its key and
+/// `encrypted_response_enc_values_supported` (`ecdh_es::client_metadata`).
+fn client_metadata(key: &LabKey, kid: &KeyId) -> Value {
+    match key {
+        LabKey::Hpke(key) => json!({ "jwks": { "keys": [hpke_jwk(key, kid)] } }),
+        #[cfg(feature = "ecdh-es-research")]
+        LabKey::EcdhEs(key) => crate::ecdh_es::client_metadata(key, kid),
+    }
+}
+
 /// The request object payload for `binding`: exactly the stored wire values (`state` included,
-/// OpenID4VP 1.1 §5.2), the HPKE-0 public
-/// key in `client_metadata.jwks`, `aud` (OpenID4VP 1.1 §5.8, Static Discovery), `iat` and `exp`
-/// ([`Lifetime`]). No `iss`: it MAY be present and Wallets MUST ignore it (§5). Signed by
-/// `RequestSigner::sign`.
-fn request_object(
-    binding: &RequestBinding,
-    key: &RecipientPrivateKey,
-    kid: &KeyId,
-    lifetime: Lifetime,
-) -> Value {
+/// OpenID4VP 1.1 §5.2), `client_metadata` with the encryption key ([`client_metadata`]), `aud`
+/// (OpenID4VP 1.1 §5.8, Static Discovery), `iat` and `exp` ([`Lifetime`]). No `iss`: it MAY be
+/// present and Wallets MUST ignore it (§5). Signed by `RequestSigner::sign`.
+fn request_object(binding: &RequestBinding, client_metadata: Value, lifetime: Lifetime) -> Value {
     let RequestBinding::DirectPostJwt {
         client_id,
         nonce,
@@ -925,6 +1000,23 @@ fn request_object(
     else {
         return Value::Null;
     };
+    json!({
+        "aud": REQUEST_OBJECT_AUD,
+        "iat": lifetime.issued_at,
+        "exp": lifetime.expires_at,
+        "client_id": client_id.as_str(),
+        "response_type": RESPONSE_TYPE_VP_TOKEN,
+        "response_mode": EncryptedResponseMode::DirectPostJwt.as_str(),
+        "response_uri": response_uri.as_str(),
+        REQUEST_NONCE: nonce.as_str(),
+        RESPONSE_STATE: state.as_str(),
+        "dcql_query": validate::dcql_query(),
+        "client_metadata": client_metadata,
+    })
+}
+
+/// The advertised HPKE-0 public JWK (RFC 7518 §6.2.1; draft-22 §5.1).
+fn hpke_jwk(key: &RecipientPrivateKey, kid: &KeyId) -> Value {
     let point = key.public_key().to_bytes();
     let (x, y) = point
         .strip_prefix(&[SEC1_UNCOMPRESSED_TAG])
@@ -938,19 +1030,7 @@ fn request_object(
     jwk.insert("use".into(), JWK_USE_ENC.into());
     jwk.insert("alg".into(), ALG_HPKE_0.into());
     jwk.insert("kid".into(), kid.as_str().into());
-    json!({
-        "aud": REQUEST_OBJECT_AUD,
-        "iat": lifetime.issued_at,
-        "exp": lifetime.expires_at,
-        "client_id": client_id.as_str(),
-        "response_type": RESPONSE_TYPE_VP_TOKEN,
-        "response_mode": EncryptedResponseMode::DirectPostJwt.as_str(),
-        "response_uri": response_uri.as_str(),
-        REQUEST_NONCE: nonce.as_str(),
-        RESPONSE_STATE: state.as_str(),
-        "dcql_query": validate::dcql_query(),
-        "client_metadata": { "jwks": { "keys": [Value::Object(jwk)] } },
-    })
+    Value::Object(jwk)
 }
 
 async fn get_request(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
@@ -1067,6 +1147,12 @@ async fn respond(
     record.rejection = pipeline(&mut record, state, route, headers, body)
         .await
         .err();
+    answer(state, record)
+}
+
+/// Pushes `record` and maps its outcome to the HTTP answer: 200 `{}` on success, the
+/// admission errors' own answers, and [`GENERIC_REJECTION_BODY`] for everything else.
+pub(crate) fn answer(state: &AppState, record: EvidenceRecord) -> Response {
     let response = match &record.rejection {
         None => json_response(StatusCode::OK, "{}".to_owned()),
         Some(Rejection::Admission(a)) => admission_response(*a),
@@ -1106,17 +1192,7 @@ async fn pipeline(
     headers: &HeaderMap,
     body: Result<Bytes, BytesRejection>,
 ) -> Result<(), Rejection> {
-    let body = body.map_err(|e| {
-        Rejection::Admission(if e.status() == StatusCode::PAYLOAD_TOO_LARGE {
-            AdmissionError::BodyTooLarge
-        } else {
-            AdmissionError::BodyUnreadable
-        })
-    })?;
-    if !is_form_urlencoded(headers) {
-        return Err(Rejection::Admission(AdmissionError::UnsupportedMediaType));
-    }
-    let response = single_response_param(&body).map_err(Rejection::Admission)?;
+    let response = admit(headers, body)?;
     let jwe = CompactJwe::parse(&response).map_err(Rejection::JweParse)?;
     // Every lab key is advertised with a kid, and OpenID4VP 1.1 §8.3 ties the JWE kid to the
     // chosen JWK: a JWE without one matches nothing, on any route.
@@ -1128,12 +1204,7 @@ async fn pipeline(
     record.candidate_count = candidates.len();
 
     // HPKE is CPU-bound: run it on the blocking pool, at most `decryptions` trials at once.
-    #[cfg(feature = "lab-instrumentation")]
-    let parked = ParkedTrial::enter(&state.parked_trials);
-    let slot = Arc::clone(&state.decryptions).acquire_owned().await;
-    #[cfg(feature = "lab-instrumentation")]
-    drop(parked);
-    let slot = slot.map_err(|_| Rejection::TrialAborted)?;
+    let slot = decryption_slot(state).await?;
     let issuer = state.trusted_issuer.clone();
     // KB-JWT freshness is judged on this clock, in NumericDate seconds (RFC 7519 §2).
     let now = SystemClock.now().as_unix_millis() / MILLIS_PER_SECOND;
@@ -1145,8 +1216,58 @@ async fn pipeline(
     })
     .await
     .map_err(|_| Rejection::TrialAborted)?;
-    record.hpke_attempts = trial.attempts;
     record.trial_time = trial_time;
+    let (index, validated) = select(record, trial)?;
+    let candidate = candidates.get(index).ok_or(Rejection::TrialAborted)?;
+    commit(
+        record,
+        state,
+        route.registry,
+        candidate,
+        &response,
+        validated,
+    )
+    .await
+}
+
+/// Steps 1-3: body limit, media type, exactly one non-empty `response` and nothing else.
+/// Returns the `response` value.
+pub(crate) fn admit(
+    headers: &HeaderMap,
+    body: Result<Bytes, BytesRejection>,
+) -> Result<String, Rejection> {
+    let body = body.map_err(|e| {
+        Rejection::Admission(if e.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            AdmissionError::BodyTooLarge
+        } else {
+            AdmissionError::BodyUnreadable
+        })
+    })?;
+    if !is_form_urlencoded(headers) {
+        return Err(Rejection::Admission(AdmissionError::UnsupportedMediaType));
+    }
+    single_response_param(&body).map_err(Rejection::Admission)
+}
+
+/// One of the `decryptions` slots for a trial on the blocking pool; counted as parked while
+/// it waits (instrumentation).
+pub(crate) async fn decryption_slot(state: &AppState) -> Result<OwnedSemaphorePermit, Rejection> {
+    #[cfg(feature = "lab-instrumentation")]
+    let parked = ParkedTrial::enter(&state.parked_trials);
+    let slot = Arc::clone(&state.decryptions).acquire_owned().await;
+    #[cfg(feature = "lab-instrumentation")]
+    drop(parked);
+    slot.map_err(|_| Rejection::TrialAborted)
+}
+
+/// Records the trial's evidence and picks its result: exactly one validated candidate is
+/// kept, more than one is an integrity failure (`Ambiguous`), none is the first validation
+/// error (or `Decrypt` when nothing opened).
+pub(crate) fn select(
+    record: &mut EvidenceRecord,
+    trial: Trial,
+) -> Result<(usize, validate::Validated), Rejection> {
+    record.hpke_attempts = trial.attempts;
     if trial.attempts > 0 {
         record.crypto_result = if trial.opened == 0 {
             CryptoResult::NoneOpened
@@ -1162,25 +1283,32 @@ async fn pipeline(
             (validated, _) => ValidationResult::Passed { validated },
         };
     }
-    let (
-        index,
-        validate::Validated {
-            response: result,
-            holder_proof,
-        },
-    ) = match (trial.first, trial.validated) {
-        (Some(first), 1) => first,
+    match (trial.first, trial.validated) {
+        (Some(first), 1) => Ok(first),
         (Some(_), validated) => {
             record.commit_result = CommitResult::RefusedAmbiguous;
-            return Err(Rejection::Ambiguous { validated });
+            Err(Rejection::Ambiguous { validated })
         }
-        (None, _) => {
-            return Err(trial
-                .first_error
-                .map_or(Rejection::Decrypt, Rejection::Validation));
-        }
-    };
-    let candidate = candidates.get(index).ok_or(Rejection::TrialAborted)?;
+        (None, _) => Err(trial
+            .first_error
+            .map_or(Rejection::Decrypt, Rejection::Validation)),
+    }
+}
+
+/// Steps 9-10: the Verifier-wide replay guard, then the atomic claim of `candidate` with the
+/// digest of the compact JWE `response`.
+pub(crate) async fn commit(
+    record: &mut EvidenceRecord,
+    state: &AppState,
+    registry: &Registry,
+    candidate: &Candidate<SessionKey>,
+    response: &str,
+    validated: validate::Validated,
+) -> Result<(), Rejection> {
+    let validate::Validated {
+        response: result,
+        holder_proof,
+    } = validated;
     let digest = ResponseDigest::new(Sha256::digest(response.as_bytes()).into());
     let commits_open = state.commits_open.read().await;
     if !*commits_open {
@@ -1198,7 +1326,7 @@ async fn pipeline(
                 .expires_at()
                 .saturating_add(DEFAULT_CONSUMED_RETENTION),
         )?;
-    match SessionStore::claim(route.registry, candidate, digest, result).await {
+    match SessionStore::claim(registry, candidate, digest, result).await {
         Ok(snapshot) => {
             record.commit_result = CommitResult::Committed;
             record.committed_session = Some(snapshot.id().clone());
@@ -1224,17 +1352,14 @@ fn trial(
     issuer: &TrustedIssuerKey,
     now: u64,
 ) -> Trial {
-    let mut out = Trial {
-        attempts: 0,
-        opened: 0,
-        validated: 0,
-        first: None,
-        first_error: None,
-    };
+    let mut out = Trial::default();
     for (index, candidate) in candidates.iter().enumerate() {
         out.attempts += 1;
         let info = SessionInfo::from_binding(candidate.binding());
-        let Ok(plaintext) = jwe.open(candidate.key(), info.as_bytes()) else {
+        let Some(key) = candidate.key().hpke() else {
+            continue;
+        };
+        let Ok(plaintext) = jwe.open(key, info.as_bytes()) else {
             continue;
         };
         out.opened += 1;
