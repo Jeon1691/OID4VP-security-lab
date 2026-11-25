@@ -44,7 +44,7 @@ against the new source (every condition cited there can change between releases)
 cd tools/oidf-suite
 docker --context orbstack compose up -d          # pulls the pinned digests on first use
 curl -sk https://localhost:8443/api/currentuser  # [run] 200 {"sub":"developer",…,"isAdmin":true} once booted (10–25 s observed)
-cd ../.. && cargo build -p lab-server --features conformance --locked
+cd ../..                                         # the driver builds the lab itself (--features conformance --locked)
 RUN="evidence/oidf/$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)"
 python3 -I tools/oidf-suite/driver/run_plan.py run --plan c3 --out "$RUN/c3"   # starts and stops the lab itself
 python3 -I tools/oidf-suite/driver/run_plan.py run --plan c4 --out "$RUN/c4"   # export zip -> tools/oidf-suite/ (git-ignored)
@@ -426,9 +426,16 @@ All of this runs over HTTP from the driver; no browser is involved (section 2).
 
 ## 7. Results: the lab against both plans
 
-Run `evidence/oidf/20261125T044623Z-61dbb05/` (`summary.md` has the per-module table with
-reasons and the lab test covering each module; `manifest.json` per plan has the lab commit,
-`Cargo.lock` hash, image digests, alias, Docker / OrbStack / Java versions). One run per plan,
+Run `evidence/oidf/20261125T044623Z-61dbb05/`. Its `summary.md` is the source of truth for
+the results (per-module table with reasons and the lab test covering each module); the table
+below condenses it. Later driver hardening commits (leak guard, self-build, deadline,
+no-redirect authorize GET) do not alter that run: its manifests record the SHA-256 of the
+driver that produced it (commit `61dbb05`; the summary by `def69f4`). `manifest.json` per
+plan has the lab commit, `Cargo.lock` hash, image digests, alias, Docker / OrbStack / Java
+versions. That run predates the self-build: its binary was built by hand with the same command
+from the same lab sources (at `5d8d14b`; `61dbb05` only adds the driver), and its dirty flag
+covered tracked files only (`git status` showed no untracked files under `crates/` then). One
+run per plan,
 both at lab commit `61dbb05` (clean tree), suite stack freshly started, driven by
 `driver/run_plan.py` only, with no browser. Lab in conformance mode with the committed synthetic
 fixtures, time box 3600 s, bound to 127.0.0.1:18444, public origin
