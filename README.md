@@ -17,7 +17,7 @@ evidence.
 | `crates/session-redis` | Redis-backed `SessionStore`: Lua compare-and-set, keys kept in-process, fail closed (G5, IMP-014) |
 | `crates/evidence-report` | G6 benchmark rows → JSON / CSV / Markdown summary (IMP-016) |
 | `crates/scenario-runner` | G6 benchmark driver: in-process lab-server over loopback HTTP with the wallet simulator, store timings, criterion micro-benches (IMP-015) |
-| `crates/lab-server` | axum lab Verifier for HPKE-0 `direct_post.jwt` (IMP-008..010) with SD-JWT VC + KB-JWT holder binding (Evidence level 3), wallet simulator and synthetic issuer (`wallet-sim` feature), OpenID4VP 1.0-style ECDH-ES research route (`ecdh-es-research` feature, research mode only, not in the binary); G0-C API smoke test, G0-D ECDH-ES loopback e2e |
+| `crates/lab-server` | axum lab Verifier for HPKE-0 `direct_post.jwt` (IMP-008..010) with SD-JWT VC + KB-JWT holder binding (Evidence level 3), wallet simulator and synthetic issuer (`wallet-sim` feature), OpenID4VP 1.0-style ECDH-ES research route (`ecdh-es-research` feature, research mode only, not in the binary), time-boxed OIDF conformance mode (`conformance` feature, ADR 0002); G0-C API smoke test, G0-D ECDH-ES loopback e2e |
 | `docs/adr/` | Lab design decisions (`0001-ecdh-es-research-route.md`) |
 | `docs/interop/` | G7: OIDF #792 reproduction map (`issue-792-reproduction.md`), OIDF conformance-suite plan and INTEROP-02 outline (`oidf-conformance-plan.md`) |
 | `tools/oidf-suite/` | Self-hosted OIDF conformance suite for C3/C4: digest-pinned compose file, runbook, plan configs, suite-side findings, suite-observation stand-in (not a verifier) |
@@ -185,11 +185,14 @@ The lab server binds to loopback only, in every mode (shared URI / bounded trial
 
 | Mode | Build | Bind | Transport | Response encryption | Reachable by |
 | --- | --- | --- | --- | --- | --- |
-| Hardened (default) | default | loopback only | HTTP | HPKE-0, unique route | host processes |
-| Research | default (`ecdh-es-research` for the ECDH-ES route) | loopback only | HTTP | HPKE-0 (+ ECDH-ES research route) | host processes |
-| Conformance ([ADR 0002](docs/adr/0002-conformance-mode.md)) | `--features conformance`, `--mode conformance` flag only | loopback only | HTTPS, synthetic CA | ECDH-ES, unique route, key per session | host processes **and every local container** (OrbStack `host.docker.internal`), so also whatever can drive the suite |
+| Hardened (default) | default | loopback only | HTTP | HPKE-0, unique route | host processes (on OrbStack also every local container) |
+| Research | default (`ecdh-es-research` for the ECDH-ES route) | loopback only | HTTP | HPKE-0 (+ ECDH-ES research route) | host processes (on OrbStack also every local container) |
+| Conformance ([ADR 0002](docs/adr/0002-conformance-mode.md)) | `--features conformance`, `--mode conformance` flag only | loopback only | HTTPS, synthetic CA | ECDH-ES, unique route, key per session | host processes **and every local container** (OrbStack `host.docker.internal`; the suite relies on it), so also whatever can drive the suite |
+
+A loopback bind keeps the lab off the LAN; on OrbStack it does not isolate it from local
+containers, in any mode.
 
 Conformance mode is off by default, synthetic-only, time-boxed (`--max-runtime-secs`, default
-two hours, then it stops accepting), and is started only while an approved OIDF conformance run
+two hours, at most eight, then it stops accepting), and is started only while an approved OIDF conformance run
 is in progress and stopped with the suite stack. It never replaces or falls back from the other
 modes, and HPKE-0 remains the lab's primary path.

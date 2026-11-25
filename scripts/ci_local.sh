@@ -41,6 +41,9 @@ stage_quality() {
   step machete cargo machete
   # The gate scripts and workflows are part of the trusted computing base of every result.
   step shellcheck shellcheck scripts/*.sh
+  # Re-derives the synthetic conformance fixtures byte for byte; prints SKIP and passes where
+  # OpenSSL is older than 3.4 (e.g. ubuntu-24.04's 3.0) or missing.
+  step conformance_fixtures python3 -I scripts/conformance_fixtures.py check
   step actionlint actionlint
 }
 
@@ -270,6 +273,8 @@ REQUIRED_TESTS=(
   wallet_refuses_conformance_request_without_x5c_or_for_another_client_id
   conformance_mode_refuses_to_start_unless_everything_fits
   conformance_server_stops_at_its_maximum_runtime
+  conformance_time_box_closes_kept_alive_connections
+  wallet_refuses_x509_san_dns_matched_only_by_a_wildcard
   binary_refuses_conformance_mode_from_the_environment
   rfc9901_fixture_provenance_is_pinned
   rfc9901_disclosure_digests_match_the_printed_hashes
