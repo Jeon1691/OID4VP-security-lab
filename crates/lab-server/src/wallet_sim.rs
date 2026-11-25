@@ -4,9 +4,12 @@
 //! [`WalletSim::verify_request`]), presents its synthetic SD-JWT VC as an SD-JWT+KB bound to
 //! the request's `client_id` / `nonce` ([`WalletSim::present`]), seals the response with HPKE-0
 //! using the `session_info` computed from the verified payload's exact wire values, and POSTs
-//! it as a `direct_post.jwt` form. [`SealOptions`] can tamper with every input the Verifier binds
-//! (session_info fields, the presentation via [`PresentationTamper`], `kid`, ciphertext); a
-//! replay is posting the same JWE again. Also carries the lab-driver calls (create session, read
+//! it as a `direct_post.jwt` form. The sealed payload carries `vp_token` and, next to it, the
+//! Request Object's `state` (OpenID4VP 1.1 §8.3: the response parameters are top-level JSON
+//! members; RFC 6749 §4.1.2: `state` is echoed when the request carried one). [`SealOptions`]
+//! can tamper with every input the Verifier binds (session_info fields, the presentation via
+//! [`PresentationTamper`], `state` via [`StateChoice`], `kid`, ciphertext); a replay is
+//! posting the same JWE again. Also carries the lab-driver calls (create session, read
 //! result) the scenarios need. Loopback targets only: proxies and redirects are disabled and any
 //! other host is refused.
 //!
@@ -45,7 +48,7 @@ use crate::sd_jwt::{
 };
 use crate::validate::{
     DCQL_CLAIMS, DCQL_CREDENTIALS, DCQL_FORMAT, DCQL_ID, DCQL_META, DCQL_PATH, DCQL_VCT_VALUES,
-    SYNTHETIC_CREDENTIAL_VCT, VP_TOKEN,
+    RESPONSE_STATE, SYNTHETIC_CREDENTIAL_VCT, VP_TOKEN,
 };
 
 /// Upper bound for one loopback request; a wedged server fails the caller instead of hanging.
@@ -185,6 +188,8 @@ pub struct RequestObject {
     pub response_uri: String,
     /// `response_mode`.
     pub response_mode: String,
+    /// `state`, exact, if the request carries one.
+    pub state: Option<String>,
     /// `alg` of the advertised encryption JWK.
     pub jwk_alg: String,
     /// `kid` of the advertised encryption JWK.
@@ -211,6 +216,18 @@ pub enum KidChoice {
     Other(String),
 }
 
+/// Which `state` the sealed payload carries next to `vp_token`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum StateChoice {
+    /// The Request Object's `state` (RFC 6749 §4.1.2), or none if it has none.
+    #[default]
+    Request,
+    /// No `state` member.
+    Omit,
+    /// This JSON value as `state` (another session's `state`, or a non-string).
+    Other(Value),
+}
+
 /// Sealing knobs. `Default` is an honest wallet.
 #[derive(Debug, Clone, Default)]
 pub struct SealOptions {
@@ -225,6 +242,8 @@ pub struct SealOptions {
     /// Seal this `vp_token` verbatim instead of building one (replays, shape tests,
     /// presentations from another implementation).
     pub vp_token: Option<Value>,
+    /// Payload `state`.
+    pub state: StateChoice,
     /// Protected header `kid`.
     pub kid: KidChoice,
     /// Flip one ciphertext character (still canonical base64url).
@@ -731,8 +750,9 @@ impl WalletSim {
     }
 
     /// Builds the presentation ([`Self::present`]) and seals `{"vp_token": {<query id>:
-    /// [<presentation>]}}` for `request` (HPKE-0, `session_info` from the request's exact wire
-    /// values unless overridden). [`SealOptions::vp_token`] replaces the built `vp_token`.
+    /// [<presentation>]}, "state": <state>}` for `request` (HPKE-0, `session_info` from the
+    /// request's exact wire values unless overridden). [`SealOptions::vp_token`] replaces the
+    /// built `vp_token`; [`SealOptions::state`] chooses the `state` member.
     ///
     /// # Errors
     /// An override that is not a valid wire value, a presentation or sealing failure.
@@ -757,7 +777,17 @@ impl WalletSim {
                 Value::Object(answers)
             }
         };
-        let plaintext = json!({ VP_TOKEN: vp_token });
+        let mut payload = Map::new();
+        payload.insert(VP_TOKEN.to_owned(), vp_token);
+        let state = match &opts.state {
+            StateChoice::Request => request.state.clone().map(Value::String),
+            StateChoice::Omit => None,
+            StateChoice::Other(value) => Some(value.clone()),
+        };
+        if let Some(state) = state {
+            payload.insert(RESPONSE_STATE.to_owned(), state);
+        }
+        let plaintext = Value::Object(payload);
         let kid = match &opts.kid {
             KidChoice::Advertised => request.kid.as_deref(),
             KidChoice::Omit => None,
@@ -914,6 +944,7 @@ fn request_object(object: &Value) -> Result<RequestObject, WalletError> {
         nonce: string(&object["nonce"])?,
         response_uri: string(&object["response_uri"])?,
         response_mode: string(&object["response_mode"])?,
+        state: object.get(RESPONSE_STATE).map(string).transpose()?,
         jwk_alg: string(&jwk["alg"])?,
         kid: jwk["kid"].as_str().map(str::to_owned),
         public_key: RecipientPublicKey::from_bytes(&point)?,
