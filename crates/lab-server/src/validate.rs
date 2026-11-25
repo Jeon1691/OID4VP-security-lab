@@ -60,6 +60,8 @@ pub(crate) const VP_TOKEN: &str = "vp_token";
 /// Request parameter and response member `state` (OpenID4VP 1.1 §5.2; RFC 6749 §4.1.1,
 /// §4.1.2).
 pub(crate) const RESPONSE_STATE: &str = "state";
+/// Request parameter `nonce` (OpenID4VP 1.1 §5.2).
+pub(crate) const REQUEST_NONCE: &str = "nonce";
 /// DCQL members (OpenID4VP 1.1 §6, §6.1, §6.3, B.3.5).
 pub(crate) const DCQL_CREDENTIALS: &str = "credentials";
 pub(crate) const DCQL_ID: &str = "id";
