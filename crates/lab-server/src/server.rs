@@ -67,9 +67,11 @@ pub const MAX_REMEMBERED_DIGESTS: usize = 4 * session_core::DEFAULT_MAX_PENDING_
 /// Verifier-wide replay guard: digests of responses that validated, and of the holder proofs
 /// they carried, each with the session it validated for.
 ///
-/// Per-session state alone does not stop cross-session replay on the shared research route:
-/// bounded trial never offers a consumed session as a candidate, so a new session with the
-/// same `session_info` (shared key and route, reused nonce) would accept an old response.
+/// The per-session state machine (pending / consumed / expired) alone does not stop
+/// cross-session replay on the shared research route: bounded trial never offers a consumed
+/// session as a candidate, so a new session with the same `session_info` (shared key and
+/// route, reused nonce) and the same `state` (research knob) would accept an old response.
+/// With a fresh `state` the `state` check already refuses it; the guard does not rely on that.
 /// Two keys are guarded, because the JWE digest alone only catches the *same ciphertext*:
 ///
 /// * the response digest (`SHA-256` of the compact JWE): the same JWE posted again;
@@ -163,10 +165,11 @@ const RESPONSE_PARAM: &str = "response";
 /// Random bytes in a nonce: 128 bits, so it is fresh and unpredictable per request
 /// (OpenID4VP 1.1 §14.1); base64url output stays inside the §5.2 nonce charset.
 const NONCE_BYTES: usize = 16;
-/// Random bytes in a `state`: 128 bits, the entropy OpenID4VP 1.1 §5.3 requires when `state`
-/// carries the request/response binding ("at least 128 bits of entropy"), so one session's
-/// `state` cannot be guessed from another's. Unpadded base64url (22 characters) stays inside
-/// the §5.2 `state` charset.
+/// Random bytes in a `state`: 128 bits. Lab policy, adopted from OpenID4VP 1.1 §5.3 ("at
+/// least 128 bits of entropy"), which requires it only when a Presentation without Holder
+/// Binding is requested (outside the DC API); the lab always requires holder binding, so §5.3
+/// does not apply and §5.2 sets no size. Unpadded base64url (22 characters) stays inside the
+/// §5.2 `state` charset.
 const STATE_BYTES: usize = 16;
 /// Random bytes in a session id and in a per-session `kid`: 128 bits, so ids never collide
 /// and unique-kid resolution is never ambiguous by accident.

@@ -22,7 +22,9 @@ anywhere.
 **Section numbers.** The issue cites "§14.3.2" for Protection of the Response URI. In the
 11 November 2026 draft, §14.3 is Session Fixation and Protection of the Response URI is
 **§14.4.2**. The draft's Document History records the earlier numbering ("Section 14.3.2. Protection
-of the Response URI"). Below, section numbers follow the 11 November 2026 draft.
+of the Response URI"). Below, section numbers follow the 11 November 2026 draft. They differ
+from OpenID4VP 1.0 Final, where Protection of the Response URI is §14.3.2 and `state` is
+OPTIONAL rather than RECOMMENDED (§5.2).
 
 ### 1.1 Spec text quoted (11 November 2026 Editor's draft)
 
@@ -54,11 +56,13 @@ of the Response URI"). Below, section numbers follow the 11 November 2026 draft.
 - **§5.2, `state`**: "REQUIRED under the conditions defined in Section 5.3. Otherwise, state is
   RECOMMENDED, see Section 14.4. state values MUST only contain ASCII URL safe characters
   (uppercase and lowercase letters, decimal digits, hyphen, period, underscore, and tilde)."
-- **§5.3** (when `state` carries the request/response binding): the Verifier MUST "ensure that
-  the value is a cryptographically strong pseudo-random number with at least 128 bits of
+- **§5.3** (applies "if at least one Presentation without Holder Binding is requested and
+  unless the Digital Credentials API is used"): the Verifier MUST include `state`, "ensure
+  that the value is a cryptographically strong pseudo-random number with at least 128 bits of
   entropy", "chosen fresh for each Authorization Request", "store it in the Verifier's
   session state" and "check that the same state value is returned in the Authorization
-  Response".
+  Response". The lab always requires holder binding, so §5.3 does not apply to it; it adopts
+  the 128 bits and per-request freshness as policy.
 - **§8.1**: "The Client MUST ignore any unrecognized parameters."
 - **Appendix A.2** (DC API): "since the state parameter is not defined for the DC API, the
   Verifier cannot expect it to be included in the response."
@@ -147,7 +151,9 @@ New tests are in `crates/lab-server/tests/issue_792_scenarios.rs` and, for `stat
    - the same KB-JWT re-sealed in a fresh JWE also validates for the other
      (`holder_proof_resealed_for_another_session_is_rejected` → `HolderProofReplay`).
 
-   State kept per session cannot see any of this. The lab needs a Verifier-wide replay guard.
+   The per-session state machine (pending / consumed / expired) cannot see any of this. The
+   lab needs a Verifier-wide replay guard. (Since the lab issues a fresh `state`, the first
+   two also need the `state` reused; see §4 item 7 and S21.)
 4. **Bounded trial fails all at once when the budget is exceeded.** When the live population
    exceeds the budget, every response on that route is refused before decryption, honest ones
    included (`bounded_trial_over_budget_is_rejected_without_decryption`). Whoever can open
@@ -224,8 +230,9 @@ New tests are in `crates/lab-server/tests/issue_792_scenarios.rs` and, for `stat
   follows from these two MUSTs.
 - §14.2.2: every presentation is bound to `client_id` and `nonce` (MUST).
 - §14.4.2: check that the received `state` corresponds to a recent Authorization Request
-  (SHOULD). The lab does, per candidate, after decryption; §5.3's 128 bits and per-request
-  freshness are what it draws.
+  (SHOULD). The lab does, per candidate, after decryption. The 128 bits and per-request
+  freshness it draws are taken from §5.3 as policy (§5.3 itself does not apply: the lab
+  always requires holder binding).
 
 ### 6.2 Candidate spec text (offered to the WG as input, not decided)
 
@@ -258,7 +265,12 @@ New tests are in `crates/lab-server/tests/issue_792_scenarios.rs` and, for `stat
   only in Research mode and needs a fixed strategy (`hardened_mode_has_no_shared_route`).
 - Only `response` in the body: a cleartext `state` or `vp_token` is refused at admission.
 - A `state` in every request (§5.2: RECOMMENDED) and required in the decrypted payload; other
-  unrecognized payload members are ignored, as §8.1 requires.
+  unrecognized payload members are ignored, as §8.1 requires
+  (`unrecognized_payload_members_are_ignored`).
+- Under bounded trial with a reused nonce, the sender-chosen `state` decides which session a
+  response is credited to (`state_mismatching_candidate_tried_first_does_not_stop_the_validating_one`).
+  A sender has the same power with fresh nonces, through the `session_info` it seals with, so
+  this is not a regression.
 - A Verifier-wide replay guard on the JWE digest and the holder-proof digest.
 - A hard candidate budget; no stop-at-first under bounded trial.
 - A generic error body for every post-admission failure
@@ -301,6 +313,7 @@ Strategies:
 | S19 | 2 | cid | seals for A with B's `state`, or a non-string `state` | UU: refuse after decryption | 1 attempt, opens, `StateMismatch`, A and B pending, both then commit (`state_of_another_live_session_is_refused`) |
 | S20 | 2 | cid, uri, key | seals A's proof and A's `state` with B's `session_info` | BT: opens for B, refused by B's `state` before holder binding | 2 attempts, `opened: 1`, `StateMismatch` (not `KbNonceMismatch`), nothing claimed, both then commit (`bounded_trial_jwe_that_opens_for_b_but_carries_a_state_is_refused_for_b`) |
 | S21 | 2 | cid, uri, key, **nonce** (violates §5.2); `state` fresh | honest, then replays A's JWE to B | BT: `state` selects A; replay refused by B's `state` | 2 open, 1 validates, A committed; replay 1 open, `StateMismatch`, B pending (`reused_nonce_with_fresh_state_selects_one_session_and_refuses_a_replay`) |
+| S22 | 2 | cid, uri, key, **nonce** (violates §5.2); `state` fresh | honest response for B, the second-inserted session | BT: A, tried first, opens and fails its `state`; B validates | 2 open, `validated: 1`, B committed, A pending (`state_mismatching_candidate_tried_first_does_not_stop_the_validating_one`) |
 
 ## 8. Open questions
 
@@ -310,5 +323,5 @@ Strategies:
 - Should the lab add a 1.0-style ECDH-ES shared-key Verifier, to observe that every candidate
   decrypts (§4 item 1 is currently an inference)?
 - ~~Should the lab issue `state` inside the JWE and check it after decryption, to exercise
-  §14.4.2?~~ Resolved: it does (C7, §4 item 7, S17-S21). Under HPKE the check comes after
+  §14.4.2?~~ Resolved: it does (C7, §4 item 7, S17-S22). Under HPKE the check comes after
   decryption and helps only against inadvertent or misrouted responses.

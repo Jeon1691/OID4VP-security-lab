@@ -7,7 +7,7 @@
 //! | --- | --- |
 //! | `state` | Required, a string equal to the session's stored `state` (§14.4.2; RFC 6749 §4.1.2: echoed because the request carried one). Absent: [`ValidationError::StateMissing`]; not a string or another value: [`ValidationError::StateMismatch`]. Compared as SHA-256 digests without early exit. Checked first, before any holder-binding work |
 //! | `vp_token` | Required: answers the lab's single DCQL Credential Query (OpenID4VP 1.1 §6.1, B.3.5) with exactly one presentation (§8.1: keyed by the query `id`, an array of one Presentation since `multiple` is omitted), a compact SD-JWT+KB string (B.3.6) |
-//! | anything else | Ignored: §8.1 "The Client MUST ignore any unrecognized parameters" |
+//! | anything else | Ignored: §8.1 "The Client MUST ignore any unrecognized parameters" (`unrecognized_payload_members_are_ignored`) |
 //!
 //! The presentation is verified by [`crate::verify_sd_jwt_vc`] against the configured trusted
 //! issuer key, with the KB-JWT bound to the session's stored `client_id` (`aud`) and `nonce`,

@@ -130,9 +130,12 @@
 //!   shared route.
 //! * Cross-session replay: on the shared research route, sessions can share `session_info`
 //!   (shared key and route, reused nonce via the research `nonce` knob), so a consumed
-//!   session's response would decrypt and validate for a new one. Per-session state cannot
-//!   see that, so the verifier-wide replay guard refuses any response already validated for
-//!   another session, and records `CrossSessionReplay` as evidence of the #792 condition.
+//!   session's response decrypts for a new one. It also validates there only if the `state`
+//!   is reused too (research `state` knob); with a fresh `state` the `state` check refuses
+//!   it (`StateMismatch`, scenario S21 in `docs/interop/issue-792-reproduction.md`). The
+//!   per-session state machine (pending / consumed / expired) cannot see either, so the
+//!   verifier-wide replay guard refuses any response already validated for another session,
+//!   and records `CrossSessionReplay` as evidence of the #792 condition.
 //!   With a reused nonce and the same `client_id` the holder proof itself is valid for both
 //!   sessions, so re-sealing it into a fresh JWE gets past the JWE digest; the guard therefore
 //!   also binds each verified KB-JWT to its first session (`HolderProofReplay`, PR #10).
@@ -142,6 +145,11 @@
 //!   and holder binding; it catches inadvertent responses (a payload meant for another
 //!   request, a verbatim replay to another session, a wallet that echoes no `state`). A
 //!   cleartext `state` beside `response` is refused at admission (step 3).
+//! * Under bounded trial with a reused nonce (research), several candidates open, and the
+//!   sender-chosen `state` (readable in every Request Object) decides which session the
+//!   response is credited to. That is the same power a sender already has with fresh nonces,
+//!   where the `session_info` it seals with decides; not a regression. Holder binding and the
+//!   replay guard still apply to the session it picked.
 //! * Results are readable only with the result token, so the request id (visible to the
 //!   wallet and anyone who sees the `request_uri`) does not reveal the outcome.
 //! * Consumed records retain only the bounded [`ValidatedResponse`], never decrypted input or
