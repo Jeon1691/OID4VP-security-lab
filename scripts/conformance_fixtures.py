@@ -6,8 +6,12 @@ Usage (run with an isolated interpreter, from the repository root):
     python3 -I scripts/conformance_fixtures.py generate OUT_DIR [--dns NAME ...]
     python3 -I scripts/conformance_fixtures.py check      # regenerate and diff the committed set
 
-Needs only the Python standard library and OpenSSL >= 3.2 on PATH (`-sigopt nonce-type:1`,
-deterministic ECDSA per RFC 6979, and `-not_before` / `-not_after`). Nothing touches the network.
+Needs only the Python standard library and OpenSSL >= 3.4 on PATH: deterministic ECDSA
+(`-sigopt nonce-type:1`, RFC 6979) arrived in OpenSSL 3.2.0 and the `-not_before` /
+`-not_after` options of `req` and `x509` in 3.4.0 (OpenSSL CHANGES.md, "Changes between 3.1 and
+3.2.0" and "Changes between 3.3 and 3.4.0"). With an older OpenSSL, or LibreSSL, `check` prints
+a SKIP line and exits 0 (CI runners such as ubuntu-24.04 ship OpenSSL 3.0); `generate` refuses.
+Nothing touches the network.
 
 Output (docs/adr/0002-conformance-mode.md):
   * conformance_ca.pem          trust anchor certificate (P-256, self-signed, CA:TRUE pathlen 0).
@@ -21,20 +25,26 @@ Output (docs/adr/0002-conformance-mode.md):
   * conformance_leaf.key.pem    the leaf private key, PKCS#8 PEM (TLS, rustls).
   * conformance_leaf.jwk        the same key as an EC P-256 private JWK (Request Object signing,
                                 `--signing-key`).
+  * conformance_wildcard_leaf.pem  negative-test leaf from the same CA and key whose only SAN is
+                                `*.<parent of the first --dns name>`: valid for that host in TLS
+                                terms, but no dNSName entry equals it (x509_san_dns must refuse).
+  * conformance_foreign_ca.pem  negative-test trust anchor: another self-signed CA that issued
+                                nothing here (the leaf must not chain to it).
   * conformance_fixtures.json   derived values: x509_san_dns / x509_hash client ids, SANs,
                                 validity, SHA-256 of every file.
 
-Reproducibility: both private scalars are derived from fixed labels (SHA-256, reduced into
+Reproducibility: every private scalar is derived from a fixed label (SHA-256, reduced into
 [1, n-1]), every certificate field is fixed (serials, names, validity, extensions), and ECDSA
 signatures are deterministic, so the same inputs give byte-identical output. Because the
 scalars follow from public labels, ANYONE can recompute these private keys: the material is
-synthetic by construction and must never be trusted outside this lab. The CA private key is not
-written to OUT_DIR at all.
+synthetic by construction and must never be trusted outside this lab. No CA private key is
+written to OUT_DIR.
 """
 
 import base64
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -43,9 +53,12 @@ from pathlib import Path
 
 COMMITTED = Path("crates/lab-server/tests/fixtures")
 DEFAULT_DNS = ["host.docker.internal", "localhost"]
-# Labels the two private scalars are derived from. Changing one changes every fixture.
+# Labels the private scalars are derived from. Changing one changes the fixtures it signs.
 CA_KEY_LABEL = b"OID4VP-security-lab SYNTHETIC conformance CA key v1"
 LEAF_KEY_LABEL = b"OID4VP-security-lab SYNTHETIC conformance leaf key v1"
+FOREIGN_CA_KEY_LABEL = b"OID4VP-security-lab SYNTHETIC conformance foreign CA key v1"
+# Oldest OpenSSL with both deterministic ECDSA (3.2.0) and -not_before / -not_after (3.4.0).
+MIN_OPENSSL = (3, 4, 0)
 # Order of the P-256 base point (SEC 2 v2 §2.4.2).
 P256_ORDER = int("FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551", 16)
 P256_SCALAR_BYTES = 32
@@ -58,18 +71,26 @@ SPKI_POINT_BYTES = 1 + 2 * P256_SCALAR_BYTES
 # Fixed certificate fields. Validity is long so the committed set outlives the lab work; the
 # lab checks the chain against the current time at start.
 CA_SUBJECT = "/O=OID4VP security lab/CN=SYNTHETIC conformance CA - never trust"
+FOREIGN_CA_SUBJECT = "/O=OID4VP security lab/CN=SYNTHETIC foreign CA - negative tests only"
 LEAF_ORG = "/O=OID4VP security lab SYNTHETIC conformance Verifier"
 CA_SERIAL = "1"
 LEAF_SERIAL = "2"
+WILDCARD_LEAF_SERIAL = "3"
+FOREIGN_CA_SERIAL = "4"
 CA_NOT_BEFORE = "20261101000000Z"
 CA_NOT_AFTER = "20361101000000Z"
 LEAF_NOT_BEFORE = "20261101000000Z"
 LEAF_NOT_AFTER = "20311101000000Z"
+# The moment the generated chain is verified at: 2027-01-15T08:00:00Z, inside both validity
+# windows above (and independent of the generating machine's clock).
+VERIFY_AT_UNIX = "1800000000"
 OUTPUT_FILES = [
     "conformance_ca.pem",
     "conformance_leaf.pem",
     "conformance_leaf.key.pem",
     "conformance_leaf.jwk",
+    "conformance_wildcard_leaf.pem",
+    "conformance_foreign_ca.pem",
 ]
 MANIFEST = "conformance_fixtures.json"
 
@@ -87,6 +108,15 @@ def openssl(*args: str, data: bytes | None = None) -> bytes:
     return subprocess.run(["openssl", *args], input=data, check=True, capture_output=True).stdout
 
 
+def openssl_too_old() -> str | None:
+    """Why this OpenSSL cannot reproduce the fixtures, or None if it can."""
+    version = openssl("version").decode().strip()
+    match = re.match(r"OpenSSL (\d+)\.(\d+)\.(\d+)", version)
+    if match is None or tuple(int(part) for part in match.groups()) < MIN_OPENSSL:
+        return f"needs OpenSSL >= {'.'.join(map(str, MIN_OPENSSL))}, found {version!r}"
+    return None
+
+
 def write_key(d: bytes, pem_path: Path) -> bytes:
     """Writes `d` as PKCS#8 PEM; returns 0x04 || x || y.
 
@@ -102,7 +132,7 @@ def write_key(d: bytes, pem_path: Path) -> bytes:
     return point
 
 
-def extensions(dns: list[str]) -> str:
+def extensions(dns: list[str], wildcard: str) -> str:
     san = ",".join(f"DNS:{name}" for name in dns)
     return f"""[req]
 distinguished_name = dn
@@ -119,6 +149,13 @@ extendedKeyUsage = serverAuth
 subjectAltName = {san}
 subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid
+[v3_wildcard_leaf]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature
+extendedKeyUsage = serverAuth
+subjectAltName = DNS:{wildcard}
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid
 """
 
 
@@ -126,30 +163,44 @@ def der_of_pem(path: Path) -> bytes:
     return openssl("x509", "-in", str(path), "-outform", "DER")
 
 
+def self_signed_ca(cnf: Path, key: Path, subject: str, serial: str, out: Path) -> None:
+    openssl("req", "-x509", "-new", "-config", str(cnf), "-key", str(key), "-subj", subject,
+            "-set_serial", serial, "-not_before", CA_NOT_BEFORE, "-not_after", CA_NOT_AFTER,
+            "-extensions", "v3_ca", "-sha256", "-sigopt", "nonce-type:1", "-out", str(out))
+
+
+def issue_leaf(cnf: Path, csr: Path, ca: Path, ca_key: Path, serial: str, section: str,
+               out: Path) -> None:
+    openssl("x509", "-req", "-in", str(csr), "-CA", str(ca), "-CAkey", str(ca_key),
+            "-set_serial", serial, "-not_before", LEAF_NOT_BEFORE, "-not_after", LEAF_NOT_AFTER,
+            "-extfile", str(cnf), "-extensions", section, "-sha256", "-sigopt", "nonce-type:1",
+            "-out", str(out))
+    openssl("verify", "-CAfile", str(ca), "-x509_strict", "-attime", VERIFY_AT_UNIX, str(out))
+
+
 def generate(out: Path, dns: list[str]) -> None:
     out.mkdir(parents=True, exist_ok=True)
+    wildcard = "*." + dns[0].split(".", 1)[1]
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         cnf = tmp / "openssl.cnf"
-        cnf.write_text(extensions(dns))
+        cnf.write_text(extensions(dns, wildcard))
         ca_key = tmp / "ca.key.pem"
         write_key(scalar(CA_KEY_LABEL), ca_key)
         leaf_key = out / "conformance_leaf.key.pem"
         point = write_key(scalar(LEAF_KEY_LABEL), leaf_key)
-        deterministic = ["-sha256", "-sigopt", "nonce-type:1"]
         ca = out / "conformance_ca.pem"
-        openssl("req", "-x509", "-new", "-config", str(cnf), "-key", str(ca_key), "-subj",
-                CA_SUBJECT, "-set_serial", CA_SERIAL, "-not_before", CA_NOT_BEFORE, "-not_after",
-                CA_NOT_AFTER, "-extensions", "v3_ca", *deterministic, "-out", str(ca))
+        self_signed_ca(cnf, ca_key, CA_SUBJECT, CA_SERIAL, ca)
         csr = tmp / "leaf.csr"
         openssl("req", "-new", "-config", str(cnf), "-key", str(leaf_key), "-subj",
                 f"{LEAF_ORG}/CN={dns[0]}", "-out", str(csr))
-        leaf = out / "conformance_leaf.pem"
-        openssl("x509", "-req", "-in", str(csr), "-CA", str(ca), "-CAkey", str(ca_key),
-                "-set_serial", LEAF_SERIAL, "-not_before", LEAF_NOT_BEFORE, "-not_after",
-                LEAF_NOT_AFTER, "-extfile", str(cnf), "-extensions", "v3_leaf", *deterministic,
-                "-out", str(leaf))
-        openssl("verify", "-CAfile", str(ca), "-x509_strict", "-attime", "1800000000", str(leaf))
+        issue_leaf(cnf, csr, ca, ca_key, LEAF_SERIAL, "v3_leaf", out / "conformance_leaf.pem")
+        issue_leaf(cnf, csr, ca, ca_key, WILDCARD_LEAF_SERIAL, "v3_wildcard_leaf",
+                   out / "conformance_wildcard_leaf.pem")
+        foreign_key = tmp / "foreign_ca.key.pem"
+        write_key(scalar(FOREIGN_CA_KEY_LABEL), foreign_key)
+        self_signed_ca(cnf, foreign_key, FOREIGN_CA_SUBJECT, FOREIGN_CA_SERIAL,
+                       out / "conformance_foreign_ca.pem")
     jwk = {
         "kty": "EC",
         "crv": "P-256",
@@ -164,6 +215,7 @@ def generate(out: Path, dns: list[str]) -> None:
                      "scripts/conformance_fixtures.py; never trust this CA anywhere else.",
         "generator": "scripts/conformance_fixtures.py",
         "dns_names": dns,
+        "wildcard_leaf_san": wildcard,
         "client_id_x509_san_dns": f"x509_san_dns:{dns[0]}",
         "client_id_x509_hash": "x509_hash:" + b64url(hashlib.sha256(leaf_der).digest()),
         "leaf_validity": [LEAF_NOT_BEFORE, LEAF_NOT_AFTER],
@@ -175,6 +227,10 @@ def generate(out: Path, dns: list[str]) -> None:
 
 
 def check() -> int:
+    too_old = openssl_too_old()
+    if too_old:
+        print(f"conformance fixtures: SKIP ({too_old}); the committed set is not re-derived")
+        return 0
     committed = json.loads((COMMITTED / MANIFEST).read_text())
     with tempfile.TemporaryDirectory() as tmp:
         fresh = Path(tmp)
@@ -189,11 +245,18 @@ def check() -> int:
 
 def main(argv: list[str]) -> int:
     if shutil.which("openssl") is None:
+        if argv[:1] == ["check"]:
+            print("conformance fixtures: SKIP (openssl not found)")
+            return 0
         print("openssl not found", file=sys.stderr)
         return 2
     if argv[:1] == ["check"] and len(argv) == 1:
         return check()
     if argv[:1] == ["generate"] and len(argv) >= 2:
+        too_old = openssl_too_old()
+        if too_old:
+            print(too_old, file=sys.stderr)
+            return 2
         rest = argv[2:]
         dns = [name for flag, name in zip(rest[::2], rest[1::2]) if flag == "--dns"]
         if len(rest) % 2 or len(dns) * 2 != len(rest):
