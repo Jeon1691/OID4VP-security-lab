@@ -170,6 +170,9 @@ used here under Apache-2.0.
 
 `crates/lab-server/tests/fixtures/lab_issuer.jwk` / `lab_issuer.pub.jwk` are a synthetic P-256
 issuer key pair generated for this repository (test use only).
+`crates/lab-server/tests/fixtures/conformance_*` are a SYNTHETIC CA, leaf certificate and key
+for conformance mode, reproducible with `python3 -I scripts/conformance_fixtures.py check`;
+their private keys follow from public labels, so never trust them anywhere.
 `crates/lab-server/tests/fixtures/rfc9901_examples.json` holds examples extracted from RFC
 9901, treated as IETF Code Components (Copyright (c) 2025 IETF Trust and the persons
 identified as authors of the code; Revised BSD License, full text in [NOTICE](NOTICE)). The
@@ -179,3 +182,14 @@ base64url strings are unchanged except for line breaks; restructured into a lab 
 
 No GitHub repository, fork, push, issue, comment or PR is created without prior approval.
 The lab server binds to loopback only, in every mode (shared URI / bounded trial included).
+
+| Mode | Build | Bind | Transport | Response encryption | Reachable by |
+| --- | --- | --- | --- | --- | --- |
+| Hardened (default) | default | loopback only | HTTP | HPKE-0, unique route | host processes |
+| Research | default (`ecdh-es-research` for the ECDH-ES route) | loopback only | HTTP | HPKE-0 (+ ECDH-ES research route) | host processes |
+| Conformance ([ADR 0002](docs/adr/0002-conformance-mode.md)) | `--features conformance`, `--mode conformance` flag only | loopback only | HTTPS, synthetic CA | ECDH-ES, unique route, key per session | host processes **and every local container** (OrbStack `host.docker.internal`), so also whatever can drive the suite |
+
+Conformance mode is off by default, synthetic-only, time-boxed (`--max-runtime-secs`, default
+two hours, then it stops accepting), and is started only while an approved OIDF conformance run
+is in progress and stopped with the suite stack. It never replaces or falls back from the other
+modes, and HPKE-0 remains the lab's primary path.
