@@ -26,6 +26,22 @@ lab-instrumentation = []
 # default (Verifier) build and the binary contain no ECDH-ES code; it enables jose-ecdh-es
 # without `test-support` (opening only). Tests enable it through the self dev-dependency.
 ecdh-es-research = ["dep:jose-ecdh-es"]
+# Time-boxed OIDF conformance mode (docs/adr/0002-conformance-mode.md): `Mode::Conformance`,
+# HTTPS served by the lab itself on its loopback bind (rustls, ring provider), x509_san_dns /
+# x509_hash client identifiers with an `x5c` Request Object header, and ECDH-ES response
+# encryption on the unique route with a key per session. Off by default, so the default
+# (Verifier) build and binary contain no TLS, X.509 or ECDH-ES code; the binary refuses
+# `--mode conformance` without it. jose-ecdh-es comes without `test-support` (opening only). With
+# `wallet-sim` also on, the simulator's HTTP client gets rustls (no provider of its own; it is
+# handed a ring-based config) to reach the HTTPS lab. Tests enable it through the self
+# dev-dependency.
+conformance = [
+    "dep:jose-ecdh-es",
+    "dep:rustls",
+    "dep:tokio-rustls",
+    "dep:rustls-webpki",
+    "reqwest?/rustls-tls-manual-roots-no-provider",
+]
 
 [dependencies]
 axum = { workspace = true }
@@ -40,6 +56,8 @@ jose-hpke = { workspace = true }
 p256 = { workspace = true }
 protocol-model = { workspace = true }
 reqwest = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
+rustls-webpki = { workspace = true, optional = true }
 # Duplicate-member check of every JWT header, payload and Disclosure (a `Visitor`; no derive).
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -48,6 +66,7 @@ sha2 = { workspace = true }
 ssi = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
+tokio-rustls = { workspace = true, optional = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
@@ -61,7 +80,7 @@ form_urlencoded = { workspace = true }
 jose-ecdh-es = { workspace = true }
 josekit = { workspace = true }
 # Self dev-dependency: integration tests drive the server with the wallet simulator.
-lab-server = { path = ".", features = ["wallet-sim", "lab-instrumentation", "ecdh-es-research"] }
+lab-server = { path = ".", features = ["wallet-sim", "lab-instrumentation", "ecdh-es-research", "conformance"] }
 openid4vp = { workspace = true }
 p256-spruce = { workspace = true }
 reqwest = { workspace = true }

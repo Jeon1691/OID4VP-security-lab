@@ -7,7 +7,9 @@ use jose_hpke::MAX_COMPACT_JWE_LEN;
 use protocol_model::ClientIdWire;
 use session_core::{CandidateBudget, ResolutionStrategy};
 
-use crate::jar::{self, RequestSigningKey};
+#[cfg(feature = "conformance")]
+use crate::conformance::{ConformanceConfig, X509Error};
+use crate::jar::{self, KeyHint, RequestSigningKey};
 use crate::sd_jwt::TrustedIssuerKey;
 use crate::validate::{CredentialRequest, MAX_CLIENT_ID_LEN};
 
@@ -88,6 +90,13 @@ pub const MAX_RESPONSE_BODY_BYTES: usize = MAX_COMPACT_JWE_LEN + FORM_OVERHEAD_B
 pub const DEFAULT_CLIENT_ID: &str =
     "decentralized_identifier:did:key:zDnaeaDj3YpPR4JXos2kCCNPS86hdELeN5PZh97KGkoFzUtGn";
 
+/// Default `authorization_endpoint`: the `openid4vp://` custom scheme a Wallet is invoked with
+/// (OpenID4VP 1.0 / 1.1 §13.1.2); the OIDF suite instead gives a per-test HTTPS endpoint.
+pub const DEFAULT_AUTHORIZATION_ENDPOINT: &str = "openid4vp://";
+
+/// Longest configured authorization endpoint (lab policy; real endpoints are short URLs).
+const MAX_AUTHORIZATION_ENDPOINT_LEN: usize = 2048;
+
 /// Loopback, OS-chosen port.
 const DEFAULT_BIND: SocketAddr = SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
 
@@ -136,6 +145,15 @@ pub enum Mode {
     /// Adds the shared route with the given strategy, and with the `ecdh-es-research` feature
     /// the ECDH-ES route. Unique-uri routes keep working as in hardened mode.
     Research(SharedRouteStrategy),
+    /// Time-boxed OIDF conformance mode (`conformance` feature;
+    /// docs/adr/0002-conformance-mode.md): HTTPS served by the lab on its loopback bind, an
+    /// `x509_san_dns` / `x509_hash` client id signed with an `x5c` header, the OpenID4VP 1.0
+    /// Final Request Object, and ECDH-ES response encryption on the unique route with a fresh
+    /// key and `kid` per session (HAIP 1.0 §5). No shared or ECDH-ES research route and no
+    /// HPKE-0: an `HPKE-0` JWE is refused at parse. Needs [`LabConfig::conformance`]; stops
+    /// itself after its maximum runtime. Never a fallback for the other modes.
+    #[cfg(feature = "conformance")]
+    Conformance,
 }
 
 /// Lab server configuration.
@@ -186,6 +204,14 @@ pub struct LabConfig {
     /// ([`StartError::EcdhEsRouteNeedsResearchMode`]).
     #[cfg(feature = "ecdh-es-research")]
     pub ecdh_es_route: bool,
+    /// Prefix of the `authorization_request` URL the session creation response carries
+    /// (`<endpoint>?client_id=...&request_uri=...`, OpenID4VP 1.0 / 1.1 §5.10); default
+    /// [`DEFAULT_AUTHORIZATION_ENDPOINT`]. The OIDF suite gives an HTTPS endpoint per test.
+    pub authorization_endpoint: String,
+    /// [`Mode::Conformance`] only, and required there: TLS credentials, public origin, kill
+    /// switch (`conformance` feature). Any other mode refuses to start with it set.
+    #[cfg(feature = "conformance")]
+    pub conformance: Option<ConformanceConfig>,
 }
 
 impl LabConfig {
@@ -218,6 +244,9 @@ impl LabConfig {
             shutdown_drain: DEFAULT_SHUTDOWN_DRAIN,
             #[cfg(feature = "ecdh-es-research")]
             ecdh_es_route: false,
+            authorization_endpoint: DEFAULT_AUTHORIZATION_ENDPOINT.to_owned(),
+            #[cfg(feature = "conformance")]
+            conformance: None,
         }
     }
 }
@@ -250,16 +279,35 @@ pub enum StartError {
     /// `origin`; OpenID4VP 1.1 §5.9.3).
     #[error("the lab cannot sign request objects for this client_id prefix")]
     UnsupportedClientIdPrefix,
-    /// [`LabConfig::ecdh_es_route`] set in [`Mode::Hardened`]: the ECDH-ES route is research
-    /// mode only.
+    /// [`LabConfig::ecdh_es_route`] set outside [`Mode::Research`]: the ECDH-ES route is
+    /// research mode only.
     #[cfg(feature = "ecdh-es-research")]
     #[error("the ECDH-ES route is served in research mode only")]
     EcdhEsRouteNeedsResearchMode,
+    /// [`LabConfig::authorization_endpoint`] empty, over the lab length limit, not visible
+    /// ASCII, or with a fragment.
+    #[error("authorization endpoint must be visible ASCII without a fragment")]
+    AuthorizationEndpoint,
+    /// [`Mode::Conformance`] without [`LabConfig::conformance`], or that configuration in any
+    /// other mode.
+    #[cfg(feature = "conformance")]
+    #[error("conformance mode needs its configuration, and no other mode takes it")]
+    ConformanceConfig,
+    /// The conformance X.509 material does not fit the client id, origin or key
+    /// ([`X509Error`]).
+    #[cfg(feature = "conformance")]
+    #[error("conformance X.509 configuration: {0}")]
+    X509(#[from] X509Error),
+    /// rustls refused the TLS certificate or key (e.g. the key is not the leaf's).
+    #[cfg(feature = "conformance")]
+    #[error("TLS configuration: {0}")]
+    Tls(rustls::Error),
 }
 
-/// Checks `config` before anything is bound; returns the Request Object `kid` for its
-/// `client_id` ([`jar::request_kid`]).
-pub(crate) fn check(config: &LabConfig) -> Result<Option<String>, StartError> {
+/// Checks `config` before anything is bound; returns how the Request Object header names its
+/// key: `kid` for a did:key `client_id` ([`jar::request_kid`]), or in conformance mode the
+/// `x5c` chain (`conformance::check`).
+pub(crate) fn check(config: &LabConfig) -> Result<KeyHint, StartError> {
     if !config.bind.ip().is_loopback() {
         return Err(StartError::LoopbackOnly);
     }
@@ -276,8 +324,29 @@ pub(crate) fn check(config: &LabConfig) -> Result<Option<String>, StartError> {
         return Err(StartError::ZeroLimit);
     }
     #[cfg(feature = "ecdh-es-research")]
-    if config.ecdh_es_route && config.mode == Mode::Hardened {
+    if config.ecdh_es_route && !matches!(config.mode, Mode::Research(_)) {
         return Err(StartError::EcdhEsRouteNeedsResearchMode);
     }
-    jar::request_kid(config.client_id.as_str(), &config.request_signing_key)
+    let endpoint = &config.authorization_endpoint;
+    if endpoint.is_empty()
+        || endpoint.len() > MAX_AUTHORIZATION_ENDPOINT_LEN
+        || !endpoint.bytes().all(|b| b.is_ascii_graphic())
+        || endpoint.contains('#')
+    {
+        return Err(StartError::AuthorizationEndpoint);
+    }
+    #[cfg(feature = "conformance")]
+    match (config.mode, &config.conformance) {
+        (Mode::Conformance, Some(conformance)) => {
+            return crate::conformance::check(config, conformance).map(KeyHint::X5c);
+        }
+        (Mode::Conformance, None) | (_, Some(_)) => return Err(StartError::ConformanceConfig),
+        _ => {}
+    }
+    Ok(
+        match jar::request_kid(config.client_id.as_str(), &config.request_signing_key)? {
+            Some(kid) => KeyHint::Kid(kid),
+            None => KeyHint::None,
+        },
+    )
 }

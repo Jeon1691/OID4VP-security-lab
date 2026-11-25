@@ -195,8 +195,9 @@ const RESPONSE_TYPE_VP_TOKEN: &str = "vp_token";
 pub(crate) enum LabKey {
     /// HPKE-0 (`alg` `HPKE-0`): the unique and shared routes.
     Hpke(RecipientPrivateKey),
-    /// ECDH-ES (`alg` `ECDH-ES`): the research route of `ecdh-es-research` only.
-    #[cfg(feature = "ecdh-es-research")]
+    /// ECDH-ES (`alg` `ECDH-ES`): the research route of `ecdh-es-research`, and the unique
+    /// route of `Mode::Conformance` (`conformance`).
+    #[cfg(any(feature = "ecdh-es-research", feature = "conformance"))]
     EcdhEs(jose_ecdh_es::RecipientPrivateKey),
 }
 
@@ -205,10 +206,54 @@ impl LabKey {
     const fn hpke(&self) -> Option<&RecipientPrivateKey> {
         match self {
             Self::Hpke(key) => Some(key),
-            #[cfg(feature = "ecdh-es-research")]
+            #[cfg(any(feature = "ecdh-es-research", feature = "conformance"))]
             Self::EcdhEs(_) => None,
         }
     }
+
+    /// The ECDH-ES key, if this is one.
+    #[cfg(any(feature = "ecdh-es-research", feature = "conformance"))]
+    pub(crate) const fn ecdh_es(&self) -> Option<&jose_ecdh_es::RecipientPrivateKey> {
+        match self {
+            Self::EcdhEs(key) => Some(key),
+            Self::Hpke(_) => None,
+        }
+    }
+}
+
+/// `client_metadata` member listing the content encryption algorithms (OpenID4VP 1.0 §5.1 and
+/// §8.3: "MUST be present for anything other than the default single value of `A128GCM`").
+#[cfg(any(feature = "ecdh-es-research", feature = "conformance"))]
+const ENC_VALUES_SUPPORTED: &str = "encrypted_response_enc_values_supported";
+
+/// A fresh ECDH-ES P-256 key pair from the OS CSPRNG. `UnwrapErr` panics if the OS RNG fails,
+/// which fails closed (no key is ever made from bad randomness).
+#[cfg(any(feature = "ecdh-es-research", feature = "conformance"))]
+pub(crate) fn ecdh_es_key() -> SessionKey {
+    Arc::new(LabKey::EcdhEs(jose_ecdh_es::RecipientPrivateKey::generate(
+        &mut jose_ecdh_es::rand_core::UnwrapErr(getrandom::SysRng),
+    )))
+}
+
+/// `client_metadata` of an ECDH-ES session (OpenID4VP 1.0 §5.1, §8.3): `jwks` with the
+/// session's public key (`alg` `ECDH-ES`, `use` `enc`, `kid`; the 1.0 §8.3 example's members)
+/// and `encrypted_response_enc_values_supported` = `A128GCM`, `A256GCM`, the two `enc` values
+/// jose-ecdh-es implements (HAIP 1.0 §5 requires both).
+#[cfg(any(feature = "ecdh-es-research", feature = "conformance"))]
+pub(crate) fn ecdh_es_client_metadata(
+    key: &jose_ecdh_es::RecipientPrivateKey,
+    kid: &KeyId,
+) -> Value {
+    let mut jwk = key.public_key().to_jwk();
+    if let Some(members) = jwk.as_object_mut() {
+        members.insert("use".into(), JWK_USE_ENC.into());
+        members.insert("alg".into(), jose_ecdh_es::ALG_ECDH_ES.into());
+        members.insert("kid".into(), kid.as_str().into());
+    }
+    json!({
+        "jwks": { "keys": [jwk] },
+        ENC_VALUES_SUPPORTED: [jose_ecdh_es::ENC_A128GCM, jose_ecdh_es::ENC_A256GCM],
+    })
 }
 
 /// Private-key handle stored per session; shared across sessions in bounded-trial mode and on
@@ -253,6 +298,11 @@ struct Limits {
 
 pub(crate) struct AppState {
     mode: Mode,
+    /// Body of the `200` answer to a committed response (`{}`, or in conformance mode
+    /// optionally `{"redirect_uri": ...}`, OpenID4VP 1.0 §8.2).
+    success_body: String,
+    /// Prefix of the `authorization_request` URL in the session creation response.
+    authorization_endpoint: String,
     client_id: ClientIdWire,
     /// Signs each request object once, at issue time.
     signer: RequestSigner,
@@ -261,7 +311,7 @@ pub(crate) struct AppState {
     session_ttl: Duration,
     base_url: String,
     /// Unique-uri sessions; `RoutePolicy::UniquePerSession`, in every mode.
-    unique: Registry,
+    pub(crate) unique: Registry,
     /// Research mode only; `RoutePolicy::Shared`.
     shared: Option<SharedRoute>,
     /// Research mode only: the ECDH-ES route (`RoutePolicy::Shared`, one key and `kid`).
@@ -288,6 +338,12 @@ pub(crate) struct AppState {
 }
 
 impl AppState {
+    /// Whether this is a `Mode::Conformance` server.
+    #[cfg(feature = "conformance")]
+    fn conformance(&self) -> bool {
+        self.mode == Mode::Conformance
+    }
+
     fn registry(&self, route: RouteKind) -> Option<&Registry> {
         match route {
             RouteKind::Unique => Some(&self.unique),
@@ -340,6 +396,8 @@ impl AppState {
 pub struct LabServer {
     addr: SocketAddr,
     base_url: String,
+    /// When the server stops accepting by itself (conformance mode's maximum runtime).
+    deadline: Option<Instant>,
     evidence: EvidenceLog,
     state: Arc<AppState>,
     shutdown_drain: Duration,
@@ -441,13 +499,30 @@ impl LabServer {
     /// # Errors
     /// [`StartError`]; a non-loopback address is refused before binding.
     pub async fn start(config: LabConfig) -> Result<Self, StartError> {
-        let request_kid = config::check(&config)?;
+        let key_hint = config::check(&config)?;
         let listener = TcpListener::bind(config.bind).await?;
         let addr = listener.local_addr()?;
         let base_url = format!("http://{addr}");
+        let success_body = json!({}).to_string();
+        // `config::check` admits a conformance configuration in conformance mode only.
+        #[cfg(feature = "conformance")]
+        let (base_url, success_body, tls, max_runtime) = match &config.conformance {
+            Some(conformance) => (
+                conformance.public_origin.base_url(addr.port()),
+                crate::conformance::success_body(conformance),
+                Some(crate::conformance::tls_acceptor(&conformance.credentials)?),
+                Some(conformance.max_runtime),
+            ),
+            None => (base_url, success_body, None, None),
+        };
+        #[cfg(not(feature = "conformance"))]
+        let max_runtime: Option<Duration> = None;
+        let deadline = max_runtime.map(|runtime| Instant::now() + runtime);
 
         let shared = match config.mode {
             Mode::Hardened => None,
+            #[cfg(feature = "conformance")]
+            Mode::Conformance => None,
             Mode::Research(strategy) => {
                 let shared_key = match strategy {
                     SharedRouteStrategy::BoundedTrial(_) => {
@@ -466,9 +541,11 @@ impl LabServer {
             }
         };
         let evidence = EvidenceLog::default();
-        let signer = RequestSigner::new(config.request_signing_key, request_kid);
+        let signer = RequestSigner::new(config.request_signing_key, key_hint);
         let state = Arc::new(AppState {
             mode: config.mode,
+            success_body,
+            authorization_endpoint: config.authorization_endpoint,
             client_id: config.client_id,
             signer,
             acceptance: Arc::new(Acceptance {
@@ -519,11 +596,16 @@ impl LabServer {
             slots: Arc::new(Semaphore::new(config.max_connections)),
         };
         let (stop, stopped) = oneshot::channel::<()>();
-        let header_read_timeout = config.header_read_timeout;
-        let serve = tokio::spawn(serve(listener, app, header_read_timeout, stopped));
+        let connections = Connections {
+            header_read_timeout: config.header_read_timeout,
+            #[cfg(feature = "conformance")]
+            tls,
+        };
+        let serve = tokio::spawn(serve(listener, app, connections, deadline, stopped));
         Ok(Self {
             addr,
             base_url,
+            deadline,
             evidence,
             state,
             shutdown_drain: config.shutdown_drain,
@@ -539,7 +621,9 @@ impl LabServer {
         self.addr
     }
 
-    /// `http://<addr>`, the prefix of every lab URL.
+    /// The prefix of every lab URL: `http://<addr>`, or in conformance mode the public origin
+    /// (`https://<host>:<port>`), which resolves to the loopback bind only through the host's
+    /// forwarding (or a client's resolver override).
     #[must_use]
     pub fn base_url(&self) -> String {
         self.base_url.clone()
@@ -624,9 +708,12 @@ impl LabServer {
             stop,
             mut serve,
             sweep,
+            deadline,
             ..
         } = self;
-        let exited_early = serve.is_finished();
+        // Stopping at the maximum runtime is the kill switch working, not an early exit.
+        let exited_early =
+            serve.is_finished() && deadline.is_none_or(|deadline| Instant::now() < deadline);
         let _ = stop.send(());
         let drained = tokio::time::timeout(shutdown_drain, &mut serve).await;
         *state.commits_open.write().await = false;
@@ -646,27 +733,61 @@ impl LabServer {
     }
 }
 
+/// How accepted connections are served.
+struct Connections {
+    header_read_timeout: Duration,
+    /// Conformance mode: every connection is TLS (rustls) before HTTP.
+    #[cfg(feature = "conformance")]
+    tls: Option<tokio_rustls::TlsAcceptor>,
+}
+
 /// Accept loop: one hyper HTTP/1 connection task per accepted stream, with a header read
-/// timeout (`axum::serve` gives hyper no timer, so it could never fire). When `stopped`
-/// resolves it stops accepting and waits for every connection to finish (idle ones are closed
-/// at once); [`LabServer::shutdown`] bounds that wait.
+/// timeout (`axum::serve` gives hyper no timer, so it could never fire). In conformance mode
+/// each task first completes the TLS handshake, bounded by the same timeout. When `stopped`
+/// resolves, or `deadline` passes, it stops accepting and waits for every connection to finish
+/// (idle ones are closed at once); [`LabServer::shutdown`] bounds that wait.
 async fn serve(
     listener: CappedListener,
     app: Router,
-    header_read_timeout: Duration,
+    connections: Connections,
+    deadline: Option<Instant>,
     stopped: oneshot::Receiver<()>,
 ) {
     let graceful = GracefulShutdown::new();
     let mut http = http1::Builder::new();
     http.timer(TokioTimer::new())
-        .header_read_timeout(header_read_timeout);
+        .header_read_timeout(connections.header_read_timeout);
     let mut stopped = std::pin::pin!(stopped);
+    let expired = async move {
+        match deadline {
+            Some(deadline) => tokio::time::sleep_until(deadline.into()).await,
+            None => std::future::pending().await,
+        }
+    };
+    let mut expired = std::pin::pin!(expired);
     loop {
         let stream = tokio::select! {
             stream = listener.accept() => stream,
             _ = &mut stopped => break,
+            () = &mut expired => break,
         };
         let service = TowerToHyperService::new(app.clone());
+        #[cfg(feature = "conformance")]
+        if let Some(tls) = &connections.tls {
+            let (tls, http, watcher) = (tls.clone(), http.clone(), graceful.watcher());
+            let handshake_timeout = connections.header_read_timeout;
+            tokio::spawn(async move {
+                // A failed or stalled handshake ends only that connection.
+                let Ok(Ok(stream)) =
+                    tokio::time::timeout(handshake_timeout, tls.accept(stream)).await
+                else {
+                    return;
+                };
+                let connection = http.serve_connection(TokioIo::new(stream), service);
+                let _ = watcher.watch(connection).await;
+            });
+            continue;
+        }
         let connection = http.serve_connection(TokioIo::new(stream), service);
         let connection = graceful.watch(connection);
         tokio::spawn(async move {
@@ -887,7 +1008,17 @@ async fn issue(
                 token.to_url_segment()
             );
             let kid = KeyId::new(random(KID_BYTES)?).map_err(|_| fail())?;
-            (&state.unique, token, uri, hpke_key(), kid)
+            // Conformance mode: a fresh ECDH-ES key per session (HAIP 1.0 §5); every other
+            // mode: HPKE-0. Each unique session holds exactly one kind.
+            #[cfg(feature = "conformance")]
+            let key = if state.conformance() {
+                ecdh_es_key()
+            } else {
+                hpke_key()
+            };
+            #[cfg(not(feature = "conformance"))]
+            let key = hpke_key();
+            (&state.unique, token, uri, key, kid)
         }
     };
     let response_uri = ResponseUriWire::new(response_uri).map_err(|_| fail())?;
@@ -919,10 +1050,17 @@ async fn issue(
     // straddle a second boundary and expire the request before its session). The request is
     // published below only once signed; `request_uri` serves these bytes unchanged.
     let lifetime = Lifetime::for_session(issued_at, stored.expires_at());
+    let metadata = match &*key {
+        #[cfg(feature = "conformance")]
+        LabKey::EcdhEs(key) if state.conformance() => {
+            crate::conformance::client_metadata(key, &kid)
+        }
+        _ => client_metadata(&key, &kid),
+    };
     let request_object = state.signer.sign(
         request_object(
             stored.binding(),
-            client_metadata(&key, &kid),
+            metadata,
             state.acceptance.request.dcql_query(),
             lifetime,
         )
@@ -943,11 +1081,24 @@ async fn issue(
         RouteKind::EcdhEs => crate::ecdh_es::ECDH_ES_ROUTE_NAME,
     };
     // `client_id` is what the Authorization Request carries next to `request_uri`; the Request
-    // Object's `client_id` must equal it (OpenID4VP 1.1 §5.10.1).
+    // Object's `client_id` must equal it (OpenID4VP 1.1 §5.10.1). `authorization_request` is
+    // that Authorization Request by reference (RFC 9101 §5.2: `client_id` and `request_uri`)
+    // on the configured endpoint, e.g. the OIDF suite's per-test authorization endpoint.
+    let query = form_urlencoded::Serializer::new(String::new())
+        .append_pair("client_id", state.client_id.as_str())
+        .append_pair("request_uri", &request_uri)
+        .finish();
+    let separator = if state.authorization_endpoint.contains('?') {
+        '&'
+    } else {
+        '?'
+    };
+    let authorization_request = format!("{}{separator}{query}", state.authorization_endpoint);
     let created = json!({
         "session_id": id.as_str(),
         "client_id": state.client_id.as_str(),
         "request_uri": request_uri,
+        "authorization_request": authorization_request,
         "response_uri": response_uri,
         "result_uri": result_uri,
         "route": route_name,
@@ -991,8 +1142,8 @@ impl Lifetime {
 fn client_metadata(key: &LabKey, kid: &KeyId) -> Value {
     match key {
         LabKey::Hpke(key) => json!({ "jwks": { "keys": [hpke_jwk(key, kid)] } }),
-        #[cfg(feature = "ecdh-es-research")]
-        LabKey::EcdhEs(key) => crate::ecdh_es::client_metadata(key, kid),
+        #[cfg(any(feature = "ecdh-es-research", feature = "conformance"))]
+        LabKey::EcdhEs(key) => ecdh_es_client_metadata(key, kid),
     }
 }
 
@@ -1117,6 +1268,10 @@ async fn post_unique(
     let Ok(token) = RouteToken::parse(&token) else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    #[cfg(feature = "conformance")]
+    if state.conformance() {
+        return crate::conformance::post_unique(&state, token, &headers, body).await;
+    }
     let route = Route {
         kind: RouteKind::Unique,
         token,
@@ -1170,7 +1325,7 @@ async fn respond(
 /// admission errors' own answers, and [`GENERIC_REJECTION_BODY`] for everything else.
 pub(crate) fn answer(state: &AppState, record: EvidenceRecord) -> Response {
     let response = match &record.rejection {
-        None => json_response(StatusCode::OK, "{}".to_owned()),
+        None => json_response(StatusCode::OK, state.success_body.clone()),
         Some(Rejection::Admission(a)) => admission_response(*a),
         Some(_) => json_response(StatusCode::BAD_REQUEST, GENERIC_REJECTION_BODY.to_owned()),
     };
@@ -1368,14 +1523,25 @@ pub(crate) fn trial(
     acceptance: &Acceptance,
     now: u64,
 ) -> Trial {
+    open_and_validate(candidates, acceptance, now, |candidate| {
+        let info = SessionInfo::from_binding(candidate.binding());
+        jwe.open(candidate.key().hpke()?, info.as_bytes()).ok()
+    })
+}
+
+/// [`trial`] with the decryption as a parameter: `open` returns a candidate's plaintext, or
+/// `None` when its key is of another kind or does not open the JWE. Every candidate is tried,
+/// every opened plaintext validated against its own candidate.
+pub(crate) fn open_and_validate(
+    candidates: &[Candidate<SessionKey>],
+    acceptance: &Acceptance,
+    now: u64,
+    open: impl Fn(&Candidate<SessionKey>) -> Option<Vec<u8>>,
+) -> Trial {
     let mut out = Trial::default();
     for (index, candidate) in candidates.iter().enumerate() {
         out.attempts += 1;
-        let info = SessionInfo::from_binding(candidate.binding());
-        let Some(key) = candidate.key().hpke() else {
-            continue;
-        };
-        let Ok(plaintext) = jwe.open(key, info.as_bytes()) else {
+        let Some(plaintext) = open(candidate) else {
             continue;
         };
         out.opened += 1;
