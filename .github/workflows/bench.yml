@@ -87,13 +87,24 @@ jobs:
           # the 60-minute timeout for the full matrix; at most 8 sizes of up to 3 digits.
           MAX_ITERATIONS: 1000
           MAX_WARMUP: 100
+        # Counts are compared as base 10 (`10#`): Bash arithmetic reads a leading zero as octal
+        # ("010" = 8, "08" an error). The seed is only shape-checked (up to 20 digits) and never
+        # used in Bash arithmetic, which is signed 64-bit; the runner parses it as a u64 and
+        # refuses anything above u64::MAX.
         run: |
-          [[ "$INPUT_SIZES" =~ ^[0-9]{1,3}(,[0-9]{1,3}){0,7}$ ]] || { echo "invalid sizes"; exit 2; }
-          [[ "$INPUT_ITERATIONS" =~ ^[0-9]{1,4}$ && "$INPUT_ITERATIONS" -le "$MAX_ITERATIONS" ]] \
-            || { echo "iterations must be 1..$MAX_ITERATIONS"; exit 2; }
-          [[ "$INPUT_WARMUP" =~ ^[0-9]{1,3}$ && "$INPUT_WARMUP" -le "$MAX_WARMUP" ]] \
-            || { echo "warmup must be 0..$MAX_WARMUP"; exit 2; }
-          [[ "$INPUT_SEED" =~ ^[0-9]{1,19}$ ]] || { echo "seed must be a decimal u64"; exit 2; }
+          if [[ ! "$INPUT_SIZES" =~ ^[0-9]{1,3}(,[0-9]{1,3}){0,7}$ ]]; then
+            echo "sizes must be 1 to 8 comma-separated counts of up to 3 digits"; exit 2
+          fi
+          if [[ ! "$INPUT_ITERATIONS" =~ ^[0-9]{1,4}$ ]] \
+            || (( 10#$INPUT_ITERATIONS < 1 || 10#$INPUT_ITERATIONS > MAX_ITERATIONS )); then
+            echo "iterations must be 1..$MAX_ITERATIONS"; exit 2
+          fi
+          if [[ ! "$INPUT_WARMUP" =~ ^[0-9]{1,3}$ ]] || (( 10#$INPUT_WARMUP > MAX_WARMUP )); then
+            echo "warmup must be 0..$MAX_WARMUP"; exit 2
+          fi
+          if [[ ! "$INPUT_SEED" =~ ^[0-9]{1,20}$ ]]; then
+            echo "seed must be a decimal u64 (up to 20 digits)"; exit 2
+          fi
           scripts/bench.sh "$BENCH_OUT" -- \
             --sizes "$INPUT_SIZES" \
             --iterations "$INPUT_ITERATIONS" \
