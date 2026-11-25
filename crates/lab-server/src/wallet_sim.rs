@@ -100,6 +100,7 @@ const ALTERED_CLAIM_VALUE: &str = "Mallory";
 
 /// Errors of the simulator.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum WalletError {
     /// HTTP transport error.
     #[error("http: {0}")]

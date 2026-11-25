@@ -478,9 +478,12 @@ impl LabServer {
             unique: registry(RoutePolicy::UniquePerSession),
             shared,
             #[cfg(feature = "ecdh-es-research")]
-            ecdh_es: match config.mode {
-                Mode::Hardened => None,
-                Mode::Research(_) => Some(crate::ecdh_es::EcdhEsRoute::new()?),
+            // Opt-in per server (`config::check` refuses it in hardened mode), so other
+            // research servers create no ECDH-ES key, registry or route.
+            ecdh_es: if config.ecdh_es_route {
+                Some(crate::ecdh_es::EcdhEsRoute::new()?)
+            } else {
+                None
             },
             issued: Mutex::new(Issued::default()),
             decryptions: Arc::new(Semaphore::new(config.max_concurrent_decryptions)),
@@ -800,7 +803,7 @@ fn parse_create(state: &AppState, body: &[u8]) -> Result<(RouteKind, FixedValues
             ("route", Some("unique")) => route = RouteKind::Unique,
             ("route", Some("shared")) if research => route = RouteKind::Shared,
             #[cfg(feature = "ecdh-es-research")]
-            ("route", Some(crate::ecdh_es::ECDH_ES_ROUTE_NAME)) if research => {
+            ("route", Some(crate::ecdh_es::ECDH_ES_ROUTE_NAME)) if state.ecdh_es.is_some() => {
                 route = RouteKind::EcdhEs;
             }
             ("route", _) => return Err("unsupported route"),
@@ -1346,7 +1349,7 @@ pub(crate) async fn commit(
 /// seen to be refused. Only the first validated result is kept; later ones are counted and
 /// dropped, so the work per candidate (and the timing) is the same either way. Unique
 /// strategies return at most one candidate.
-fn trial(
+pub(crate) fn trial(
     jwe: &CompactJwe,
     candidates: &[Candidate<SessionKey>],
     issuer: &TrustedIssuerKey,

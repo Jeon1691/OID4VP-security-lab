@@ -1,6 +1,6 @@
 //! The OpenID4VP 1.0-style ECDH-ES research route (`ecdh-es-research`;
 //! docs/adr/0001-ecdh-es-research-route.md): experiments E1-E7 of
-//! `docs/interop/issue-792-reproduction.md` §7 (S23-S33), over real loopback HTTP with the
+//! `docs/interop/issue-792-reproduction.md` §7 (S23-S38), over real loopback HTTP with the
 //! wallet simulator.
 //!
 //! Spec text these tests exercise:
@@ -30,12 +30,17 @@
 //! - E6: no downgrade or cross-route acceptance: HPKE-0 to the ECDH-ES route and ECDH-ES to the
 //!   HPKE-0 unique and shared routes are refused at parse; a plaintext `vp_token` is refused at
 //!   admission on the ECDH-ES route too.
-//! - E7: hardened mode serves no ECDH-ES route (404) and creates no ECDH-ES session.
+//! - E7: hardened mode serves no ECDH-ES route (404) and creates no ECDH-ES session, and a
+//!   research server serves it only when configured to (`LabConfig::ecdh_es_route`).
+//! - The route's pending sessions are capped at `MAX_CANDIDATE_BUDGET`; a `state` the research
+//!   knob gives two sessions is disambiguated by holder binding; expired sessions are never
+//!   candidates.
 //!
 //! Every test starts its own loopback lab server. All keys, nonces, states and presentations
 //! are synthetic.
 
 use std::collections::HashSet;
+use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -47,15 +52,20 @@ use lab_server::wallet_sim::{
 use lab_server::{
     AdmissionError, CommitResult, CryptoResult, EvidenceRecord, GENERIC_REJECTION_BODY, LabConfig,
     LabServer, Mode, Rejection, RequestSigningKey, RouteKind, SYNTHETIC_CREDENTIAL_QUERY_ID,
-    SharedRouteStrategy, TrustedIssuerKey, ValidationError, ValidationResult,
+    SharedRouteStrategy, StartError, TrustedIssuerKey, ValidationError, ValidationResult,
 };
 use serde_json::{Value, json};
-use session_core::{CandidateBudget, ResolveError};
+use session_core::{CandidateBudget, MAX_CANDIDATE_BUDGET, ResolveError};
 
 /// HTTP statuses the tests pin (RFC 9110 §15).
 const OK: u16 = 200;
 const BAD_REQUEST: u16 = 400;
 const NOT_FOUND: u16 = 404;
+const SERVICE_UNAVAILABLE: u16 = 503;
+/// Session lifetime of the expiry test: the shortest whole-second TTL (Request Object `exp` is
+/// a whole-second NumericDate), and how far past it the test waits so the session is surely due.
+const SHORT_TTL: Duration = Duration::from_secs(1);
+const EXPIRY_MARGIN: Duration = Duration::from_millis(250);
 /// E1 population: eight live sessions on one shared key (the middle `http_e2e.rs` size).
 const POPULATION: usize = 8;
 /// Two sessions are enough to show a mis-correlation.
@@ -95,13 +105,35 @@ struct Lab {
     wallet: WalletSim,
 }
 
+/// `mode` with the fixture keys; the ECDH-ES route is off (`LabConfig::new`'s default).
+fn config(mode: Mode) -> LabConfig {
+    LabConfig::new(
+        mode,
+        RequestSigningKey::from_jwk(FIXTURE_JWK).expect("fixture signing key"),
+        TrustedIssuerKey::from_jwk(ISSUER_PUBLIC_JWK).expect("fixture issuer key"),
+    )
+}
+
+/// Research mode with the shared HPKE-0 route (one shared key, budget `budget`).
+fn bounded_trial(budget: usize) -> Mode {
+    Mode::Research(SharedRouteStrategy::BoundedTrial(
+        CandidateBudget::new(budget).expect("valid budget"),
+    ))
+}
+
+/// The research configuration of these tests: [`bounded_trial`] plus the opt-in ECDH-ES route.
+fn ecdh_es_config(budget: usize) -> LabConfig {
+    let mut config = config(bounded_trial(budget));
+    config.ecdh_es_route = true;
+    config
+}
+
 impl Lab {
     async fn start(mode: Mode) -> Self {
-        let config = LabConfig::new(
-            mode,
-            RequestSigningKey::from_jwk(FIXTURE_JWK).expect("fixture signing key"),
-            TrustedIssuerKey::from_jwk(ISSUER_PUBLIC_JWK).expect("fixture issuer key"),
-        );
+        Self::with_config(config(mode)).await
+    }
+
+    async fn with_config(config: LabConfig) -> Self {
         let server = LabServer::start(config).await.expect("lab server starts");
         assert!(server.local_addr().ip().is_loopback());
         let issuer = SyntheticIssuer::from_jwk(ISSUER_JWK).expect("fixture issuer");
@@ -114,10 +146,7 @@ impl Lab {
     /// Research mode (shared HPKE-0 route with one shared key, budget `budget`) plus the
     /// ECDH-ES route.
     async fn research(budget: usize) -> Self {
-        Self::start(Mode::Research(SharedRouteStrategy::BoundedTrial(
-            CandidateBudget::new(budget).expect("valid budget"),
-        )))
-        .await
+        Self::with_config(ecdh_es_config(budget)).await
     }
 
     async fn sessions(&self, route: RouteKind, n: usize) -> Vec<CreatedSession> {
@@ -705,12 +734,170 @@ async fn ecdh_es_route_refuses_plaintext_vp_token_at_admission() {
     lab.server.shutdown().await;
 }
 
-/// E7. Hardened mode has no ECDH-ES route: a POST to it is 404 and never reaches the pipeline
-/// (no evidence record), and a session for it is refused at creation (400), while an honest
-/// HPKE-0 unique-route flow still works.
+/// E7. Hardened mode has no ECDH-ES route and creates no ECDH-ES session; asking a hardened
+/// server for the route (`LabConfig::ecdh_es_route`) is refused at start.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn hardened_mode_has_no_ecdh_es_route_and_refuses_ecdh_es_sessions() {
     let lab = Lab::start(Mode::Hardened).await;
+    assert_no_ecdh_es_route(&lab).await;
+    lab.server.shutdown().await;
+
+    let mut asked = config(Mode::Hardened);
+    asked.ecdh_es_route = true;
+    assert!(matches!(
+        LabServer::start(asked).await,
+        Err(StartError::EcdhEsRouteNeedsResearchMode)
+    ));
+}
+
+/// The route is opt-in per server: a research-mode server without `LabConfig::ecdh_es_route`
+/// (both shared strategies) has no ECDH-ES key, route or sessions, exactly as in hardened mode.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn research_mode_without_the_opt_in_has_no_ecdh_es_route() {
+    for mode in [
+        bounded_trial(PAIR),
+        Mode::Research(SharedRouteStrategy::UniqueKid),
+    ] {
+        let lab = Lab::start(mode).await;
+        assert_no_ecdh_es_route(&lab).await;
+        lab.server.shutdown().await;
+    }
+}
+
+/// The route caps its pending sessions at session-core's `MAX_CANDIDATE_BUDGET`: the session
+/// after the cap is refused (503) while other routes still issue sessions, and an honest
+/// response for the last session commits after exactly that many ECDH-ES opens, all of which
+/// open.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ecdh_es_route_caps_pending_sessions_at_the_candidate_budget() {
+    let lab = Lab::research(PAIR).await;
+    let sessions = lab.sessions(RouteKind::EcdhEs, MAX_CANDIDATE_BUDGET).await;
+    let refused = lab
+        .wallet
+        .create_session(&lab.server.base_url(), RouteKind::EcdhEs, None)
+        .await;
+    assert!(
+        matches!(refused, Err(WalletError::Status(SERVICE_UNAVAILABLE))),
+        "{refused:?}"
+    );
+    lab.session(RouteKind::Unique, None, None).await;
+
+    let last = sessions.last().expect("sessions were created");
+    let request = lab.request(last).await;
+    let (status, _) = lab.respond(&request, &SealOptions::default()).await;
+    assert_eq!(status, OK);
+    let record = lab.record();
+    assert_eq!(record.candidate_count, MAX_CANDIDATE_BUDGET);
+    assert_eq!(record.hpke_attempts, MAX_CANDIDATE_BUDGET);
+    assert_eq!(
+        record.crypto_result,
+        CryptoResult::Opened {
+            opened: MAX_CANDIDATE_BUDGET
+        }
+    );
+    assert_committed(&record, last);
+    lab.server.shutdown().await;
+}
+
+/// The research `state` knob gives two sessions the same `state` but each its own nonce: the
+/// `state` names both, and holder binding disambiguates. A's honest response validates for A
+/// only and commits it; posted again, it is named for B alone and refused by B's KB-JWT nonce
+/// binding (`KbNonceMismatch`). B then commits with its own response.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ecdh_es_duplicate_state_with_distinct_nonces_is_disambiguated_by_holder_binding() {
+    let lab = Lab::research(PAIR).await;
+    let a = lab
+        .session(RouteKind::EcdhEs, None, Some(REUSED_STATE))
+        .await;
+    let b = lab
+        .session(RouteKind::EcdhEs, None, Some(REUSED_STATE))
+        .await;
+    let request_a = lab.request(&a).await;
+    let request_b = lab.request(&b).await;
+    assert_eq!(state_of(&request_a), state_of(&request_b));
+    assert_ne!(request_a.nonce, request_b.nonce);
+
+    let jwe = lab.seal(
+        &request_a,
+        ContentEncryption::A128Gcm,
+        &SealOptions::default(),
+    );
+    let (status, _) = lab.post(&request_a.response_uri, &jwe).await;
+    assert_eq!(status, OK);
+    let record = lab.record();
+    assert_eq!(record.crypto_result, CryptoResult::Opened { opened: PAIR });
+    assert_eq!(
+        record.validation_result,
+        ValidationResult::Passed { validated: 1 }
+    );
+    assert_committed(&record, &a);
+
+    let (status, body) = lab.post(&request_a.response_uri, &jwe).await;
+    assert_generic(status, &body);
+    let record = lab.record();
+    assert_eq!(record.crypto_result, CryptoResult::Opened { opened: 1 });
+    assert_eq!(
+        record.rejection,
+        Some(Rejection::Validation(ValidationError::KbNonceMismatch))
+    );
+    lab.assert_pending(&[&b]).await;
+    let (status, _) = lab.respond(&request_b, &SealOptions::default()).await;
+    assert_eq!(status, OK);
+    assert_committed(&lab.record(), &b);
+    lab.server.shutdown().await;
+}
+
+/// Expiry: expired sessions are never candidates. A response for expired A while B is live
+/// opens for B only and names no live session (`StateUnknown`); once B has expired too, the
+/// route has no live session and resolve reports the expiry (`Resolve(SessionExpired)`)
+/// before any decryption. Nothing is consumed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ecdh_es_response_for_an_expired_session_is_refused() {
+    let mut config = ecdh_es_config(PAIR);
+    config.session_ttl = SHORT_TTL;
+    let lab = Lab::with_config(config).await;
+    let a = lab.session(RouteKind::EcdhEs, None, None).await;
+    let request_a = lab.request(&a).await;
+    let jwe = lab.seal(
+        &request_a,
+        ContentEncryption::A128Gcm,
+        &SealOptions::default(),
+    );
+    tokio::time::sleep(SHORT_TTL + EXPIRY_MARGIN).await;
+
+    let b = lab.session(RouteKind::EcdhEs, None, None).await;
+    let (status, body) = lab.post(&request_a.response_uri, &jwe).await;
+    assert_generic(status, &body);
+    let record = lab.record();
+    assert_eq!(record.candidate_count, 1, "only b is live");
+    assert_eq!(record.crypto_result, CryptoResult::Opened { opened: 1 });
+    assert_eq!(
+        record.rejection,
+        Some(Rejection::Validation(ValidationError::StateUnknown))
+    );
+    lab.assert_pending(&[&b]).await;
+
+    tokio::time::sleep(SHORT_TTL + EXPIRY_MARGIN).await;
+    let (status, body) = lab.post(&request_a.response_uri, &jwe).await;
+    assert_generic(status, &body);
+    let record = lab.record();
+    assert_eq!(
+        record.rejection,
+        Some(Rejection::Resolve(ResolveError::SessionExpired))
+    );
+    assert_eq!(record.hpke_attempts, 0);
+    // The result endpoint shows the stored state, which the sweep (not yet run here) moves to
+    // `expired`; what matters is that neither session was consumed.
+    for session in [&a, &b] {
+        assert_ne!(lab.state(session).await, "consumed");
+    }
+    lab.server.shutdown().await;
+}
+
+/// The ECDH-ES route is absent from `lab`: a POST to it is 404 and never reaches the pipeline
+/// (no evidence record), a session for it is refused at creation (400), and an honest HPKE-0
+/// unique-route flow still works.
+async fn assert_no_ecdh_es_route(lab: &Lab) {
     let base = lab.server.base_url();
     let reply = lab
         .wallet
@@ -753,5 +940,4 @@ async fn hardened_mode_has_no_ecdh_es_route_and_refuses_ecdh_es_sessions() {
     let (status, _) = lab.post(&request.response_uri, &jwe).await;
     assert_eq!(status, OK);
     assert_committed(&lab.record(), &unique);
-    lab.server.shutdown().await;
 }
