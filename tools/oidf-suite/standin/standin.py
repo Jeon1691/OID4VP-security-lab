@@ -11,6 +11,7 @@ host.docker.internal.
 Usage (suite up, see README §2):
   uv run --with cryptography==46.0.3 python -I tools/oidf-suite/standin/standin.py \
       --plan plain|haip --out OUT_DIR [--san-mismatch] [--reuse-enc-key] [--no-redirect-uri] MODULE...
+OUT_DIR must not exist yet (or be empty): every run gets its own directory.
 
 Experiment switches (each makes the stand-in deliberately wrong in one way):
   --san-mismatch     request-object leaf SAN is DNS:san-mismatch.invalid only (plain plan)
@@ -67,6 +68,10 @@ BITS_PER_BYTE = 8
 KDF_WORD_BYTES = 4
 # 1x1 transparent PNG: automation stand-in for a screenshot. It is NOT evidence of anything.
 PNG_1X1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+# Per-connection socket deadline, covering the TLS handshake and each read: a peer that stalls
+# ties up only its own worker thread, and only this long. The suite's own client times out at
+# 60 s, so 10 s is ample for a well-behaved peer on loopback.
+CONNECTION_TIMEOUT_SECONDS = 10
 # Module-name fragments of the negative modules (answered with 400).
 NEGATIVE = ("invalid", "iat-in", "wrong-vct", "revoked")
 
@@ -178,7 +183,31 @@ CAPTURES: list = []
 LOCK = threading.Lock()
 
 
+class TlsThreadingServer(http.server.ThreadingHTTPServer):
+    """TLS server whose handshake runs in the per-connection worker thread, under a deadline.
+
+    Wrapping the listening socket would make accept() do the handshake on the single accept
+    loop, so one stalled peer would block every other connection.
+    """
+
+    def __init__(self, address, handler, ssl_context):
+        super().__init__(address, handler)
+        self.ssl_context = ssl_context
+
+    def get_request(self):
+        sock, addr = self.socket.accept()
+        sock.settimeout(CONNECTION_TIMEOUT_SECONDS)
+        return self.ssl_context.wrap_socket(sock, server_side=True, do_handshake_on_connect=False), addr
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
+    timeout = CONNECTION_TIMEOUT_SECONDS
+
+    def setup(self):
+        # Runs in the worker thread; the socket deadline set in get_request bounds the handshake.
+        self.request.do_handshake()
+        super().setup()
+
     def log_message(self, *args):
         pass
 
@@ -284,6 +313,10 @@ def main():
     ap.add_argument("--no-redirect-uri", action="store_true")
     ap.add_argument("modules", nargs="+")
     args = ap.parse_args()
+    # Each run gets its own directory, as scripts/bench.sh does: a rerun must not overwrite
+    # results.json or leave stale module logs from an earlier run next to the new ones.
+    if os.path.exists(args.out) and (not os.path.isdir(args.out) or os.listdir(args.out)):
+        ap.exit(2, f"--out {args.out} already exists and is not an empty directory; pick a new run directory\n")
     os.makedirs(args.out, exist_ok=True)
 
     haip = args.plan == "haip"
@@ -299,10 +332,9 @@ def main():
     with open(key_path, "wb") as f:
         f.write(pki.tls_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                                           serialization.NoEncryption()))
-    srv = http.server.ThreadingHTTPServer(("127.0.0.1", STUB_PORT), Handler)
     sctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     sctx.load_cert_chain(cert_path, key_path)
-    srv.socket = sctx.wrap_socket(srv.socket, server_side=True)
+    srv = TlsThreadingServer(("127.0.0.1", STUB_PORT), Handler, sctx)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
     config = {"alias": f"standin-{args.plan}-{secrets.token_hex(ALIAS_SUFFIX_BYTES)}",
