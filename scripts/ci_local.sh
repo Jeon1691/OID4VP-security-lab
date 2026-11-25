@@ -258,6 +258,19 @@ REQUIRED_TESTS=(
   kb_jwt_with_corrupted_signature_is_rejected
   credential_with_minimal_cnf_jwk_is_accepted
   configured_credential_query_is_requested_and_enforced
+  sd_jwt::tests::suite_shaped_pid_credential_with_status_and_decoys_is_accepted
+  # lab-server conformance mode (`conformance`, ADR 0002): HTTPS on loopback, x509 client ids,
+  # ECDH-ES on the unique route, the start checks, the time box and the explicit flag.
+  conformance_round_trip_over_https_commits_with_x509_san_dns
+  conformance_round_trip_with_x509_hash_a256gcm_and_redirect_uri
+  conformance_sessions_get_fresh_encryption_keys
+  conformance_negative_responses_are_refused_and_consume_nothing
+  conformance_route_refuses_hpke_and_hpke_route_refuses_ecdh_es
+  conformance_mode_serves_no_shared_or_research_routes
+  wallet_refuses_conformance_request_without_x5c_or_for_another_client_id
+  conformance_mode_refuses_to_start_unless_everything_fits
+  conformance_server_stops_at_its_maximum_runtime
+  binary_refuses_conformance_mode_from_the_environment
   rfc9901_fixture_provenance_is_pinned
   rfc9901_disclosure_digests_match_the_printed_hashes
   rfc9901_section_5_2_presentation_verifies_and_yields_the_printed_payload
@@ -525,11 +538,55 @@ verifier_without_sealing() {
   own="$(cargo tree --locked -p lab-server -e normal,features -i lab-server)" || return 1
   normal="$(cargo tree --locked -p lab-server -e normal --prefix none)" || return 1
   if grep -F 'feature "test-support"' <<<"$features" \
-    || grep -E 'lab-server feature "(wallet-sim|lab-instrumentation|ecdh-es-research)"' <<<"$own" \
+    || grep -E 'lab-server feature "(wallet-sim|lab-instrumentation|ecdh-es-research|conformance)"' <<<"$own" \
     || grep -E '^(reqwest|openid4vp|ssi|ssi-[a-z0-9-]+) ' <<<"$normal"; then
-    echo "test-only or research feature reachable from the default lab-server build"
+    echo "test-only, research or conformance feature reachable from the default lab-server build"
     return 1
   fi
+  # No TLS / X.509 code in the default build (conformance mode only, ADR 0002).
+  if grep -E "$TLS_TREE_RE" <<<"$normal"; then
+    echo "the default lab-server build contains TLS / X.509 crates"
+    return 1
+  fi
+}
+
+# The `conformance` build (docs/adr/0002-conformance-mode.md) must reach its TLS stack and
+# jose-ecdh-es (so the checks below inspect a real graph), with the ring provider only (no
+# aws-lc-rs), and without sealing (`test-support`), the test-only lab-server features, the
+# research route, or the SpruceID / HTTP-client tree.
+TLS_TREE_RE='^(rustls|rustls-webpki|tokio-rustls|ring|aws-lc-rs|aws-lc-sys) '
+conformance_without_sealing() {
+  local tree own codecs
+  tree="$(cargo tree --locked -p lab-server --features conformance -e normal --prefix none)" \
+    || return 1
+  own="$(cargo tree --locked -p lab-server --features conformance -e normal,features \
+    -i lab-server)" || return 1
+  codecs="$(cargo tree --locked -p lab-server --features conformance -e normal,features \
+    -i jose-ecdh-es)" || return 1
+  if ! grep -Eq '^rustls v' <<<"$tree" || ! grep -Eq '^jose-ecdh-es v' <<<"$tree"; then
+    echo "the conformance build does not reach rustls / jose-ecdh-es; this check would be vacuous"
+    return 1
+  fi
+  if grep -E '^(aws-lc-rs|aws-lc-sys) ' <<<"$tree"; then
+    echo "the conformance build contains aws-lc (ring is the only provider)"
+    return 1
+  fi
+  if grep -F 'feature "test-support"' <<<"$codecs" \
+    || grep -E 'lab-server feature "(wallet-sim|lab-instrumentation|ecdh-es-research)"' <<<"$own" \
+    || grep -E '^(reqwest|openid4vp|ssi|ssi-[a-z0-9-]+|josekit) ' <<<"$tree"; then
+    echo "sealing, test-only or research code reachable from the conformance build"
+    return 1
+  fi
+}
+
+# The binary refuses conformance mode unless built with the feature, before reading any file
+# (ADR 0002 kill switch). Built into its own target directory, so no feature-unified build of
+# the workspace can stand in for it.
+binary_refuses_conformance_without_feature() {
+  local out
+  out="$(cargo run --locked -q -p lab-server --target-dir target/verifier-only -- \
+    --mode conformance 2>&1)" && return 1
+  grep -F 'was built without the' <<<"$out"
 }
 
 # session-core's `store-backend` feature (candidate / snapshot constructors for store backends)
@@ -553,8 +610,8 @@ verifier_without_store_backend() {
 default_members_are_verifier_builds() {
   local own codec sealing=0
   own="$(cargo tree --locked -e normal,features -i lab-server)" || return 1
-  if grep -E 'lab-server feature "(wallet-sim|lab-instrumentation|ecdh-es-research)"' <<<"$own"; then
-    echo "a default workspace member enables a test-only or research lab-server feature"
+  if grep -E 'lab-server feature "(wallet-sim|lab-instrumentation|ecdh-es-research|conformance)"' <<<"$own"; then
+    echo "a default workspace member enables a test-only, research or conformance lab-server feature"
     return 1
   fi
   for codec in jose-hpke jose-ecdh-es; do
@@ -580,6 +637,12 @@ stage_supply_chain() {
     cargo clippy --locked -p lab-server --features wallet-sim --lib --bins -- -D warnings
   step lab_server_ecdh_es_research_check \
     cargo clippy --locked -p lab-server --features ecdh-es-research --lib --bins -- -D warnings
+  step lab_server_conformance_check \
+    cargo clippy --locked -p lab-server --features conformance --lib --bins -- -D warnings
+  step lab_server_wallet_sim_conformance_check \
+    cargo clippy --locked -p lab-server --features wallet-sim,conformance --lib --bins -- -D warnings
+  step conformance_without_sealing conformance_without_sealing
+  step binary_refuses_conformance_without_feature binary_refuses_conformance_without_feature
   step verifier_without_store_backend verifier_without_store_backend
   step audit cargo audit --deny warnings
 }
