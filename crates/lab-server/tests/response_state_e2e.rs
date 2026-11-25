@@ -20,6 +20,10 @@
 //!   answer the generic 400, consume nothing, and a later honest response still commits.
 //! - Under bounded trial, a JWE that opens for B but carries A's `state` does not validate for
 //!   B, and nothing is claimed.
+//! - A Verifier that reuses a nonce (research knob) but keeps `state` fresh: the `state` check
+//!   alone selects the one session an honest response answers, and refuses a verbatim replay
+//!   to the other session before the replay guard is reached.
+//! - The research `state` knob is research-mode only, bounded and charset-checked.
 //!
 //! Every test starts its own loopback lab server and drives it with the wallet simulator. All
 //! keys, nonces, states and presentations are synthetic.
@@ -28,12 +32,13 @@ use std::collections::HashSet;
 
 use lab_server::wallet_sim::{
     CreatedSession, PresentationTamper, RequestObject, SealOptions, StateChoice, SyntheticIssuer,
-    WalletSim,
+    WalletError, WalletSim,
 };
 use lab_server::{
-    CommitResult, CryptoResult, EvidenceRecord, GENERIC_REJECTION_BODY, LabConfig, LabServer, Mode,
-    Rejection, RequestSigningKey, RouteKind, SYNTHETIC_CREDENTIAL_QUERY_ID, SharedRouteStrategy,
-    TrustedIssuerKey, ValidationError, ValidationResult,
+    CommitResult, CryptoResult, EvidenceRecord, GENERIC_REJECTION_BODY, LabConfig, LabServer,
+    MAX_RESEARCH_STATE_LEN, Mode, Rejection, RequestSigningKey, RouteKind,
+    SYNTHETIC_CREDENTIAL_QUERY_ID, SharedRouteStrategy, TrustedIssuerKey, ValidationError,
+    ValidationResult,
 };
 use serde_json::json;
 use session_core::CandidateBudget;
@@ -50,6 +55,11 @@ const SESSIONS_PER_ROUTE: usize = 4;
 const STATE_LEN: usize = 22;
 /// A non-string `state` (JSON number).
 const NUMERIC_STATE: u64 = 42;
+/// Research-knob values: a nonce two sessions share, and a `state` outside the §5.2 charset.
+const REUSED_NONCE: &str = "lab-reused-nonce";
+const NOT_URL_SAFE_STATE: &str = "a b";
+/// One character, repeated to build research states at and beyond the length cap.
+const STATE_CHAR: &str = "s";
 
 /// Synthetic SpruceID fixture key that signs every request object (its did:key is the default
 /// `client_id`), and the synthetic SD-JWT VC issuer (private for the wallet, public for the
@@ -335,5 +345,127 @@ async fn bounded_trial_jwe_that_opens_for_b_but_carries_a_state_is_refused_for_b
 
     lab.honest_commits(b).await;
     lab.honest_commits(a).await;
+    lab.server.shutdown().await;
+}
+
+/// A Verifier that reuses a nonce under a shared key and route (violating §5.2) gives two
+/// sessions the same `session_info`, so an honest response opens for both. Their `state`s are
+/// still fresh, and the per-candidate `state` check selects the one it answers: A commits
+/// without `Ambiguous`. A's JWE replayed to B opens again and is refused by B's `state`
+/// (`StateMismatch`) before the replay guard is consulted. Lab finding: under nonce reuse,
+/// `state` restores the selection for inadvertent and verbatim responses; a sender that
+/// re-seals with B's `state` still meets the replay guard (`HolderProofReplay` in
+/// `http_e2e.rs`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reused_nonce_with_fresh_state_selects_one_session_and_refuses_a_replay() {
+    let lab = Lab::start(shared_key(PAIR)).await;
+    let mut sessions = Vec::with_capacity(PAIR);
+    for _ in 0..PAIR {
+        sessions.push(
+            lab.wallet
+                .create_session(
+                    &lab.server.base_url(),
+                    RouteKind::Shared,
+                    Some(REUSED_NONCE),
+                )
+                .await
+                .expect("research mode accepts a fixed nonce"),
+        );
+    }
+    let (a, b) = (&sessions[0], &sessions[1]);
+    let request_a = lab.request(a).await;
+    assert_ne!(state_of(&request_a), state_of(&lab.request(b).await));
+
+    let jwe = lab
+        .wallet
+        .seal(&request_a, &SealOptions::default())
+        .expect("seal");
+    let reply = lab
+        .wallet
+        .post_response(&request_a.response_uri, &jwe)
+        .await
+        .expect("post");
+    assert_eq!(reply.status, OK);
+    let record = lab.record();
+    assert_eq!(record.hpke_attempts, PAIR);
+    assert_eq!(
+        record.crypto_result,
+        CryptoResult::Opened { opened: PAIR },
+        "the reused nonce gives both sessions one session_info"
+    );
+    assert_eq!(
+        record.validation_result,
+        ValidationResult::Passed { validated: 1 },
+        "only A's state matches"
+    );
+    assert_eq!(record.commit_result, CommitResult::Committed);
+    assert_eq!(
+        record.committed_session.as_ref().map(|id| id.as_str()),
+        Some(a.session_id.as_str())
+    );
+
+    let reply = lab
+        .wallet
+        .post_response(&request_a.response_uri, &jwe)
+        .await
+        .expect("post");
+    assert_generic(reply.status, &reply.body);
+    let record = lab.record();
+    assert_eq!(record.hpke_attempts, 1, "only B is live");
+    assert_eq!(record.crypto_result, CryptoResult::Opened { opened: 1 });
+    assert_eq!(
+        record.rejection,
+        Some(Rejection::Validation(ValidationError::StateMismatch))
+    );
+    assert_eq!(record.commit_result, CommitResult::NotRun);
+    // B is not committed here: under the reused nonce, B's honest KB-JWT can equal A's
+    // (same `aud`, `nonce`, `sd_hash` and, within one second, `iat`), which the replay guard
+    // binds to A (`HolderProofReplay`).
+    assert_eq!(lab.state(b).await, "pending");
+    lab.server.shutdown().await;
+}
+
+/// The caller-chosen `state` of `POST /lab/v1/sessions` models a Verifier that reuses one; it
+/// is research-mode only, at most `MAX_RESEARCH_STATE_LEN` bytes, and must be a §5.2 value. A
+/// state at the cap is signed, echoed and commits.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn research_state_knob_is_research_only_bounded_and_charset_checked() {
+    let refused = |result: Result<CreatedSession, WalletError>| match result {
+        Err(WalletError::Status(BAD_REQUEST)) => {}
+        other => panic!("fixed state accepted: {other:?}"),
+    };
+    let hardened = Lab::start(Mode::Hardened).await;
+    refused(
+        hardened
+            .wallet
+            .create_research_session(
+                &hardened.server.base_url(),
+                RouteKind::Unique,
+                None,
+                Some(STATE_CHAR),
+            )
+            .await,
+    );
+    hardened.server.shutdown().await;
+
+    let lab = Lab::start(shared_key(PAIR)).await;
+    let base = lab.server.base_url();
+    let longest = STATE_CHAR.repeat(MAX_RESEARCH_STATE_LEN);
+    let session = lab
+        .wallet
+        .create_research_session(&base, RouteKind::Shared, None, Some(&longest))
+        .await
+        .expect("state at the cap is accepted");
+    assert_eq!(state_of(&lab.request(&session).await), longest);
+    lab.honest_commits(&session).await;
+
+    let too_long = STATE_CHAR.repeat(MAX_RESEARCH_STATE_LEN + 1);
+    for bad in [too_long.as_str(), NOT_URL_SAFE_STATE, ""] {
+        refused(
+            lab.wallet
+                .create_research_session(&base, RouteKind::Shared, None, Some(bad))
+                .await,
+        );
+    }
     lab.server.shutdown().await;
 }

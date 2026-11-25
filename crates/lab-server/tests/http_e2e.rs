@@ -374,18 +374,26 @@ async fn bounded_trial_over_budget_is_rejected_without_decryption() {
 }
 
 /// Bounded trial: two sessions that both decrypt and validate (a verifier that reused a nonce
-/// under a shared key) are an integrity failure. Nothing is claimed.
+/// and a `state` under a shared key) are an integrity failure. Nothing is claimed. With a
+/// fresh `state` per session the `state` check alone tells them apart
+/// (`response_state_e2e.rs`), so both are reused here to reach the integrity check.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn bounded_trial_with_two_validating_sessions_is_an_integrity_failure() {
     const REUSED_NONCE: &str = "lab-reused-nonce";
+    const REUSED_STATE: &str = "lab-reused-state";
     let lab = Lab::start(trial(TRIAL_SIZES[0])).await;
     let mut sessions = Vec::new();
     for _ in 0..2 {
         let s = lab
             .wallet
-            .create_session(&lab.base(), RouteKind::Shared, Some(REUSED_NONCE))
+            .create_research_session(
+                &lab.base(),
+                RouteKind::Shared,
+                Some(REUSED_NONCE),
+                Some(REUSED_STATE),
+            )
             .await
-            .expect("research mode accepts a fixed nonce");
+            .expect("research mode accepts a fixed nonce and state");
         sessions.push(s);
     }
 
@@ -1106,16 +1114,22 @@ async fn wait_parked(server: &LabServer, n: usize) {
 
 /// Review H1: in research mode a session created with a reused nonce on the shared route has
 /// the same session_info as an already consumed one, so a previously accepted JWE decrypts and
-/// validates for it. The verifier-wide replay guard refuses it (evidence CrossSessionReplay)
-/// and the new session stays pending.
+/// (with the `state` reused too) validates for it. The verifier-wide replay guard refuses it
+/// (evidence CrossSessionReplay) and the new session stays pending. With a fresh `state` the
+/// same replay is already refused by the `state` check (`response_state_e2e.rs`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cross_session_replay_on_shared_route_is_rejected() {
     const REUSED_NONCE: &str = "lab-reused-nonce";
+    const REUSED_STATE: &str = "lab-reused-state";
     let lab = Lab::start(trial(TRIAL_SIZES[0])).await;
     let base = lab.base();
     let create = || {
-        lab.wallet
-            .create_session(&base, RouteKind::Shared, Some(REUSED_NONCE))
+        lab.wallet.create_research_session(
+            &base,
+            RouteKind::Shared,
+            Some(REUSED_NONCE),
+            Some(REUSED_STATE),
+        )
     };
     let a = create().await.expect("session a");
     let (jwe, status, _) = lab.respond(&a, &SealOptions::default()).await;
@@ -1144,8 +1158,10 @@ async fn cross_session_replay_on_shared_route_is_rejected() {
 /// PR #10 review: the JWE digest alone does not stop a replay of the *holder proof*. With a
 /// reused nonce and the same client_id, A's exact SD-JWT+KB re-sealed into a fresh JWE for B
 /// has a new ciphertext digest but the same verified KB-JWT; it is refused as
-/// `HolderProofReplay` and B stays pending. A session's own retry with a fresh JWE still
-/// reaches the claim and is reported there as a replay.
+/// `HolderProofReplay` and B stays pending. The re-sealed payload echoes B's own `state`
+/// (the sender reads it from B's Request Object), so the `state` check passes and only the
+/// guard stops it. A session's own retry with a fresh JWE still reaches the claim and is
+/// reported there as a replay.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn holder_proof_resealed_for_another_session_is_rejected() {
     const REUSED_NONCE: &str = "lab-reused-nonce";

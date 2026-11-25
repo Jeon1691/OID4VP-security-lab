@@ -583,6 +583,22 @@ impl WalletSim {
         route: RouteKind,
         nonce: Option<&str>,
     ) -> Result<CreatedSession, WalletError> {
+        self.create_research_session(base_url, route, nonce, None)
+            .await
+    }
+
+    /// Lab driver: [`Self::create_session`], optionally also with a fixed `state` (research
+    /// mode only), to model a Verifier that reuses both.
+    ///
+    /// # Errors
+    /// Transport errors, or any status other than 201.
+    pub async fn create_research_session(
+        &self,
+        base_url: &str,
+        route: RouteKind,
+        nonce: Option<&str>,
+        state: Option<&str>,
+    ) -> Result<CreatedSession, WalletError> {
         let route = match route {
             RouteKind::Unique => "unique",
             RouteKind::Shared => "shared",
@@ -590,6 +606,9 @@ impl WalletSim {
         let mut body = json!({ "route": route });
         if let Some(nonce) = nonce {
             body["nonce"] = nonce.into();
+        }
+        if let Some(state) = state {
+            body[RESPONSE_STATE] = state.into();
         }
         let url = format!("{base_url}/lab/v1/sessions");
         let reply = self

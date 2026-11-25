@@ -1,11 +1,22 @@
 //! Presentation validation with holder binding (Evidence level 3, synthetic credentials).
 //!
-//! The decrypted payload must be a JSON object (unique member names) whose `vp_token` answers
-//! the lab's single DCQL Credential Query (OpenID4VP 1.1 §6.1, B.3.5) with exactly one
-//! presentation (§8.1: keyed by the query `id`, an array of one Presentation since `multiple`
-//! is omitted): a compact SD-JWT+KB string (B.3.6). It is verified by
-//! [`crate::verify_sd_jwt_vc`] against the configured trusted issuer key, with the KB-JWT bound
-//! to the session's stored `client_id` (`aud`) and `nonce`, exactly (B.3.6, §14.2.2).
+//! The decrypted payload must be a JSON object (unique member names). Its members, checked in
+//! this order (§8.3: the response parameters are "top-level JSON members"):
+//!
+//! | Member | Policy |
+//! | --- | --- |
+//! | `state` | Required, a string equal to the session's stored `state` (§14.4.2; RFC 6749 §4.1.2: echoed because the request carried one). Absent: [`ValidationError::StateMissing`]; not a string or another value: [`ValidationError::StateMismatch`]. Compared as SHA-256 digests without early exit. Checked first, before any holder-binding work |
+//! | `vp_token` | Required: answers the lab's single DCQL Credential Query (OpenID4VP 1.1 §6.1, B.3.5) with exactly one presentation (§8.1: keyed by the query `id`, an array of one Presentation since `multiple` is omitted), a compact SD-JWT+KB string (B.3.6) |
+//! | anything else | Ignored: §8.1 "The Client MUST ignore any unrecognized parameters" |
+//!
+//! The presentation is verified by [`crate::verify_sd_jwt_vc`] against the configured trusted
+//! issuer key, with the KB-JWT bound to the session's stored `client_id` (`aud`) and `nonce`,
+//! exactly (B.3.6, §14.2.2).
+//!
+//! The `state` check adds nothing against a deliberate sender: `state` is in the Request
+//! Object, the sender chooses the plaintext, and `session_info` already selected the session.
+//! It catches inadvertent responses (§14.4.2): a payload meant for another request, or one that
+//! echoes no `state`.
 //!
 //! HPKE decryption alone still authenticates nothing about the holder; what this adds is proof
 //! that the holder of the credential's `cnf` key signed this session's `aud` / `nonce` over
@@ -17,7 +28,7 @@
 //! names. Never the presentation, so a consumed record does not retain attacker-sized data for
 //! its TTL plus retention window.
 
-use protocol_model::RequestBinding;
+use protocol_model::{RequestBinding, StateWire};
 use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 
@@ -67,6 +78,11 @@ pub const MAX_CLIENT_ID_LEN: usize = 1024;
 /// Longest caller-chosen nonce for a research session (generated nonces are 22 characters).
 /// 512 bytes leaves room for nonce-format experiments; see the size relation below.
 pub const MAX_RESEARCH_NONCE_LEN: usize = 512;
+
+/// Longest caller-chosen `state` for a research session (generated states are 22 characters).
+/// The same 512 bytes as the research nonce, for the same experiments; `state` is not in the
+/// KB-JWT, so it only adds to the JWE, which stays far below `MAX_COMPACT_JWE_LEN`.
+pub const MAX_RESEARCH_STATE_LEN: usize = 512;
 
 /// The serialized KB-JWT payload with every value empty (RFC 9901 §4.3 members).
 const KB_PAYLOAD_SKELETON: &str = r#"{"iat":,"aud":"","nonce":"","sd_hash":""}"#;
@@ -321,6 +337,26 @@ fn holder_proof_digest(presentation: &str) -> [u8; SHA256_DIGEST_BYTES] {
     Sha256::digest(signing_input.as_bytes()).into()
 }
 
+/// The decrypted `state` member against the session's stored `state` (OpenID4VP 1.1 §14.4.2).
+/// Both are hashed first, so the comparison runs over two fixed-length digests and does not
+/// stop at the first differing byte; best effort, as for `RouteToken` (no formal constant-time
+/// guarantee). The stored `state` is no secret from the sender (it is in the Request Object);
+/// this keeps the check from timing how much of a guess matched.
+fn check_state(received: Option<&Value>, stored: &StateWire) -> Result<(), ValidationError> {
+    let received = received.ok_or(ValidationError::StateMissing)?;
+    let received = received.as_str().ok_or(ValidationError::StateMismatch)?;
+    let (a, b): ([u8; SHA256_DIGEST_BYTES], [u8; SHA256_DIGEST_BYTES]) = (
+        Sha256::digest(received.as_bytes()).into(),
+        Sha256::digest(stored.as_bytes()).into(),
+    );
+    let differ = a.iter().zip(&b).fold(0u8, |acc, (x, y)| acc | (x ^ y));
+    if differ == 0 {
+        Ok(())
+    } else {
+        Err(ValidationError::StateMismatch)
+    }
+}
+
 /// Validates `plaintext` against the session's stored `binding`, the trusted issuer and `now`
 /// (seconds since the Unix epoch).
 pub(crate) fn validate(
@@ -330,12 +366,16 @@ pub(crate) fn validate(
     now: u64,
 ) -> Result<Validated, ValidationError> {
     let RequestBinding::DirectPostJwt {
-        client_id, nonce, ..
+        client_id,
+        nonce,
+        state,
+        ..
     } = binding
     else {
         return Err(ValidationError::UnsupportedMode);
     };
     let payload = jose::parse_strict_object(plaintext).ok_or(ValidationError::NotJsonObject)?;
+    check_state(payload.get(RESPONSE_STATE), state)?;
     let vp_token = payload
         .get(VP_TOKEN)
         .and_then(Value::as_object)
