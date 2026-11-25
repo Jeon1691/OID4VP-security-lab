@@ -65,7 +65,10 @@ impl RecipientPrivateKey {
 }
 
 /// `Z` for a scalar and a validated public point. `p256::ecdh::SharedSecret` zeroizes itself;
-/// the copy returned here does too.
+/// the copy returned here does too. Best effort only: the `NonZeroScalar` copy made by
+/// `to_nonzero_scalar`, the projective point inside `diffie_hellman` and the by-value `FieldBytes`
+/// moved into the `Zeroizing` are stack temporaries that Rust can copy or leave behind, and
+/// nothing guarantees they are wiped.
 pub(crate) fn shared_secret(sk: &SecretKey, peer: &PublicKey) -> Zeroizing<[u8; P256_FIELD_BYTES]> {
     let shared = p256::ecdh::diffie_hellman(sk.to_nonzero_scalar(), peer.as_affine());
     Zeroizing::new((*shared.raw_secret_bytes()).into())
