@@ -104,7 +104,9 @@ as reference text (`library/specs/…`); no test cites them.
 | `…WrongVct` | `sd_jwt::tests::sd_jwt_vc_profile_enforces_vct_and_exactly_the_requested_claims` | Unit level only |
 | `…RequestUriFetchedTwice` | `served_request_object_is_signed_once_and_never_changes` | |
 | `…RequestUriMethodPost` | none | The lab serves GET only (no `request_uri_method`) |
-| `…PresentRevokedCredential`, `…PresentCredentialWithoutStatus`, `…PresentCredentialOnIdentifierList` | none | Status and revocation are out of lab scope |
+| `…PresentRevokedCredential` | `same_credential_flips_from_accepted_to_revoked_when_only_the_list_changes` (`tests/status_list_e2e.rs`) | Added 2026-11-25 (ADR 0003): Token Status List checking in conformance mode with a status policy |
+| `…PresentCredentialWithoutStatus` | `credential_without_status_is_accepted_without_a_fetch` | Accepted without a fetch |
+| `…PresentCredentialOnIdentifierList` | none | mdoc only, out of scope |
 | `…InvalidSessionTranscript` | none | mdoc only, out of scope |
 
 The suite has no multi-session or response-correlation tests (nothing like #792 shared-route
@@ -251,7 +253,9 @@ stays unsupported.
    - The status must be exactly 200, with `Content-Type: application/json`.
    - Positive modules always end in REVIEW, which is completed through the image API.
    - `…PresentRevokedCredential` FAILS for any verifier that does not fetch the status list.
-     The lab has no status support, so this module stays FAILED for the lab [run].
+     Until ADR 0003 the lab had no status support, so this module was FAILED for the lab
+     [run, `20261125T044623Z-61dbb05`]; the lab now checks the list (see §7 of
+     `tools/oidf-suite/README.md` for the re-run).
 7. `request_uri_method=post` (§5.10) is not supported. That module would be skipped: it calls
    `fireTestSkipped` when the request has no `request_uri_method=post`
    (`VP1FinalVerifierRequestUriMethodPost.java` L37).
