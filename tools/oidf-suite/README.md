@@ -9,10 +9,15 @@ post issues, MRs or comments. Synthetic keys and credentials only. Exports conta
 configuration, including the synthetic issuer private key: they are synthetic, but treat them as
 lab evidence, not as anything to publish.
 
-Tags used below: **[run]** = observed on 2026-11-25 by running this compose file; **[read]** =
-read from the suite source at the pinned commit. Source paths are relative to
+**Egress.** The suite container's outbound traffic is not restricted: it fetches whatever
+`request_uri` it is handed, with a client that trusts every certificate (section 3). Section 2
+explains why that matters and how to keep it limited to lab endpoints.
+
+Tags used below: **[run]** = observed on 2026-11-25 by running this compose file with the
+stand-in in `standin/` (section 5); **[read]** = read from the suite source at the pinned
+commit, not exercised. Source paths are relative to
 `src/main/java/net/openid/conformance/` in <https://gitlab.com/openid/conformance-suite> unless
-they start with `src/` or `scripts/`.
+they start with `src/`, `scripts/` or `nginx/`.
 
 ## 1. Pins
 
@@ -22,9 +27,12 @@ they start with `src/` or `scripts/`.
 | `docker-compose-prebuilt.yml` | taken from that tag, then changed as listed at the top of `docker-compose.yml` |
 | Server image | `registry.gitlab.com/openid/conformance-suite:release-v5.3.5@sha256:576ad9d6ea4230a6d58623a03c17c74e2ae1438cceec252f8721daa53a705961` (index; linux/arm64 manifest `sha256:8a6b788bd81e1a16550331f7867aa8f8cae4c181beeb02a60008d5aa678b0c73`, created 2026-11-24T10:49Z) |
 | nginx image | `registry.gitlab.com/openid/conformance-suite/nginx:release-v5.3.5@sha256:fd5ae05bf2a8f246f600b16a198dd670051bbad44f0b59d903da6e294e02707d` (index; arm64 `sha256:8225f080426c77ee4cbbfc3c52c542d6defeb64a2a4e3f5da8f9e926514bae41`) |
-| MongoDB | `mongo:6.0.13@sha256:b415b12f638e2685d06c58ab7fb5943577c50fadec6d9340ef67d21aeac72070` (index; arm64 `sha256:ba69f4aba491d2a4e423a18617e5287752a2b10e1c69d7d5d73a9633b5a533d4`), the upstream default |
+| MongoDB | `mongo:6.0.28@sha256:8b6d8f5bbedb25cb73517b65cf99f13aeb75ad5b157a56c479287a840bbad3ac` (index; arm64 `sha256:3ed30e2875f51747c16be3807301f5595ea44a29ab339be3668c3eecd115cd89`). **Diverges from upstream**, whose default `mongo:6.0.13` is affected by CVE-2025-14847 ("MongoBleed": unauthenticated memory disclosure; MongoDB SERVER-115508 lists 6.0.0–6.0.26 as affected, fixed in 6.0.27). 6.0.28 is the newest 6.0 patch on 2026-11-25 and still matches the suite's `featureCompatibilityVersion` 6.0. [run] The suite starts and both plans run unchanged on it. |
 
 On 2026-11-25 `:latest` resolved to the same two suite digests as `:release-v5.3.5`.
+
+The server container also runs with `no-new-privileges` and `cap_drop: [ALL]` (not upstream);
+[run] it starts and both plans run unchanged.
 
 To move the pins: pick a new `release-v*` tag, diff its `docker-compose-prebuilt.yml`, resolve
 the digests with `docker buildx imagetools inspect <image>:<tag>`, and re-check sections 4 and 5
@@ -35,10 +43,9 @@ against the new source (every condition cited there can change between releases)
 ```sh
 cd tools/oidf-suite
 docker --context orbstack compose up -d          # pulls the pinned digests on first use
-curl -sk https://localhost:8443/api/currentuser  # 200 {"sub":"developer",...,"isAdmin":true} once booted (~15 s)
-# UI: https://localhost:8443/  (self-signed nginx certificate, CN=localhost)
-...                                              # run the plan (section 6)
-curl -sk -o plan.zip https://localhost:8443/api/plan/export/<planId>   # export BEFORE stopping
+curl -sk https://localhost:8443/api/currentuser  # [run] 200 {"sub":"developer",…,"isAdmin":true} once booted (10–25 s observed)
+...                                              # run the plan (section 5e), driver via curl/HTTP only
+curl -sk -o oid4vp-lab-c3.zip https://localhost:8443/api/plan/export/<planId>   # export BEFORE stopping (git-ignored)
 docker --context orbstack compose down           # removes containers and network; nothing persists
 ```
 
@@ -47,15 +54,28 @@ docker --context orbstack compose down           # removes containers and networ
   request as the admin `DEVMODE@developer.com` (`security/DummyUserFilter.java:62-83`), and
   `WebSecurityResourceServerConfig` adds that filter to the API chain (`:132-134`). [run] The API
   answers without a token; `scripts/run-test-plan.py` would need `CONFORMANCE_DEV_MODE` set.
-  The flip side: while the stack is up, anything on this machine, including a web page in a
-  browser that has accepted the suite's certificate, can drive an unauthenticated admin API.
-  Keep it up only for a run, and avoid general browsing meanwhile.
+- **Browser risk: SSRF and an unauthenticated admin API.** [read] CSRF protection is off
+  (`security/WebSecurityResourceServerConfig.java:60`, also `WebSecurityConfig.java:107`), and
+  `/test/**` carries a permissive CORS policy for any origin (`security/TestDispatcherCorsConfiguration.java`,
+  `applyPermitDefaultValues`; the `authorize` path itself is excluded from that mapping, but a
+  cross-site GET needs no CORS to be *sent*). So any web page open in a browser that has
+  accepted the `localhost:8443` certificate can make the suite request
+  `https://localhost:8443/test/a/<alias>/authorize?request_uri=<any URL>` while a test waits.
+  The suite then fetches that URL with its trust-all client: server-side request forgery into
+  host loopback (`host.docker.internal`), the LAN, or the internet. Therefore:
+  - drive runs with `curl` or the driver (section 5e), not a browser;
+  - if the UI is needed, use a throwaway browser profile, and close it before any other browsing;
+  - keep the stack up only for the duration of a run (`compose down` straight after export);
+  - use a fresh random alias per run (`oid4vp-lab-c3-<16 hex>`), so a guessed alias from an
+    earlier run reaches nothing.
 - **Loopback only.** nginx publishes `127.0.0.1:8443` only. The mTLS listener 8444, mongo 27017
   and the server's 8080 are not published.
 - **No hosts-file edit.** `BASE_URL=https://localhost:8443`, so every URL the suite hands out
-  (authorization endpoint, issuer, status list) starts with `https://localhost:8443/test/a/<alias>/`.
-  The upstream default `localhost.emobix.co.uk` resolves to 127.0.0.1 in public DNS and is not
-  needed. Nothing in the verifier plans makes the suite call its own `BASE_URL`.
+  (authorization endpoint, issuer, status list) starts with `https://localhost:8443/test/a/<alias>/`
+  [run]. The upstream default `localhost.emobix.co.uk` is not needed (it resolved to 127.0.0.1 in
+  public DNS on 2026-11-25 [run, one `dig` lookup]). [read] None of the verifier modules makes
+  the suite call its own `BASE_URL`; the status-list and Entity Configuration URLs it serves
+  are for the verifier to fetch (`vp1finalverifier/AbstractVP1FinalVerifierTest.java:328-342`).
 - **The placeholder OIDC client ids are required.** Without `OIDC_*_CLIENTID` the server does
   not start ("Client id of registration 'gitlab' must not be empty") [run]. They are never used.
 - **Ephemeral state.** Mongo keeps its data on tmpfs, so `compose down` (or `stop`) loses all
@@ -63,6 +83,14 @@ docker --context orbstack compose down           # removes containers and networ
 - **Alias.** Tests in one plan share the configured `alias`. Starting a test while another test
   with the same alias is still running stops the older one (`runner/TestRunner.java:478-527`), so
   run modules one at a time.
+- **Configs.** `config/*.config.json` are templates with `LAB:` placeholders. A run renders its
+  own `config/<name>.local.json` (git-ignored), or writes under `evidence/local/`; it never edits
+  the committed files.
+- **Export signatures are not provenance.** The `.sig` files in an export are made with
+  `fintechlabs.signingKey`, which in the dev profile is upstream's published development key
+  (`src/main/resources/application-dev.properties:31`): anyone can produce them. Provenance for
+  lab evidence is the SHA-256 recorded in the lab's evidence manifest
+  (`scripts/evidence_manifest.sh`).
 
 ## 3. Reachability (task 2) [run]
 
@@ -80,13 +108,18 @@ host.orb.internal reachable
   IPv6 ULA; OrbStack forwards both to the host loopback, and the host server sees the client as
   127.0.0.1. **Binding the lab to 127.0.0.1 is enough**; no wider bind, no host networking.
   This is OrbStack behaviour; Docker Desktop was not tested.
+- **The flip side: on OrbStack, host 127.0.0.1 is not isolated from local containers.** Every
+  container on this machine can reach every service bound to host loopback the same way, not only
+  the suite. A loopback bind keeps the lab off the LAN, not away from other local containers. The
+  lab's conformance-mode ADR therefore treats the mode as time-boxed and off by default.
 - Use `host.docker.internal` in `request_uri` and `response_uri` (it is also the name the
   example configs and certificate SANs below assume).
 - The suite's outbound client accepts any TLS certificate and host name (trust-all
   `X509TrustManager`, `NoopHostnameVerifier`: `condition/AbstractCondition.java` ~L677-702), so
   the lab's TLS certificate can be self-signed. Its HTTP timeouts are 60 s
   (`condition/AbstractCondition.java:746-747`).
-- The probe stops its server on exit (verified: no listener left on 18443).
+- The probe stops its server on exit (verified: no listener left on 18443). It exits 0 when every
+  alias is reachable, 1 when one is not (with curl's error), 2 when it cannot run.
 
 ## 4. Plan configuration (task 3)
 
@@ -119,10 +152,17 @@ completion; see section 5d for the results.
 
 ## 5. Facts for the lab side (task 4)
 
-How these were observed: a throwaway stand-in verifier (Python, in the session scratchpad, not
-committed, not the lab) served a signed request object on `https://host.docker.internal:18443`
-(bound to 127.0.0.1), decrypted the suite's response, and answered 200 for positive modules and
-400 for negative ones. It verified nothing; it only made the suite's own behaviour visible.
+How the [run] facts were observed: `standin/standin.py`, a suite-observation stand-in. It is
+**not a verifier and not the lab**. It served a signed request object on
+`https://host.docker.internal:18443` (bound to 127.0.0.1), decrypted the suite's response to
+record its shape, and answered by module name: 200 for positive modules, 400 for negative ones.
+It verified nothing. Three switches make it wrong on purpose, to see how the suite reacts:
+`--san-mismatch`, `--reuse-enc-key`, `--no-redirect-uri`. It uses fresh synthetic keys only.
+
+```sh
+uv run --with cryptography==46.0.3 python -I tools/oidf-suite/standin/standin.py \
+    --plan haip --out evidence/local/standin oid4vp-1final-verifier-happy-flow
+```
 
 ### 5a. The SD-JWT VC the mock wallet presents
 
@@ -188,6 +228,9 @@ Order: `vp1finalverifier/AbstractVP1FinalVerifierTest.java:487-524` (fetch, pref
 - **`x509_san_dns`**: the suite does **not** check the certificate's SAN at all, nor the
   `response_uri` host. Its only check is `client_id` == `x509_san_dns:` + `client.client_id`.
   (A SAN check, `CheckIfClientIdInX509CertSanDns`, exists only in the wallet-test families.)
+  [read, run] With `--san-mismatch` (leaf SAN only `DNS:san-mismatch.invalid`, `client_id`
+  `x509_san_dns:host.docker.internal`) the C3 happy flow still ended in REVIEW with no new
+  finding.
   Put `DNS:host.docker.internal` in the leaf SAN anyway, as OpenID4VP §5.9.3 requires, and use
   that host in `response_uri`.
 - **`x509_hash`**: `client_id` must equal `x509_hash:` + base64url (no padding) SHA-256 of the
@@ -224,7 +267,10 @@ Order: `vp1finalverifier/AbstractVP1FinalVerifierTest.java:487-524` (fetch, pref
   - **Encryption key reuse**: the JWK thumbprint of each encryption key is remembered per suite
     user for 3 h; a key seen in an earlier Authorization Request is a **FAILURE under HAIP**, a
     WARNING in plain (`condition/as/VP1FinalCheckEncryptionKeyNotReused.java:62-79`,
-    `AbstractVP1FinalVerifierTest.java:636-641`, `condition/as/RecentValueHistory.java:34`). The lab's
+    `AbstractVP1FinalVerifierTest.java:636-641`, `condition/as/RecentValueHistory.java:34`).
+    [run] With `--reuse-enc-key` over happy-flow then minimal-cnf-jwk: HAIP minimal-cnf-jwk
+    FAILED on `VP1FinalCheckEncryptionKeyNotReused`; in plain the same check was a WARNING and
+    the module still reached REVIEW. The lab's
     research route (`crates/lab-server/src/ecdh_es.rs`: one shared key) would fail C4 from the
     second module on: the conformance mode needs a **fresh ECDH-ES key per session**. The
     history is in server memory, so a suite restart clears it; that is not a fix.
@@ -256,8 +302,9 @@ Order: `vp1finalverifier/AbstractVP1FinalVerifierTest.java:487-524` (fetch, pref
 Response checks (`AbstractVP1FinalVerifierTest.java:878-886`): HTTP 200 (exactly, not any 2xx),
 `Content-Type: application/json`, body `{}` or `{"redirect_uri":"…"}` and nothing else
 (WARNING otherwise), `redirect_uri` a non-empty string if present. **HAIP: `redirect_uri` is
-required** (`condition/as/VP1FinalEnsureDirectPostResponseHasRedirectUriForHaip.java:34-38`); plain
-accepts `{}`. The suite does not follow `redirect_uri`; it lists it as a URL to visit
+required** (`condition/as/VP1FinalEnsureDirectPostResponseHasRedirectUriForHaip.java:34-38`);
+[run] with `--no-redirect-uri` (`200 {}`) the HAIP happy flow FAILED on that condition. Plain
+accepts `{}` [run]. The suite does not follow `redirect_uri`; it lists it as a URL to visit
 (`AbstractVP1FinalVerifierTest.java:739-758`), which does not block the result.
 
 - **Positive** modules (happy flow, minimal-cnf, fetched-twice, without-status, method-post when
@@ -276,7 +323,7 @@ accepts `{}`. The suite does not follow `redirect_uri`; it lists it as a URL to 
   | present-credential-without-status | REVIEW | |
   | request-uri-method-post | SKIPPED | no `request_uri_method=post` |
   | invalid-kb-jwt-signature, invalid-credential-signature, invalid-sd-hash, invalid-kb-jwt-nonce, invalid-kb-jwt-aud, kb-jwt-iat-in-past, kb-jwt-iat-in-future, wrong-vct | PASSED | 400 |
-  | present-revoked-credential | **FAILED** | 400 is not enough: not fetching the status list is a FAILURE (`VP1FinalVerifierPresentRevokedCredential.java:52-55`). The lab has no status support, so this stays FAILED unless status-list checking is added. |
+  | present-revoked-credential | **FAILED** | 400 is not enough: the stand-in never fetched the status list, and that is a FAILURE in this module. [read] The rule holds for any verifier that does not fetch it (`VP1FinalVerifierPresentRevokedCredential.java:52-55`). The lab has no status support, so this stays FAILED unless status-list checking is added. |
   | invalid-session-transcript, present-credential-on-identifier-list | not in the plan | mdoc only |
 
 - **Screenshots via API**: the placeholder id is the `upload` field of a log entry
@@ -298,8 +345,9 @@ accepts `{}`. The suite does not follow `redirect_uri`; it lists it as a URL to 
   `response_uri`, and only then answers 200 with an HTML page (0.1–1.3 s observed). So the
   lab must already be serving the session when the driver calls it, and must handle the
   suite's two requests while the driver's GET is open.
-- Timeouts: suite HTTP client 60 s per request; nginx proxy 120 s; a WAITING test is stopped
-  after 6 h idle (`runner/InMemoryTestRunnerSupport.java:21`).
+- Timeouts [read]: suite HTTP client 60 s per request (`condition/AbstractCondition.java:746-747`);
+  nginx proxy 120 s (`nginx/nginx.conf`, `proxy_read_timeout`/`proxy_send_timeout`); a WAITING
+  test is stopped after 6 h idle (`runner/InMemoryTestRunnerSupport.java:21`).
 - `scripts/run-test-plan.py` cannot drive this: it has no way to make the lab start a session,
   and relies on `browser` automation in the config. Use the REST API directly:
 
@@ -318,18 +366,24 @@ accepts `{}`. The suite does not follow `redirect_uri`; it lists it as a URL to 
 **Minimal driver design** (not implemented here):
 
 1. Preconditions: suite up and `/api/currentuser` 200; lab conformance mode up on
-   `127.0.0.1:<port>` with TLS; synthetic reader CA, leaf and issuer key generated once per run
-   and written into the plan config (`config/*.json` placeholders) and the lab config.
-2. Create the plan; record `planId`, the suite tag and digests, the lab commit.
+   `127.0.0.1:<port>` with TLS; synthetic reader CA, leaf and issuer key generated once per run.
+   Render the plan config from the committed template into `config/<name>.local.json` or
+   `evidence/local/` (both git-ignored), never editing the template. Fill the `LAB:`
+   placeholders, including a fresh random alias such as `oid4vp-lab-c3-<16 hex>` per run
+   (section 2), and pass the same keys to the lab config.
+2. Create the plan; record `planId`, the alias, the suite tag and digests, the lab commit.
 3. For each module in plan order, one at a time: start it; wait for WAITING; read
    `authorization_endpoint`; ask the lab for a new session (`POST /lab/v1/sessions`, fresh nonce,
    state and ECDH-ES key) and build `client_id` + `request_uri`; GET the authorization endpoint;
    wait; if `uploadsRequired` > 0, render the lab's verdict for that session to PNG and upload
    it; wait for FINISHED; fetch `/api/info` and `/api/log`.
 4. Write `evidence/<run>/`: per-module result and log, the plan export, and a manifest with all
-   pins. Map REVIEW (positive) and PASSED (negative) to "as expected"; FAILED and any WARNING
-   to triage.
-5. Stop the stack.
+   pins and the SHA-256 of every file (the export's own signatures are not provenance,
+   section 2). Map REVIEW (positive) and PASSED (negative) to "as expected"; FAILED and any
+   WARNING to triage.
+5. Stop the stack (`compose down`) straight away.
+
+All of this runs over HTTP from the driver; no browser is involved (section 2).
 
 ### 5f. HAIP extras (C4)
 
@@ -342,8 +396,8 @@ accepts `{}`. The suite does not follow `redirect_uri`; it lists it as a URL to 
   `jwks` must contain a P-256 key with `alg":"ECDH-ES"`
   (`condition/as/ValidateVpClientMetadataEncryptionForHaip.java:28-85`). The suite then encrypts
   with whichever is listed first [run: A128GCM].
-- Fresh encryption key per request (5b, reuse is FAILURE).
-- `redirect_uri` in the 200 response body (5d).
+- Fresh encryption key per request (5b; reuse is a FAILURE [run]).
+- `redirect_uri` in the 200 response body (5d; missing is a FAILURE [run]).
 - No other HAIP-only condition runs in these modules: signed request, `typ`, x5c and the
   metadata checks are the same as in plain. Issuer `x5c` in the SD-JWT is whatever
   `signing_jwk.x5c` holds; the suite does not require it, but HAIP-style issuers carry it, so
