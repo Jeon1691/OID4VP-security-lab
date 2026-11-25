@@ -210,7 +210,8 @@ REQUIRED_TESTS=(
   unrecognized_payload_members_are_ignored
   state_mismatching_candidate_tried_first_does_not_stop_the_validating_one
   # lab-server ECDH-ES research route (`ecdh-es-research`, ADR 0001): #792 C3/C9 observed
-  # directly, experiments E1-E7 (docs/interop/issue-792-reproduction.md §7, S23-S33).
+  # directly, experiments E1-E7 (docs/interop/issue-792-reproduction.md §7, S23-S38), the
+  # session cap, duplicate state, expiry, the per-server opt-in and the key-kind separation.
   ecdh_es_shared_key_opens_for_every_live_session_and_only_state_selects
   ecdh_es_request_object_advertises_the_shared_key_and_both_enc_values
   ecdh_es_honest_round_trip_commits_the_session_named_by_state
@@ -221,6 +222,12 @@ REQUIRED_TESTS=(
   ecdh_es_and_hpke_routes_never_accept_each_others_jwes
   ecdh_es_route_refuses_plaintext_vp_token_at_admission
   hardened_mode_has_no_ecdh_es_route_and_refuses_ecdh_es_sessions
+  research_mode_without_the_opt_in_has_no_ecdh_es_route
+  ecdh_es_route_caps_pending_sessions_at_the_candidate_budget
+  ecdh_es_duplicate_state_with_distinct_nonces_is_disambiguated_by_holder_binding
+  ecdh_es_response_for_an_expired_session_is_refused
+  ecdh_es::tests::ecdh_es_trial_never_opens_with_an_hpke_key
+  ecdh_es::tests::hpke_trial_never_opens_with_an_ecdh_es_key
   # lab-server holder binding (Evidence level 3): SD-JWT VC + KB-JWT (OpenID4VP 1.1 B.3;
   # RFC 9901 §7.1/§7.3; draft-ietf-oauth-sd-jwt-vc-27), over HTTP and against RFC 9901 vectors.
   request_object_dcql_query_requests_the_sd_jwt_vc_and_its_claims
@@ -562,6 +569,12 @@ stage_supply_chain() {
   step verifier_without_sealing verifier_without_sealing
   step default_members_are_verifier_builds default_members_are_verifier_builds
   step lab_server_default_check cargo check -p lab-server --locked
+  # Each optional feature alone (library and binary): the workspace clippy runs with
+  # --all-features only, so code that builds only in combination would otherwise slip through.
+  step lab_server_wallet_sim_check \
+    cargo clippy --locked -p lab-server --features wallet-sim --lib --bins -- -D warnings
+  step lab_server_ecdh_es_research_check \
+    cargo clippy --locked -p lab-server --features ecdh-es-research --lib --bins -- -D warnings
   step verifier_without_store_backend verifier_without_store_backend
   step audit cargo audit --deny warnings
 }
