@@ -1,0 +1,1100 @@
+{
+ "c3": [
+  {
+   "module": "oid4vp-1final-verifier-happy-flow",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None",
+     "fetched": true,
+     "state": "consumed"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "Valid",
+       "commit": "Committed",
+       "rejection": "None"
+      }
+     ],
+     "suite_logged_list_fetches": 1,
+     "state": "consumed",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "Hy91s8plF7czv8DcDPtWPQ"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/conformance_mode_e2e.rs",
+    "test": "conformance_round_trip_over_https_commits_with_x509_san_dns"
+   },
+   "log": "logs/happy-flow.json",
+   "screenshot": "screenshots/happy-flow.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-minimal-cnf-jwk",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None",
+     "fetched": true,
+     "state": "consumed"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "Valid",
+       "commit": "Committed",
+       "rejection": "None"
+      }
+     ],
+     "suite_logged_list_fetches": 1,
+     "state": "consumed",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "X2lca98smjoMGgrgRr3jNA"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "credential_with_minimal_cnf_jwk_is_accepted"
+   },
+   "log": "logs/minimal-cnf-jwk.json",
+   "screenshot": "screenshots/minimal-cnf-jwk.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-request-uri-method-post",
+   "status": "FINISHED",
+   "result": "SKIPPED",
+   "expected": "SKIPPED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": null,
+    "observed": {
+     "evidence": [],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": null,
+   "lab_test": null,
+   "log": "logs/request-uri-method-post.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-request-uri-fetched-twice",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None",
+     "fetched": true,
+     "state": "consumed"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "Valid",
+       "commit": "Committed",
+       "rejection": "None"
+      }
+     ],
+     "suite_logged_list_fetches": 1,
+     "state": "consumed",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "ZAWk2_pXaz-giKdE0EetDQ"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/signed_request_object_e2e.rs",
+    "test": "served_request_object_is_signed_once_and_never_changes"
+   },
+   "log": "logs/request-uri-fetched-twice.json",
+   "screenshot": "screenshots/request-uri-fetched-twice.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-signature",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbSignature))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "IF8iUtcaqrvuP43WzO8IXA"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_corrupted_signature_is_rejected"
+   },
+   "log": "logs/invalid-kb-jwt-signature.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-credential-signature",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(IssuerSignature))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "in0VYsD0O2dengHuSIv8wQ"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "issuer_jwt_with_corrupted_signature_is_rejected"
+   },
+   "log": "logs/invalid-credential-signature.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-sd-hash",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbSdHashMismatch))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "yzAMXyTEBXulC5dwLRePAQ"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_sd_hash_is_rejected"
+   },
+   "log": "logs/invalid-sd-hash.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-nonce",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbNonceMismatch))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "QfON23z1w5s-oQdjidmSMQ"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_nonce_is_rejected"
+   },
+   "log": "logs/invalid-kb-jwt-nonce.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-aud",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbAudienceMismatch))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "9aP30HyGLYeUHf7pH2sTXg"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_aud_is_rejected"
+   },
+   "log": "logs/invalid-kb-jwt-aud.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-kb-jwt-iat-in-past",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbIatOutOfWindow))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "i37xwr7Nd9lcwSxajxl7Zw"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_stale_iat_is_rejected"
+   },
+   "log": "logs/kb-jwt-iat-in-past.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-kb-jwt-iat-in-future",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbIatOutOfWindow))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "Mfic9PRkXRV1wj-wI57tOw"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_future_iat_is_rejected"
+   },
+   "log": "logs/kb-jwt-iat-in-future.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-present-revoked-credential",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "Failed(Revoked)",
+     "commit": "NotRun",
+     "rejection": "Some(Status(Revoked))",
+     "fetched": true,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "Failed(Revoked)",
+       "commit": "NotRun",
+       "rejection": "Some(Status(Revoked))"
+      }
+     ],
+     "suite_logged_list_fetches": 1,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "nQnH7G9NydDOgPvJVl73GQ"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/status_list_e2e.rs",
+    "test": "same_credential_flips_from_accepted_to_revoked_when_only_the_list_changes"
+   },
+   "log": "logs/present-revoked-credential.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-present-credential-without-status",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotReferenced",
+     "commit": "Committed",
+     "rejection": "None",
+     "fetched": false,
+     "state": "consumed"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotReferenced",
+       "commit": "Committed",
+       "rejection": "None"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "consumed",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "b_n60gbZrQIfdEFUo5pFlw"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "honest_sd_jwt_kb_presentation_commits_only_the_requested_claims"
+   },
+   "log": "logs/present-credential-without-status.json",
+   "screenshot": "screenshots/present-credential-without-status.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-wrong-vct",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(VctMismatch))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "xsbKCxD0N3Xxt0gRGHHEsw"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/src/sd_jwt.rs",
+    "test": "sd_jwt_vc_profile_enforces_vct_and_exactly_the_requested_claims"
+   },
+   "log": "logs/wrong-vct.json",
+   "screenshot": null
+  }
+ ],
+ "c4": [
+  {
+   "module": "oid4vp-1final-verifier-happy-flow",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None",
+     "fetched": true,
+     "state": "consumed"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "Valid",
+       "commit": "Committed",
+       "rejection": "None"
+      }
+     ],
+     "suite_logged_list_fetches": 1,
+     "state": "consumed",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "9XyUS8oF15cHAL3jEkgssQ"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/conformance_mode_e2e.rs",
+    "test": "conformance_round_trip_over_https_commits_with_x509_san_dns"
+   },
+   "log": "logs/happy-flow.json",
+   "screenshot": "screenshots/happy-flow.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-minimal-cnf-jwk",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None",
+     "fetched": true,
+     "state": "consumed"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "Valid",
+       "commit": "Committed",
+       "rejection": "None"
+      }
+     ],
+     "suite_logged_list_fetches": 1,
+     "state": "consumed",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "JnWJ6rhY02WhZZQ0zZRC3g"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "credential_with_minimal_cnf_jwk_is_accepted"
+   },
+   "log": "logs/minimal-cnf-jwk.json",
+   "screenshot": "screenshots/minimal-cnf-jwk.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-request-uri-method-post",
+   "status": "FINISHED",
+   "result": "SKIPPED",
+   "expected": "SKIPPED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": null,
+    "observed": {
+     "evidence": [],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": null,
+   "lab_test": null,
+   "log": "logs/request-uri-method-post.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-request-uri-fetched-twice",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None",
+     "fetched": true,
+     "state": "consumed"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "Valid",
+       "commit": "Committed",
+       "rejection": "None"
+      }
+     ],
+     "suite_logged_list_fetches": 1,
+     "state": "consumed",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "odo1KvDIb5DgVp_b-Kc5nw"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/signed_request_object_e2e.rs",
+    "test": "served_request_object_is_signed_once_and_never_changes"
+   },
+   "log": "logs/request-uri-fetched-twice.json",
+   "screenshot": "screenshots/request-uri-fetched-twice.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-signature",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbSignature))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "0QUzoo6rh-lym-6dyC9WbA"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_corrupted_signature_is_rejected"
+   },
+   "log": "logs/invalid-kb-jwt-signature.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-credential-signature",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(IssuerSignature))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "2I0Sv-iM3DWsTYOdN9EVkg"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "issuer_jwt_with_corrupted_signature_is_rejected"
+   },
+   "log": "logs/invalid-credential-signature.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-sd-hash",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbSdHashMismatch))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "9S4D7MffMFpNSkP9osPdTA"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_sd_hash_is_rejected"
+   },
+   "log": "logs/invalid-sd-hash.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-nonce",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbNonceMismatch))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "q_3F9MqG8t1gMGe8Nqh03w"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_nonce_is_rejected"
+   },
+   "log": "logs/invalid-kb-jwt-nonce.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-aud",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbAudienceMismatch))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "h1JbjN_TOBWbhHKyhGVDTA"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_aud_is_rejected"
+   },
+   "log": "logs/invalid-kb-jwt-aud.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-kb-jwt-iat-in-past",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbIatOutOfWindow))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "WfYEgeon53tdjNGI2g40Rw"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_stale_iat_is_rejected"
+   },
+   "log": "logs/kb-jwt-iat-in-past.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-kb-jwt-iat-in-future",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbIatOutOfWindow))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "UK9gQaanMiiDPpZj-RU_tA"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_future_iat_is_rejected"
+   },
+   "log": "logs/kb-jwt-iat-in-future.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-present-revoked-credential",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "Failed(Revoked)",
+     "commit": "NotRun",
+     "rejection": "Some(Status(Revoked))",
+     "fetched": true,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "Failed(Revoked)",
+       "commit": "NotRun",
+       "rejection": "Some(Status(Revoked))"
+      }
+     ],
+     "suite_logged_list_fetches": 1,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "6oEt2DR-83HYYH4NUJB02Q"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/status_list_e2e.rs",
+    "test": "same_credential_flips_from_accepted_to_revoked_when_only_the_list_changes"
+   },
+   "log": "logs/present-revoked-credential.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-present-credential-without-status",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotReferenced",
+     "commit": "Committed",
+     "rejection": "None",
+     "fetched": false,
+     "state": "consumed"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotReferenced",
+       "commit": "Committed",
+       "rejection": "None"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "consumed",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "gTfELmVMcpgluS_yHlsmAA"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "honest_sd_jwt_kb_presentation_commits_only_the_requested_claims"
+   },
+   "log": "logs/present-credential-without-status.json",
+   "screenshot": "screenshots/present-credential-without-status.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-wrong-vct",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(VctMismatch))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "NQuTjiJAqSs5ujw9Q7UXHg"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/src/sd_jwt.rs",
+    "test": "sd_jwt_vc_profile_enforces_vct_and_exactly_the_requested_claims"
+   },
+   "log": "logs/wrong-vct.json",
+   "screenshot": null
+  }
+ ]
+}

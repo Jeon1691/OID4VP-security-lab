@@ -334,7 +334,7 @@ accepts `{}` [run]. The suite does not follow `redirect_uri`; it lists it as a U
   | present-credential-without-status | REVIEW | |
   | request-uri-method-post | SKIPPED | no `request_uri_method=post` |
   | invalid-kb-jwt-signature, invalid-credential-signature, invalid-sd-hash, invalid-kb-jwt-nonce, invalid-kb-jwt-aud, kb-jwt-iat-in-past, kb-jwt-iat-in-future, wrong-vct | PASSED | 400 |
-  | present-revoked-credential | **FAILED** | 400 is not enough: the stand-in never fetched the status list, and that is a FAILURE in this module. [read] The rule holds for any verifier that does not fetch it (`VP1FinalVerifierPresentRevokedCredential.java:52-55`). The lab has no status support, so this stays FAILED unless status-list checking is added. |
+  | present-revoked-credential | **FAILED** | 400 is not enough: the stand-in never fetched the status list, and that is a FAILURE in this module. [read] The rule holds for any verifier that does not fetch it (`VP1FinalVerifierPresentRevokedCredential.java:52-55`). The lab now checks status lists (ADR 0003) and passes it; see §7. |
   | invalid-session-transcript, present-credential-on-identifier-list | not in the plan | mdoc only |
 
 - **Screenshots via API**: the placeholder id is the `upload` field of a log entry
@@ -425,6 +425,42 @@ All of this runs over HTTP from the driver; no browser is involved (section 2).
   `iss` in the request object, or `verifier_info`; those paths were read only.
 
 ## 7. Results: the lab against both plans
+
+### 7.1 With Token Status List checking (run `evidence/oidf/20261125T113627Z-e91431d/`)
+
+Its `summary.md` is the source of truth. Lab commit `e91431d` (clean tree, built by the driver),
+both plans driven by `driver/run_plan.py` only, suite stack freshly started and taken down
+after the run. The lab ran as in §7.2 plus a status policy (ADR 0003): only
+`https://localhost:8443/test/a/<alias>/statuslists/` URIs of that run, the list signing key
+pinned explicitly (`--status-list-key crates/lab-server/tests/fixtures/lab_issuer.pub.jwk`, the
+public half of the key the suite signs its lists with), and the suite nginx certificate pinned
+(`--status-list-tls-cert`). That certificate is read from `localhost:8443` when the run starts
+(trust on first use, over host loopback); it is stored as `suite-tls.pem` in each plan
+directory and its SHA-256 is in the manifest. The HAIP `x5c` trust mode is not exercised by the
+suite (its `x5c` is the driver's self-signed certificate); the lab tests cover it
+(`x509_trust_accepts_only_a_signer_certified_by_the_status_ca`).
+
+| Module | C3 plain | C4 HAIP | Lab evidence (both plans) |
+| --- | --- | --- | --- |
+| happy-flow, minimal-cnf-jwk, request-uri-fetched-twice | REVIEW, **no WARNING** | same | status `Valid`, committed; suite logged one list fetch (`GET`, `Accept` ok, no query, no body) |
+| present-credential-without-status | REVIEW | REVIEW | `NotReferenced`, committed, nothing fetched |
+| present-revoked-credential | **PASSED** (was FAILED) | **PASSED** | list fetched, then `Status(Revoked)`; nothing committed, the session stays `pending` |
+| the eight negative modules | PASSED | same | refused while validating (`KbSignature`, `IssuerSignature`, ...); status not reached, nothing fetched |
+| request-uri-method-post | SKIPPED | SKIPPED | no response |
+
+- 28 of 28 modules ended as expected, with the lab-side checks: the driver requires the suite
+  result, the lab's own evidence line (status outcome, commit, rejection), the suite's
+  "The verifier fetched the status list ..." log entry and the session state on the lab's
+  result endpoint to agree (`LAB_EXPECTED`). No WARNING or FAILURE appeared in any module.
+- The flip of one credential from accepted to refused when only the list entry changes from
+  `0x00` to `0x01` cannot be driven through the suite (it mints a new credential per module);
+  the lab test `same_credential_flips_from_accepted_to_revoked_when_only_the_list_changes`
+  shows it, with a real HTTPS fetch each time.
+- Driver change for this run: the suite answers the authorize GET of a module it skips with a
+  redirect of its own; the driver now records it (`authorize_redirect_not_followed`) instead of
+  failing, and still never follows it.
+
+### 7.2 Before status checking (run `evidence/oidf/20261125T044623Z-61dbb05/`)
 
 Run `evidence/oidf/20261125T044623Z-61dbb05/`. Its `summary.md` is the source of truth for
 the results (per-module table with reasons and the lab test covering each module); the table

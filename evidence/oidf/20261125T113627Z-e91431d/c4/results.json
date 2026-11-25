@@ -1,0 +1,912 @@
+{
+ "plan": "oid4vp-1final-verifier-haip-test-plan",
+ "variant": {
+  "credential_format": "sd_jwt_vc",
+  "response_mode": "direct_post.jwt"
+ },
+ "alias": "oid4vp-lab-c4-2146713b2e4bf736",
+ "modules": [
+  {
+   "module": "oid4vp-1final-verifier-happy-flow",
+   "test_id": "SScTOp92X4M7tMa",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c4-2146713b2e4bf736/authorize",
+   "session_id": "MBE5J2vgggQWYhRwC3gK6A",
+   "client_id": "x509_hash:u84GnwYsxIzaMIop_GNsNmSPi-KqkDE301hxQA6_HJA",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.19,
+   "lab_result": {
+    "credential": {
+     "claims": {
+      "birthdate": "1980-05-23",
+      "family_name": "Dupont",
+      "given_name": "Jean"
+     },
+     "disclosed_claim_names": [
+      "/birthdate",
+      "/family_name",
+      "/given_name"
+     ],
+     "holder_key_thumbprint": "Hlu8Wd1k9egb46uQ-mfIDkScS3hrO7Fp9qcIvdjL76Y",
+     "vct": "urn:eudi:pid:1"
+    },
+    "response_code": "823w6afr1c3weBDqyUZRPQ",
+    "state": "consumed"
+   },
+   "screenshot": "screenshots/happy-flow.png",
+   "lab_evidence": [
+    {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "lab_check": {
+    "expected": {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None",
+     "fetched": true,
+     "state": "consumed"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "Valid",
+       "commit": "Committed",
+       "rejection": "None"
+      }
+     ],
+     "suite_logged_list_fetches": 1,
+     "state": "consumed",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "9XyUS8oF15cHAL3jEkgssQ"
+   },
+   "log": "logs/happy-flow.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/conformance_mode_e2e.rs",
+    "test": "conformance_round_trip_over_https_commits_with_x509_san_dns"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-minimal-cnf-jwk",
+   "test_id": "lVwH0NuYm7ZRmj2",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c4-2146713b2e4bf736/authorize",
+   "session_id": "M78XRt4-jOnxabJ7k4LAYg",
+   "client_id": "x509_hash:u84GnwYsxIzaMIop_GNsNmSPi-KqkDE301hxQA6_HJA",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.15,
+   "lab_result": {
+    "credential": {
+     "claims": {
+      "birthdate": "1980-05-23",
+      "family_name": "Dupont",
+      "given_name": "Jean"
+     },
+     "disclosed_claim_names": [
+      "/birthdate",
+      "/family_name",
+      "/given_name"
+     ],
+     "holder_key_thumbprint": "Hlu8Wd1k9egb46uQ-mfIDkScS3hrO7Fp9qcIvdjL76Y",
+     "vct": "urn:eudi:pid:1"
+    },
+    "response_code": "ksD-nHa2cEof3Xeq6VlhnA",
+    "state": "consumed"
+   },
+   "screenshot": "screenshots/minimal-cnf-jwk.png",
+   "lab_evidence": [
+    {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "lab_check": {
+    "expected": {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None",
+     "fetched": true,
+     "state": "consumed"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "Valid",
+       "commit": "Committed",
+       "rejection": "None"
+      }
+     ],
+     "suite_logged_list_fetches": 1,
+     "state": "consumed",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "JnWJ6rhY02WhZZQ0zZRC3g"
+   },
+   "log": "logs/minimal-cnf-jwk.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "credential_with_minimal_cnf_jwk_is_accepted"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-request-uri-method-post",
+   "test_id": "iUYloj7A80YIG7a",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c4-2146713b2e4bf736/authorize",
+   "session_id": "eXMbVHoOd6PesSBbP3yneQ",
+   "client_id": "x509_hash:u84GnwYsxIzaMIop_GNsNmSPi-KqkDE301hxQA6_HJA",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 302,
+   "authorize_redirect_not_followed": true,
+   "authorize_seconds": 0.02,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "SKIPPED",
+   "expected": "SKIPPED",
+   "lab_check": {
+    "expected": null,
+    "observed": {
+     "evidence": [],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": null,
+   "log": "logs/request-uri-method-post.json",
+   "lab_test": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-request-uri-fetched-twice",
+   "test_id": "9sKHJac8Z1AxtTo",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c4-2146713b2e4bf736/authorize",
+   "session_id": "pHrNSz0NAE9xk0FqsTg4qA",
+   "client_id": "x509_hash:u84GnwYsxIzaMIop_GNsNmSPi-KqkDE301hxQA6_HJA",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.12,
+   "lab_result": {
+    "credential": {
+     "claims": {
+      "birthdate": "1980-05-23",
+      "family_name": "Dupont",
+      "given_name": "Jean"
+     },
+     "disclosed_claim_names": [
+      "/birthdate",
+      "/family_name",
+      "/given_name"
+     ],
+     "holder_key_thumbprint": "Hlu8Wd1k9egb46uQ-mfIDkScS3hrO7Fp9qcIvdjL76Y",
+     "vct": "urn:eudi:pid:1"
+    },
+    "response_code": "zim_dBnnNurhPsHmfoPnyw",
+    "state": "consumed"
+   },
+   "screenshot": "screenshots/request-uri-fetched-twice.png",
+   "lab_evidence": [
+    {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "lab_check": {
+    "expected": {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None",
+     "fetched": true,
+     "state": "consumed"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "Valid",
+       "commit": "Committed",
+       "rejection": "None"
+      }
+     ],
+     "suite_logged_list_fetches": 1,
+     "state": "consumed",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "odo1KvDIb5DgVp_b-Kc5nw"
+   },
+   "log": "logs/request-uri-fetched-twice.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/signed_request_object_e2e.rs",
+    "test": "served_request_object_is_signed_once_and_never_changes"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-signature",
+   "test_id": "lAFpRfu5jHSqC0Z",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c4-2146713b2e4bf736/authorize",
+   "session_id": "7OOFm87ykdTRc4vAOg3GXg",
+   "client_id": "x509_hash:u84GnwYsxIzaMIop_GNsNmSPi-KqkDE301hxQA6_HJA",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.09,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbSignature))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbSignature))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "0QUzoo6rh-lym-6dyC9WbA"
+   },
+   "log": "logs/invalid-kb-jwt-signature.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_corrupted_signature_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-credential-signature",
+   "test_id": "Q5UjoE1nRnYKFr3",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c4-2146713b2e4bf736/authorize",
+   "session_id": "Nxh3ruqkNnElXDVI0AprJQ",
+   "client_id": "x509_hash:u84GnwYsxIzaMIop_GNsNmSPi-KqkDE301hxQA6_HJA",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.07,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(IssuerSignature))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(IssuerSignature))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "2I0Sv-iM3DWsTYOdN9EVkg"
+   },
+   "log": "logs/invalid-credential-signature.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "issuer_jwt_with_corrupted_signature_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-sd-hash",
+   "test_id": "TY5BkmWuA9xOx1u",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c4-2146713b2e4bf736/authorize",
+   "session_id": "LummH7FBxzFDsjeDhxvmmQ",
+   "client_id": "x509_hash:u84GnwYsxIzaMIop_GNsNmSPi-KqkDE301hxQA6_HJA",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.07,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbSdHashMismatch))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbSdHashMismatch))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "9S4D7MffMFpNSkP9osPdTA"
+   },
+   "log": "logs/invalid-sd-hash.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_sd_hash_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-nonce",
+   "test_id": "VpGB9kFBIRkDGsT",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c4-2146713b2e4bf736/authorize",
+   "session_id": "eXLRvOPkF3jijl7OqG1tzg",
+   "client_id": "x509_hash:u84GnwYsxIzaMIop_GNsNmSPi-KqkDE301hxQA6_HJA",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.09,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbNonceMismatch))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbNonceMismatch))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "q_3F9MqG8t1gMGe8Nqh03w"
+   },
+   "log": "logs/invalid-kb-jwt-nonce.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_nonce_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-aud",
+   "test_id": "GUqqT1xHPxcQCv7",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c4-2146713b2e4bf736/authorize",
+   "session_id": "3XXANq5nGnP6PKuOziDyog",
+   "client_id": "x509_hash:u84GnwYsxIzaMIop_GNsNmSPi-KqkDE301hxQA6_HJA",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.14,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbAudienceMismatch))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbAudienceMismatch))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "h1JbjN_TOBWbhHKyhGVDTA"
+   },
+   "log": "logs/invalid-kb-jwt-aud.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_aud_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-kb-jwt-iat-in-past",
+   "test_id": "JqLPhfaVE5aF3Wo",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c4-2146713b2e4bf736/authorize",
+   "session_id": "No5rrGDx0-Webb7Bvu96Ew",
+   "client_id": "x509_hash:u84GnwYsxIzaMIop_GNsNmSPi-KqkDE301hxQA6_HJA",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.13,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbIatOutOfWindow))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbIatOutOfWindow))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "WfYEgeon53tdjNGI2g40Rw"
+   },
+   "log": "logs/kb-jwt-iat-in-past.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_stale_iat_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-kb-jwt-iat-in-future",
+   "test_id": "kXbCqhv79j26iUW",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c4-2146713b2e4bf736/authorize",
+   "session_id": "Z705WhTMfkOlCTs31G03zQ",
+   "client_id": "x509_hash:u84GnwYsxIzaMIop_GNsNmSPi-KqkDE301hxQA6_HJA",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.08,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbIatOutOfWindow))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbIatOutOfWindow))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "UK9gQaanMiiDPpZj-RU_tA"
+   },
+   "log": "logs/kb-jwt-iat-in-future.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_future_iat_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-present-revoked-credential",
+   "test_id": "9WRl1cfDXsQieqn",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c4-2146713b2e4bf736/authorize",
+   "session_id": "bnum6qyRcIBJOtE3YYsvrA",
+   "client_id": "x509_hash:u84GnwYsxIzaMIop_GNsNmSPi-KqkDE301hxQA6_HJA",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.09,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "Failed(Revoked)",
+     "commit": "NotRun",
+     "rejection": "Some(Status(Revoked))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "Failed(Revoked)",
+     "commit": "NotRun",
+     "rejection": "Some(Status(Revoked))",
+     "fetched": true,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "Failed(Revoked)",
+       "commit": "NotRun",
+       "rejection": "Some(Status(Revoked))"
+      }
+     ],
+     "suite_logged_list_fetches": 1,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "6oEt2DR-83HYYH4NUJB02Q"
+   },
+   "log": "logs/present-revoked-credential.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/status_list_e2e.rs",
+    "test": "same_credential_flips_from_accepted_to_revoked_when_only_the_list_changes"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-present-credential-without-status",
+   "test_id": "Eb3p2ndBs9KLOjs",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c4-2146713b2e4bf736/authorize",
+   "session_id": "kRpuu_tNngrVvzLBY1VfHA",
+   "client_id": "x509_hash:u84GnwYsxIzaMIop_GNsNmSPi-KqkDE301hxQA6_HJA",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.06,
+   "lab_result": {
+    "credential": {
+     "claims": {
+      "birthdate": "1980-05-23",
+      "family_name": "Dupont",
+      "given_name": "Jean"
+     },
+     "disclosed_claim_names": [
+      "/birthdate",
+      "/family_name",
+      "/given_name"
+     ],
+     "holder_key_thumbprint": "Hlu8Wd1k9egb46uQ-mfIDkScS3hrO7Fp9qcIvdjL76Y",
+     "vct": "urn:eudi:pid:1"
+    },
+    "response_code": "M6E-wvqDo0nu0climDcAuA",
+    "state": "consumed"
+   },
+   "screenshot": "screenshots/present-credential-without-status.png",
+   "lab_evidence": [
+    {
+     "status": "NotReferenced",
+     "commit": "Committed",
+     "rejection": "None"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "lab_check": {
+    "expected": {
+     "status": "NotReferenced",
+     "commit": "Committed",
+     "rejection": "None",
+     "fetched": false,
+     "state": "consumed"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotReferenced",
+       "commit": "Committed",
+       "rejection": "None"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "consumed",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "gTfELmVMcpgluS_yHlsmAA"
+   },
+   "log": "logs/present-credential-without-status.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "honest_sd_jwt_kb_presentation_commits_only_the_requested_claims"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-wrong-vct",
+   "test_id": "ioxQsVqkAdY0MLK",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c4-2146713b2e4bf736/authorize",
+   "session_id": "OQeqeA47K2So0pasHriFBw",
+   "client_id": "x509_hash:u84GnwYsxIzaMIop_GNsNmSPi-KqkDE301hxQA6_HJA",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.07,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(VctMismatch))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "fetched": false,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(VctMismatch))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "forbidden_findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "NQuTjiJAqSs5ujw9Q7UXHg"
+   },
+   "log": "logs/wrong-vct.json",
+   "lab_test": {
+    "file": "crates/lab-server/src/sd_jwt.rs",
+    "test": "sd_jwt_vc_profile_enforces_vct_and_exactly_the_requested_claims"
+   }
+  }
+ ],
+ "plan_id": "gb0THlG6jK4Rz",
+ "lab_status_policy": "uri prefix https://localhost:8443/test/a/oid4vp-lab-c4-2146713b2e4bf736/statuslists/, trust pinned key (thumbprint 4Vfes1N2h2msnV9WmtWt1VE03QEQSNksLUEK43jSABY), TLS certificate pinned (sha-256 S5Eqk6kZS2dypRaJN6xY-g3r4idJCcxjjjd9E7nWJCk)"
+}
