@@ -176,6 +176,12 @@ const STATE_BYTES: usize = 16;
 /// and unique-kid resolution is never ambiguous by accident.
 const SESSION_ID_BYTES: usize = 16;
 pub(crate) const KID_BYTES: usize = 16;
+/// Random bytes in a Response Code: 128 bits, OpenID4VP 1.0 §8.2 "RECOMMENDED to use a
+/// cryptographic random value of 128 bits or more".
+pub const RESPONSE_CODE_BYTES: usize = 16;
+/// Query parameter carrying the Response Code in the response `redirect_uri` (OpenID4VP 1.0
+/// §8.2 example, §13.3).
+const RESPONSE_CODE_PARAM: &str = "response_code";
 
 /// JWK members for the advertised HPKE-0 key (RFC 7517 / RFC 7518 §6.2, draft-22 §5.1).
 pub(crate) const JWK_KTY_EC: &str = "EC";
@@ -298,9 +304,10 @@ struct Limits {
 
 pub(crate) struct AppState {
     mode: Mode,
-    /// Body of the `200` answer to a committed response (`{}`, or in conformance mode
-    /// optionally `{"redirect_uri": ...}`, OpenID4VP 1.0 §8.2).
-    success_body: String,
+    /// Conformance mode only, optional: the `redirect_uri` the `200` answer to a committed
+    /// response carries, with that response's fresh `response_code` (OpenID4VP 1.0 §8.2);
+    /// `None` answers `{}`.
+    response_redirect_uri: Option<String>,
     /// Prefix of the `authorization_request` URL in the session creation response.
     authorization_endpoint: String,
     client_id: ClientIdWire,
@@ -503,17 +510,17 @@ impl LabServer {
         let listener = TcpListener::bind(config.bind).await?;
         let addr = listener.local_addr()?;
         let base_url = format!("http://{addr}");
-        let success_body = json!({}).to_string();
+        let response_redirect_uri: Option<String> = None;
         // `config::check` admits a conformance configuration in conformance mode only.
         #[cfg(feature = "conformance")]
-        let (base_url, success_body, tls, max_runtime) = match &config.conformance {
+        let (base_url, response_redirect_uri, tls, max_runtime) = match &config.conformance {
             Some(conformance) => (
                 conformance.public_origin.base_url(addr.port()),
-                crate::conformance::success_body(conformance),
+                conformance.response_redirect_uri.clone(),
                 Some(crate::conformance::tls_acceptor(&conformance.credentials)?),
                 Some(conformance.max_runtime),
             ),
-            None => (base_url, success_body, None, None),
+            None => (base_url, response_redirect_uri, None, None),
         };
         // Only conformance mode has a time box.
         #[cfg(not(feature = "conformance"))]
@@ -554,7 +561,7 @@ impl LabServer {
         let signer = RequestSigner::new(config.request_signing_key, key_hint);
         let state = Arc::new(AppState {
             mode: config.mode,
-            success_body,
+            response_redirect_uri,
             authorization_endpoint: config.authorization_endpoint,
             client_id: config.client_id,
             signer,
@@ -1259,9 +1266,18 @@ async fn get_result(State(state): State<Arc<AppState>>, Path(token): Path<String
     };
     let body = match snapshot.state() {
         SessionState::Pending => json!({ "state": "pending" }),
-        SessionState::Consumed { result, .. } => {
-            json!({ "state": "consumed", "credential": result.to_json() })
-        }
+        SessionState::Consumed { result, .. } => match &result.response_code {
+            // The lab has no frontend: the result endpoint (result token only) stands in for
+            // the Verifier frontend of OpenID4VP 1.0 §13.3 and shows the Response Code, so a
+            // run can match it to the redirect the Wallet was given. It does not gate the
+            // read on it; the result token is already the capability.
+            Some(code) => json!({
+                "state": "consumed",
+                "credential": result.to_json(),
+                RESPONSE_CODE_PARAM: code,
+            }),
+            None => json!({ "state": "consumed", "credential": result.to_json() }),
+        },
         SessionState::Expired => json!({ "state": "expired" }),
     };
     json_response(StatusCode::OK, body.to_string())
@@ -1335,12 +1351,37 @@ async fn respond(
 /// admission errors' own answers, and [`GENERIC_REJECTION_BODY`] for everything else.
 pub(crate) fn answer(state: &AppState, record: EvidenceRecord) -> Response {
     let response = match &record.rejection {
-        None => json_response(StatusCode::OK, state.success_body.clone()),
+        None => json_response(StatusCode::OK, success_body(state, &record)),
         Some(Rejection::Admission(a)) => admission_response(*a),
         Some(_) => json_response(StatusCode::BAD_REQUEST, GENERIC_REJECTION_BODY.to_owned()),
     };
     state.evidence.push(record);
     response
+}
+
+/// The `200` body for a committed response: `{}`, or with a configured response `redirect_uri`
+/// `{"redirect_uri": "<uri>?response_code=<code>"}` with the fresh code `commit` stored with the
+/// consumed session (OpenID4VP 1.0 §8.2: "MUST include a fresh, cryptographically random value
+/// in the URL"). Read back from the registry, so the answer carries exactly the stored code.
+fn success_body(state: &AppState, record: &EvidenceRecord) -> String {
+    let code = state.response_redirect_uri.as_ref().and_then(|uri| {
+        let id = record.committed_session.as_ref()?;
+        let snapshot = state.registry(record.route)?.snapshot(id).ok()??;
+        match snapshot.state() {
+            SessionState::Consumed { result, .. } => Some((uri, result.response_code.clone()?)),
+            _ => None,
+        }
+    });
+    match code {
+        Some((uri, code)) => {
+            let query = form_urlencoded::Serializer::new(String::new())
+                .append_pair(RESPONSE_CODE_PARAM, &code)
+                .finish();
+            let separator = if uri.contains('?') { '&' } else { '?' };
+            json!({ "redirect_uri": format!("{uri}{separator}{query}") }).to_string()
+        }
+        None => json!({}).to_string(),
+    }
 }
 
 fn admission_response(error: AdmissionError) -> Response {
@@ -1487,9 +1528,16 @@ pub(crate) async fn commit(
     validated: validate::Validated,
 ) -> Result<(), Rejection> {
     let validate::Validated {
-        response: result,
+        response: mut result,
         holder_proof,
     } = validated;
+    // A fresh Response Code per committed response when the answer carries a `redirect_uri`
+    // (OpenID4VP 1.0 §8.2, §13.3 step 6: created by the Response URI and bound to the stored
+    // response). Drawn before the claim, so it is stored with the consumed session atomically.
+    if state.response_redirect_uri.is_some() {
+        result.response_code =
+            Some(random_b64(RESPONSE_CODE_BYTES).ok_or(Rejection::ResponseCodeUnavailable)?);
+    }
     let digest = ResponseDigest::new(Sha256::digest(response.as_bytes()).into());
     let commits_open = state.commits_open.read().await;
     if !*commits_open {

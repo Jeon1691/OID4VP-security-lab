@@ -296,7 +296,7 @@ pub use sd_jwt::{
 };
 #[cfg(feature = "lab-instrumentation")]
 pub use server::DecryptionPause;
-pub use server::{GENERIC_REJECTION_BODY, LabServer, MAX_REMEMBERED_DIGESTS};
+pub use server::{GENERIC_REJECTION_BODY, LabServer, MAX_REMEMBERED_DIGESTS, RESPONSE_CODE_BYTES};
 pub use validate::{
     CredentialRequest, CredentialRequestError, MAX_CLAIM_NAME_LEN, MAX_CLIENT_ID_LEN,
     MAX_CREDENTIAL_QUERY_ID_LEN, MAX_RESEARCH_NONCE_LEN, MAX_RESEARCH_STATE_LEN, MAX_VCT_LEN,

@@ -157,8 +157,9 @@ pub enum X509Error {
     /// The leaf certificate is not valid for the public origin's host (TLS server name).
     #[error("leaf certificate is not valid for the public host")]
     OriginNotInCertificate,
-    /// The response `redirect_uri` is not an `https://` URL of visible ASCII.
-    #[error("response redirect_uri must be an https URL")]
+    /// The response `redirect_uri` is not an absolute `https://` URL with a host (no user
+    /// info, no fragment: the lab appends a `response_code` query parameter).
+    #[error("response redirect_uri must be an absolute https URL with a host and no fragment")]
     RedirectUri,
 }
 
@@ -288,8 +289,9 @@ pub struct ConformanceConfig {
     /// [`MAX_CONFORMANCE_MAX_RUNTIME`], never zero.
     pub max_runtime: Duration,
     /// `redirect_uri` the `response_uri` answers a committed response with (OpenID4VP 1.0
-    /// §8.2: OPTIONAL; with it present the Wallet MUST redirect there). `None` (default)
-    /// answers `200 {}` like every other mode.
+    /// §8.2: OPTIONAL; with it present the Wallet MUST redirect there), extended per response
+    /// with a fresh `response_code` (`server::RESPONSE_CODE_BYTES`). `None` (default) answers
+    /// `200 {}` like every other mode.
     pub response_redirect_uri: Option<String>,
 }
 
@@ -347,7 +349,7 @@ pub(crate) fn check(
         return Err(StartError::MaxRuntimeTooLong);
     }
     if let Some(uri) = &conformance.response_redirect_uri
-        && (!uri.starts_with(HTTPS_PREFIX) || !uri.bytes().all(|b| b.is_ascii_graphic()))
+        && !crate::config::is_https_url(uri)
     {
         return Err(X509Error::RedirectUri.into());
     }
@@ -422,15 +424,6 @@ pub(crate) fn tls_acceptor(credentials: &X509Credentials) -> Result<TlsAcceptor,
         .map_err(StartError::Tls)?;
     tls.alpn_protocols = vec![ALPN_HTTP_1_1.to_vec()];
     Ok(TlsAcceptor::from(Arc::new(tls)))
-}
-
-/// The `response_uri` answer to a committed response: `{"redirect_uri": ...}` when configured,
-/// else `{}` (OpenID4VP 1.0 §8.2).
-pub(crate) fn success_body(conformance: &ConformanceConfig) -> String {
-    match &conformance.response_redirect_uri {
-        Some(uri) => json!({ "redirect_uri": uri }).to_string(),
-        None => json!({}).to_string(),
-    }
 }
 
 /// `client_metadata` of a conformance session: the ECDH-ES `jwks` and both `enc` values

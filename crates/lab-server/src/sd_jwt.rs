@@ -358,6 +358,7 @@ pub fn verify_sd_jwt_vc(
         holder_key_thumbprint: processed.holder_key_thumbprint,
         claims,
         disclosed_claim_names,
+        response_code: None,
     })
 }
 

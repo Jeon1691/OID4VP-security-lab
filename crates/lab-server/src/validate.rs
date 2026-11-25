@@ -301,6 +301,10 @@ pub struct ValidatedResponse {
     /// RFC 6901 JSON Pointers of every claim that came from a Disclosure (nested properties and
     /// array elements included), sorted.
     pub disclosed_claim_names: Vec<String>,
+    /// Conformance mode with a response `redirect_uri` only: the fresh Response Code put into
+    /// that redirect for this response (OpenID4VP 1.0 §8.2, §13.3), stored with the consumed
+    /// session and shown by the result endpoint. `None` otherwise.
+    pub response_code: Option<String>,
 }
 
 impl ValidatedResponse {
