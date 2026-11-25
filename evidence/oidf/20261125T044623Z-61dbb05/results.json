@@ -1,0 +1,566 @@
+{
+ "c3": [
+  {
+   "module": "oid4vp-1final-verifier-happy-flow",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "findings": [
+    {
+     "src": "EnsureVerifierFetchedRevocationList",
+     "result": "WARNING",
+     "msg": "The verifier did not fetch the revocation list referenced by the presented credential, so it cannot have checked the credential's revocation status"
+    }
+   ],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "oehXRWdMOaxVlsBoMMsIWQ"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/conformance_mode_e2e.rs",
+    "test": "conformance_round_trip_over_https_commits_with_x509_san_dns"
+   },
+   "log": "logs/happy-flow.json",
+   "screenshot": "screenshots/happy-flow.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-minimal-cnf-jwk",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "findings": [
+    {
+     "src": "EnsureVerifierFetchedRevocationList",
+     "result": "WARNING",
+     "msg": "The verifier did not fetch the revocation list referenced by the presented credential, so it cannot have checked the credential's revocation status"
+    }
+   ],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "nFbAGAM2-_dYgIx5ty_x6Q"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "credential_with_minimal_cnf_jwk_is_accepted"
+   },
+   "log": "logs/minimal-cnf-jwk.json",
+   "screenshot": "screenshots/minimal-cnf-jwk.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-request-uri-method-post",
+   "status": "FINISHED",
+   "result": "SKIPPED",
+   "expected": "SKIPPED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": null,
+   "lab_test": null,
+   "log": "logs/request-uri-method-post.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-request-uri-fetched-twice",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "findings": [
+    {
+     "src": "EnsureVerifierFetchedRevocationList",
+     "result": "WARNING",
+     "msg": "The verifier did not fetch the revocation list referenced by the presented credential, so it cannot have checked the credential's revocation status"
+    }
+   ],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "EZALNPjk_9VqQ7emo87Sdg"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/signed_request_object_e2e.rs",
+    "test": "served_request_object_is_signed_once_and_never_changes"
+   },
+   "log": "logs/request-uri-fetched-twice.json",
+   "screenshot": "screenshots/request-uri-fetched-twice.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-signature",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "lri6NxAuC2w0b5P6ZpLXzw"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_corrupted_signature_is_rejected"
+   },
+   "log": "logs/invalid-kb-jwt-signature.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-credential-signature",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "R95ntj2es4TtEBK8iWX5xQ"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "issuer_jwt_with_corrupted_signature_is_rejected"
+   },
+   "log": "logs/invalid-credential-signature.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-sd-hash",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "JnEBVc-X1TnV_XkFmwTWxA"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_sd_hash_is_rejected"
+   },
+   "log": "logs/invalid-sd-hash.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-nonce",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "mTm2yJYAmByNZP3qfEkrvQ"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_nonce_is_rejected"
+   },
+   "log": "logs/invalid-kb-jwt-nonce.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-aud",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "qIf2NbbzUNv0534ONxvmKA"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_aud_is_rejected"
+   },
+   "log": "logs/invalid-kb-jwt-aud.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-kb-jwt-iat-in-past",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "cCJXQjgkXWpXSaWn3hVQKw"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_stale_iat_is_rejected"
+   },
+   "log": "logs/kb-jwt-iat-in-past.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-kb-jwt-iat-in-future",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "y4I_OYYhb-JdXg-V-5vZbQ"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_future_iat_is_rejected"
+   },
+   "log": "logs/kb-jwt-iat-in-future.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-present-revoked-credential",
+   "status": "FINISHED",
+   "result": "FAILED",
+   "expected": "FAILED",
+   "as_expected": true,
+   "findings": [
+    {
+     "src": "EnsureVerifierFetchedRevocationList",
+     "result": "FAILURE",
+     "msg": "The verifier did not fetch the revocation list referenced by the presented credential, so it cannot have checked the credential's revocation status"
+    }
+   ],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "sYaaSowm0dlDePmrwDHzKg"
+   },
+   "lab_test": null,
+   "log": "logs/present-revoked-credential.json",
+   "screenshot": "screenshots/present-revoked-credential.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-present-credential-without-status",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "UTI9I6MPOWeMitwMEEboHQ"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "honest_sd_jwt_kb_presentation_commits_only_the_requested_claims"
+   },
+   "log": "logs/present-credential-without-status.json",
+   "screenshot": "screenshots/present-credential-without-status.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-wrong-vct",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "zkMJ9utL9YS8ce6dM6BBIA"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/src/sd_jwt.rs",
+    "test": "sd_jwt_vc_profile_enforces_vct_and_exactly_the_requested_claims"
+   },
+   "log": "logs/wrong-vct.json",
+   "screenshot": null
+  }
+ ],
+ "c4": [
+  {
+   "module": "oid4vp-1final-verifier-happy-flow",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "findings": [
+    {
+     "src": "EnsureVerifierFetchedRevocationList",
+     "result": "WARNING",
+     "msg": "The verifier did not fetch the revocation list referenced by the presented credential, so it cannot have checked the credential's revocation status"
+    }
+   ],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "6prI5zbqq2q529ErCyzX5Q"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/conformance_mode_e2e.rs",
+    "test": "conformance_round_trip_over_https_commits_with_x509_san_dns"
+   },
+   "log": "logs/happy-flow.json",
+   "screenshot": "screenshots/happy-flow.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-minimal-cnf-jwk",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "findings": [
+    {
+     "src": "EnsureVerifierFetchedRevocationList",
+     "result": "WARNING",
+     "msg": "The verifier did not fetch the revocation list referenced by the presented credential, so it cannot have checked the credential's revocation status"
+    }
+   ],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "jlIh9wM-F0_pKKKejOYjFA"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "credential_with_minimal_cnf_jwk_is_accepted"
+   },
+   "log": "logs/minimal-cnf-jwk.json",
+   "screenshot": "screenshots/minimal-cnf-jwk.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-request-uri-method-post",
+   "status": "FINISHED",
+   "result": "SKIPPED",
+   "expected": "SKIPPED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": null,
+   "lab_test": null,
+   "log": "logs/request-uri-method-post.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-request-uri-fetched-twice",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "findings": [
+    {
+     "src": "EnsureVerifierFetchedRevocationList",
+     "result": "WARNING",
+     "msg": "The verifier did not fetch the revocation list referenced by the presented credential, so it cannot have checked the credential's revocation status"
+    }
+   ],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "oLkVnWPnN24TID6KeXvTyg"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/signed_request_object_e2e.rs",
+    "test": "served_request_object_is_signed_once_and_never_changes"
+   },
+   "log": "logs/request-uri-fetched-twice.json",
+   "screenshot": "screenshots/request-uri-fetched-twice.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-signature",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "1DysHkl5VL9EHF5KLP9zQA"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_corrupted_signature_is_rejected"
+   },
+   "log": "logs/invalid-kb-jwt-signature.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-credential-signature",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "FtWLlb1Bqu7EjCTdf7QHdA"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "issuer_jwt_with_corrupted_signature_is_rejected"
+   },
+   "log": "logs/invalid-credential-signature.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-sd-hash",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "S9x1KKup84XZlITeKzetiw"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_sd_hash_is_rejected"
+   },
+   "log": "logs/invalid-sd-hash.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-nonce",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "2s_XhMJKrNZWD0D-x1qW5w"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_nonce_is_rejected"
+   },
+   "log": "logs/invalid-kb-jwt-nonce.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-aud",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "lwfc48VI9wXy0ecgBC8gxA"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_aud_is_rejected"
+   },
+   "log": "logs/invalid-kb-jwt-aud.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-kb-jwt-iat-in-past",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "8HAa5N1FJOTrZe0GyonRew"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_stale_iat_is_rejected"
+   },
+   "log": "logs/kb-jwt-iat-in-past.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-kb-jwt-iat-in-future",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "sWmxzVOHinubWDSX0yFZjQ"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_future_iat_is_rejected"
+   },
+   "log": "logs/kb-jwt-iat-in-future.json",
+   "screenshot": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-present-revoked-credential",
+   "status": "FINISHED",
+   "result": "FAILED",
+   "expected": "FAILED",
+   "as_expected": true,
+   "findings": [
+    {
+     "src": "EnsureVerifierFetchedRevocationList",
+     "result": "FAILURE",
+     "msg": "The verifier did not fetch the revocation list referenced by the presented credential, so it cannot have checked the credential's revocation status"
+    }
+   ],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "Beeugm70Fzg38tFT7QqSTw"
+   },
+   "lab_test": null,
+   "log": "logs/present-revoked-credential.json",
+   "screenshot": "screenshots/present-revoked-credential.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-present-credential-without-status",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "qM7s2msB1FYs3NQPvgIQww"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "honest_sd_jwt_kb_presentation_commits_only_the_requested_claims"
+   },
+   "log": "logs/present-credential-without-status.json",
+   "screenshot": "screenshots/present-credential-without-status.png"
+  },
+  {
+   "module": "oid4vp-1final-verifier-wrong-vct",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "R5zcFibg0bWKi9w9U3oiWw"
+   },
+   "lab_test": {
+    "file": "crates/lab-server/src/sd_jwt.rs",
+    "test": "sd_jwt_vc_profile_enforces_vct_and_exactly_the_requested_claims"
+   },
+   "log": "logs/wrong-vct.json",
+   "screenshot": null
+  }
+ ]
+}
