@@ -10,3 +10,6 @@
 /evidence/local/
 # Agent worktrees (Claude Code isolation).
 /.claude/worktrees/
+# OIDF suite: plan exports and per-run configs rendered from the committed placeholders.
+/tools/oidf-suite/*.zip
+/tools/oidf-suite/config/*.local.json
