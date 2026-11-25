@@ -54,6 +54,10 @@ docker --context orbstack compose down           # removes containers and networ
   request as the admin `DEVMODE@developer.com` (`security/DummyUserFilter.java:62-83`), and
   `WebSecurityResourceServerConfig` adds that filter to the API chain (`:132-134`). [run] The API
   answers without a token; `scripts/run-test-plan.py` would need `CONFORMANCE_DEV_MODE` set.
+  This admin access is granted to **any local process**, not only a browser. While the stack is
+  up, any program on this machine, and any OrbStack container (they reach host 127.0.0.1, see
+  section 3), can list, read, export, rerun or delete plans and logs, and start tests. So export
+  results as soon as a run ends, and keep the stack up only for the duration of a run.
 - **Browser risk: SSRF and an unauthenticated admin API.** [read] CSRF protection is off
   (`security/WebSecurityResourceServerConfig.java:60`, also `WebSecurityConfig.java:107`), and
   `/test/**` carries a permissive CORS policy for any origin (`security/TestDispatcherCorsConfiguration.java`,
@@ -161,8 +165,12 @@ It verified nothing. Three switches make it wrong on purpose, to see how the sui
 
 ```sh
 uv run --with cryptography==46.0.3 python -I tools/oidf-suite/standin/standin.py \
-    --plan haip --out evidence/local/standin oid4vp-1final-verifier-happy-flow
+    --plan haip --out "evidence/local/standin/$(date -u +%Y%m%dT%H%M%SZ)" oid4vp-1final-verifier-happy-flow
 ```
+
+`--out` must be a new (or empty) directory; the stand-in refuses to overwrite an earlier run.
+Its TLS handshakes run per connection under a 10 s deadline, so a stalled peer cannot block
+the suite's requests.
 
 ### 5a. The SD-JWT VC the mock wallet presents
 
