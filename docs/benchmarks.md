@@ -126,6 +126,12 @@ The row's latency is the refused probe's.
 Each cycle is `insert`, then unique-uri `resolve`, then `claim`: 1000 measured cycles after the
 warm-up. For Redis, a `PING` on a separate connection measures the network round trip, so
 `claim − ping` approximates the script cost. Keys never go to Redis (session-redis key table).
+After the Redis rows, on success and on error alike, the runner deletes its namespace and
+nothing else. It runs `SCAN MATCH {ns}:*` in pages of 500, re-checks each key for the exact
+prefix, and `UNLINK`s the batch. This happens outside every timed interval. Two tests in the
+gate's redis stage check that a run leaves none of its keys behind, also when an operation
+fails, and that neighbouring keys survive: another namespace sharing the prefix, the same hash
+tag without `:`, and an unrelated key.
 
 ## Metrics
 
