@@ -48,7 +48,9 @@
 //! binary have no TLS, X.509 or ECDH-ES code), the binary enters it only on an explicit
 //! `--mode conformance` flag (never from the environment), it refuses to start without its
 //! complete configuration, and the server stops accepting after
-//! [`ConformanceConfig::max_runtime`] (default [`DEFAULT_CONFORMANCE_MAX_RUNTIME`]). It is never
+//! [`ConformanceConfig::max_runtime`] (default [`DEFAULT_CONFORMANCE_MAX_RUNTIME`], at most
+//! [`MAX_CONFORMANCE_MAX_RUNTIME`]; measured with `Instant`, so on macOS time asleep does not
+//! count). It is never
 //! entered as a fallback: Hardened and Research servers refuse a [`ConformanceConfig`] and the
 //! x509 client id prefixes.
 
@@ -93,6 +95,10 @@ pub const X509_HASH_PREFIX: &str = "x509_hash:";
 /// enough for one plan run of the OIDF suite, whose modules each finish in minutes with a
 /// tester in the loop, short enough that a forgotten server does not keep serving.
 pub const DEFAULT_CONFORMANCE_MAX_RUNTIME: Duration = Duration::from_secs(2 * 60 * 60);
+/// Longest maximum runtime a conformance server accepts (lab policy, ADR 0002): one working
+/// day. A plan run takes well under an hour, so a longer time box only means a server that was
+/// forgotten; above it the server refuses to start (`StartError::MaxRuntimeTooLong`).
+pub const MAX_CONFORMANCE_MAX_RUNTIME: Duration = Duration::from_secs(8 * 60 * 60);
 /// Most certificates in the configured chain, leaf first (lab policy): the synthetic CA issues
 /// the leaf directly, so one is normal; a few intermediates leave room for experiments.
 pub const MAX_CHAIN_CERTIFICATES: usize = 4;
@@ -117,7 +123,7 @@ pub enum X509Error {
     #[error("PEM input unreadable or of the wrong kind")]
     Pem,
     /// The chain is empty or longer than [`MAX_CHAIN_CERTIFICATES`].
-    #[error("certificate chain must hold 1-4 certificates, leaf first")]
+    #[error("certificate chain must hold 1 to {MAX_CHAIN_CERTIFICATES} certificates, leaf first")]
     ChainLength,
     /// The chain contains the trust anchor (HAIP 1.0 §5: it "MUST NOT be included in the x5c").
     #[error("the trust anchor must not be part of the chain (x5c)")]
@@ -278,7 +284,8 @@ pub struct ConformanceConfig {
     pub credentials: X509Credentials,
     /// The origin every handed-out URL uses.
     pub public_origin: PublicOrigin,
-    /// The server stops accepting connections this long after start (kill switch).
+    /// The server stops accepting connections this long after start (kill switch); at most
+    /// [`MAX_CONFORMANCE_MAX_RUNTIME`], never zero.
     pub max_runtime: Duration,
     /// `redirect_uri` the `response_uri` answers a committed response with (OpenID4VP 1.0
     /// §8.2: OPTIONAL; with it present the Wallet MUST redirect there). `None` (default)
@@ -336,6 +343,9 @@ pub(crate) fn check(
     if conformance.max_runtime.is_zero() {
         return Err(StartError::ZeroLimit);
     }
+    if conformance.max_runtime > MAX_CONFORMANCE_MAX_RUNTIME {
+        return Err(StartError::MaxRuntimeTooLong);
+    }
     if let Some(uri) = &conformance.response_redirect_uri
         && (!uri.starts_with(HTTPS_PREFIX) || !uri.bytes().all(|b| b.is_ascii_graphic()))
     {
@@ -373,7 +383,9 @@ pub(crate) fn check(
     }
     let client_id = config.client_id.as_str();
     if let Some(dns) = client_id.strip_prefix(X509_SAN_DNS_PREFIX) {
-        if dns != host || !valid_for(dns) {
+        // §5.9.3: the value must "match a dNSName Subject Alternative Name (SAN)" entry, so an
+        // exact entry, not TLS wildcard matching (which `valid_for` uses for the origin host).
+        if dns != host || !has_dns_san(&leaf, dns) {
             return Err(X509Error::SanMismatch.into());
         }
     } else if let Some(hash) = client_id.strip_prefix(X509_HASH_PREFIX) {
@@ -388,6 +400,13 @@ pub(crate) fn check(
         .iter()
         .map(|cert| STANDARD.encode(cert))
         .collect())
+}
+
+/// Whether `leaf` has a dNSName SAN entry equal to `dns` (ASCII case-insensitive, as DNS
+/// names compare; RFC 5280 §4.2.1.6). A wildcard entry such as `*.example` does not match.
+pub(crate) fn has_dns_san(leaf: &EndEntityCert<'_>, dns: &str) -> bool {
+    leaf.valid_dns_names()
+        .any(|name| name.eq_ignore_ascii_case(dns))
 }
 
 /// The TLS server of a conformance server: TLS 1.3 only, the ring provider passed explicitly

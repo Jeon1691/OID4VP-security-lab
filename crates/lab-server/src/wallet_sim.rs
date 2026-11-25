@@ -1258,13 +1258,13 @@ fn tamper_segment(compact: &str, index: usize) -> String {
 mod x509 {
     use base64::Engine as _;
     use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
-    use rustls::pki_types::{CertificateDer, DnsName, ServerName, UnixTime};
+    use rustls::pki_types::{CertificateDer, UnixTime};
     use serde_json::{Map, Value};
     use sha2::{Digest as _, Sha256};
     use webpki::{EndEntityCert, KeyUsage};
 
     use super::{RequestRejection, WalletError};
-    use crate::conformance::{JwsEs256, X509_HASH_PREFIX, X509_SAN_DNS_PREFIX};
+    use crate::conformance::{JwsEs256, X509_HASH_PREFIX, X509_SAN_DNS_PREFIX, has_dns_san};
 
     /// JWS header parameter carrying the certificate chain (RFC 7515 §4.1.6).
     const HEADER_X5C: &str = "x5c";
@@ -1328,7 +1328,7 @@ mod x509 {
                 .map_err(|_| reject(RequestRejection::Signature))
         }
 
-        /// `x509_san_dns:<dns>`: `<dns>` is a dNSName SAN of the leaf and the FQDN of
+        /// `x509_san_dns:<dns>`: `<dns>` is a dNSName SAN entry of the leaf and the FQDN of
         /// `response_uri`; `x509_hash:<hash>`: the base64url SHA-256 of the leaf DER. Any other
         /// prefix is not x509 trust.
         pub(super) fn check_client_id(
@@ -1337,12 +1337,8 @@ mod x509 {
             response_uri: &str,
         ) -> Result<(), WalletError> {
             let ok = if let Some(dns) = client_id.strip_prefix(X509_SAN_DNS_PREFIX) {
-                let in_san = DnsName::try_from(dns).is_ok_and(|name| {
-                    self.cert().is_ok_and(|cert| {
-                        cert.verify_is_valid_for_subject_name(&ServerName::DnsName(name))
-                            .is_ok()
-                    })
-                });
+                // An exact dNSName entry (§5.9.3), not TLS wildcard matching.
+                let in_san = self.cert().is_ok_and(|cert| has_dns_san(&cert, dns));
                 let fqdn = response_uri
                     .strip_prefix(RESPONSE_URI_SCHEME)
                     .and_then(|rest| rest.split(['/', ':']).next());

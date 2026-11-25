@@ -336,14 +336,20 @@ pub struct CredentialRequest {
 pub enum CredentialRequestError {
     /// `id` empty, over [`MAX_CREDENTIAL_QUERY_ID_LEN`], or outside the §6.1 charset
     /// (alphanumeric, `_`, `-`).
-    #[error("credential query id must be 1-128 characters of [A-Za-z0-9_-]")]
+    #[error(
+        "credential query id must be 1 to {MAX_CREDENTIAL_QUERY_ID_LEN} characters of [A-Za-z0-9_-]"
+    )]
     Id,
     /// `vct` empty, over [`MAX_VCT_LEN`], or not visible ASCII.
-    #[error("vct must be 1-1024 visible ASCII characters")]
+    #[error("vct must be 1 to {MAX_VCT_LEN} visible ASCII characters")]
     Vct,
     /// No claims, more than [`crate::MAX_DISCLOSURES`], a duplicate, or an empty, over-long
     /// ([`MAX_CLAIM_NAME_LEN`]) or reserved (`_sd`, `...`, `_sd_alg`) claim name.
-    #[error("claims must be 1-16 distinct, non-reserved claim names")]
+    #[error(
+        "claims must be 1 to {max} distinct, non-reserved claim names of at most \
+         {MAX_CLAIM_NAME_LEN} bytes",
+        max = sd_jwt::MAX_DISCLOSURES
+    )]
     Claims,
 }
 

@@ -517,7 +517,15 @@ impl LabServer {
         };
         #[cfg(not(feature = "conformance"))]
         let max_runtime: Option<Duration> = None;
-        let deadline = max_runtime.map(|runtime| Instant::now() + runtime);
+        // `config::check` bounds the runtime; `checked_add` keeps an overflow from panicking.
+        let deadline = match max_runtime {
+            Some(runtime) => Some(
+                Instant::now()
+                    .checked_add(runtime)
+                    .ok_or(StartError::MaxRuntimeTooLong)?,
+            ),
+            None => None,
+        };
 
         let shared = match config.mode {
             Mode::Hardened => None,

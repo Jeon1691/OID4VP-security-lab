@@ -38,7 +38,8 @@
 //! `--public-origin` (e.g. `https://host.docker.internal:<port>`; without a port the bound one).
 //! `--client-id-prefix` derives the client id from the certificate (`x509_san_dns:<origin host>`
 //! or `x509_hash:<leaf hash>`) instead of `--client-id`. It stops by itself after
-//! `--max-runtime-secs` (default `DEFAULT_CONFORMANCE_MAX_RUNTIME`).
+//! `--max-runtime-secs` (default `DEFAULT_CONFORMANCE_MAX_RUNTIME`, at most
+//! `MAX_CONFORMANCE_MAX_RUNTIME`). `--session-ttl-secs` must be 1 to `MAX_SESSION_TTL` seconds.
 //!
 //! Every mode refuses non-loopback addresses (lab policy; ADR 0002 keeps that for conformance
 //! mode too). Build release artifacts with a plain `cargo build -p lab-server`, so the
