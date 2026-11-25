@@ -1,0 +1,66 @@
+{
+  "generated_at": "2026-11-25T00:09:56+00:00",
+  "lab_git_sha": "72a14df51ecae786cae61b4cedcfe78fe23f2266",
+  "lab_crates_tree": "6f2fef9ad90e7c0a0eab592ba41a7cbc954e0c7e",
+  "lab_source_dirty": false,
+  "spruce_openid4vp_sha": "c57a895884d039a741cc4b472c1698fb147ba487",
+  "cargo_lock_sha256": "41e242eea7999b5c000b7eeaf0ebf2fda935709c52d6eae436d2fec9598a181b",
+  "upstream_cargo_lock_sha256": "none",
+  "rustc_vv": [
+    "rustc 1.100.0 (0ef1bc386 2026-11-09)",
+    "binary: rustc",
+    "commit-hash: 0ef1bc386059596dada8fb65b50425aab2ea637a",
+    "commit-date: 2026-11-09",
+    "host: aarch64-apple-darwin",
+    "release: 1.100.0",
+    "LLVM version: 23.1.5"
+  ],
+  "cargo": "cargo 1.100.0 (3acc79c0c 2026-11-05)",
+  "tools": {
+    "cargo-deny": "cargo-deny 0.20.2",
+    "cargo-audit": "cargo-audit 0.23.0",
+    "cargo-machete": "0.10.1"
+  },
+  "host": {
+    "os": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
+    "kernel": "27.2.0",
+    "machine": "arm64",
+    "cpu": "Apple M5 Pro",
+    "logical_cpus": 18,
+    "physical_cpus": 18,
+    "memory_bytes": 68719476736
+  },
+  "ci": null,
+  "steps": {
+    "bench": {
+      "bench_build": "pass",
+      "scenario_runner": "pass",
+      "invariants": "pass"
+    }
+  },
+  "tests_passed": {},
+  "bench": {
+    "budget": 128,
+    "burst": 64,
+    "burst_rounds": 10,
+    "iterations": 100,
+    "over_budget": 8,
+    "profile": "release",
+    "redis": true,
+    "run_id": "20261125T000721Z-72a14df51eca",
+    "seed": 1,
+    "sizes": [
+      1,
+      2,
+      8,
+      32,
+      64,
+      128
+    ],
+    "store_iterations": 1000,
+    "store_warmup": 10,
+    "transport": "HTTP/1.1 over 127.0.0.1, server and wallet simulator in one process",
+    "warmup": 10,
+    "worker_threads": 18
+  }
+}
