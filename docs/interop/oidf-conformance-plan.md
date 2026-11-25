@@ -1,9 +1,14 @@
 # OIDF conformance suite: plan for the lab Verifier
 
-Status: G7 groundwork. This is desk research only. The suite has **not** been run against
-anything, no external service was contacted beyond reading public pages and repositories,
-and nothing was posted. All sources were retrieved on **2026-11-25**. Anything not confirmed
-in a source is marked **UNKNOWN**.
+Status: G7 groundwork. Sections 1-2 and 5-7 are desk research. All sources were retrieved on
+**2026-11-25**. Anything not confirmed in a source is marked **UNKNOWN**. Nothing was posted.
+
+*Update 2026-11-25:* the suite now runs self-hosted (`tools/oidf-suite/`, release-v5.3.5 = commit
+`246b2c1`, images pinned by digest, OrbStack, loopback only). It was run against a throwaway
+local stand-in verifier only, not against the lab and not against any external system, to
+resolve the UNKNOWNs in §3-§4. `tools/oidf-suite/README.md` holds the runbook, the exact plan
+configuration and the source citations; below, **[run]** marks what was observed running and
+**[read]** what was read from source.
 
 ## 1. Sources
 
@@ -85,7 +90,7 @@ as reference text (`library/specs/…`); no test cites them.
 | `…InvalidKbJwtAud` / `…InvalidKbJwtNonce` | `kb_jwt_with_wrong_aud_is_rejected` / `kb_jwt_with_wrong_nonce_is_rejected` | |
 | `…InvalidKbJwtSignature` | `kb_jwt_signed_by_a_non_cnf_key_is_rejected` | Wrong key, not a corrupted signature |
 | `…InvalidSdHash` | `kb_jwt_with_wrong_sd_hash_is_rejected` | |
-| `…KbJwtIatInFuture` / `…KbJwtIatInPast` | `kb_jwt_with_future_iat_is_rejected` / `kb_jwt_with_stale_iat_is_rejected` | The suite's thresholds are UNKNOWN; the lab allows 300 s age and 60 s future skew |
+| `…KbJwtIatInFuture` / `…KbJwtIatInPast` | `kb_jwt_with_future_iat_is_rejected` / `kb_jwt_with_stale_iat_is_rejected` | The suite sets the KB-JWT `iat` 365 days in the future / past [read]; the lab allows 300 s age and 60 s future skew |
 | `…MinimalCnfJwk` | none | Gap: the lab has no test for a `cnf.jwk` with only `kty`/`crv`/`x`/`y` |
 | `…WrongVct` | `sd_jwt::tests::sd_jwt_vc_profile_enforces_vct_and_exactly_the_requested_claims` | Unit level only |
 | `…RequestUriFetchedTwice` | `served_request_object_is_signed_once_and_never_changes` | |
@@ -108,26 +113,27 @@ L17-30):
 
 Anything else (3xx, 5xx, no status) fails.
 
-## 3. Running the suite locally (as documented, not executed)
+## 3. Running the suite locally
 
-- **Prebuilt images** (from the project's Build & Run wiki):
-  - `docker compose -f docker-compose-prebuilt.yml up`, then open
-    `https://localhost.emobix.co.uk:8443/`. The hostname must be mapped in the hosts file.
-  - The images are `registry.gitlab.com/openid/conformance-suite:${IMAGE_TAG:-latest}`, its
-    nginx image, and `${MONGODB_IMAGE:-mongo:6.0.13}` (an overridable default)
-    (`docker-compose-prebuilt.yml` L3, L12, L30).
-  - `BASE_URL` can be overridden.
-- **From source**:
-  - Maven and Java. `pom.xml` sets `java.version` 21. The wiki says "17 or later". **Which one
-    is authoritative is UNKNOWN.**
-  - `docker-compose-dev.yml` runs mongo, nginx (8443-8445) and the server with
-    `--fintechlabs.devmode=true`.
-  - `docker-compose-dev-mac-nodocker.yml` runs the Java server on the host, with nginx
-    reaching it through `host-gateway`.
-- **Scripted runs**: `scripts/run-test-plan.py` uses `CONFORMANCE_SERVER` and a bearer
-  `CONFORMANCE_TOKEN`.
-- **Reachability**: the suite server must reach the Verifier's `request_uri` and
-  `response_uri` over **HTTPS**. Self-signed certificates are accepted.
+Runbook, pins and findings: `tools/oidf-suite/README.md`. In short:
+
+- **Prebuilt images**: `tools/oidf-suite/docker-compose.yml`, derived from upstream
+  `docker-compose-prebuilt.yml` at tag `release-v5.3.5` (= `246b2c1`). The server, nginx and
+  `mongo:6.0.13` images are pinned by multi-arch index digest. On 2026-11-25 `:latest` resolved
+  to the same suite digests. [run]
+- **No login**: the `dev` profile sets `fintechlabs.devmode=true`, which authenticates every
+  request as a dummy admin, so the REST API needs no token. [run]
+- **No hosts-file edit**: `BASE_URL=https://localhost:8443`, and nginx publishes
+  `127.0.0.1:8443` only. Mongo is on tmpfs, so `docker compose down` leaves nothing behind
+  (export the results first). [run]
+- The image runs Java 21 (Temurin 21.0.13) [run]. The Maven/Java question only matters for
+  source builds, which are not used.
+- **Scripted runs**: `scripts/run-test-plan.py` cannot drive a verifier plan here, because it
+  cannot make the lab start a session. The REST API can, end to end, including the screenshot
+  upload that REVIEW needs. README §5e lists the calls and a driver design. [run]
+- **Reachability**: from inside the suite container, `host.docker.internal` and
+  `host.orb.internal` both reach an HTTPS server bound to host **127.0.0.1 only**
+  (`scripts/oidf_suite_probe.sh`). The suite's client accepts self-signed certificates. [run]
 
 ## 4. Lab-server changes the suite would need
 
@@ -139,19 +145,32 @@ None of these is in scope for G7. Each needs its own decision record.
    - *Option A*: suite JVM on the same host (nodocker variant), with a TLS-terminating loopback
      front for the lab. The lab still binds `127.0.0.1`, but third-party code becomes a client
      and TLS is added.
-   - *Option B*: suite in Docker. The container must reach the host, which means either a
-     non-loopback bind or host networking (Linux). Whether Docker Desktop's
-     `host.docker.internal` reaches a service bound to host `127.0.0.1` is **UNKNOWN**; do not
-     rely on it.
+   - *Option B*: suite in Docker. On OrbStack the container reaches a service bound to host
+     `127.0.0.1` through `host.docker.internal` (or `host.orb.internal`), so neither a wider
+     bind nor host networking is needed [run, `scripts/oidf_suite_probe.sh`]. Docker Desktop
+     is still **UNKNOWN**.
    - *Option C*: hosted demo/production server. This needs a public endpoint and is **not**
      compatible with the lab policy.
 
-   Recommendation: Option A, with an ADR amending ADR-005 for a TLS loopback front, synthetic
-   data only, and a time-boxed conformance mode.
+   Recommendation (updated): Option B on OrbStack, which keeps the lab on 127.0.0.1. It still
+   needs an ADR amending ADR-005 for a TLS loopback front, synthetic data only, and a
+   time-boxed conformance mode. Option A remains the fallback where the Docker host alias is
+   not available.
 2. **Client identifier.** Add `x509_san_dns:` / `x509_hash:` with a synthetic CA, a leaf
    certificate and an `x5c` JWS header. Today they are refused by design
    (`start_refuses_client_id_prefixes_the_lab_cannot_sign_for`). HAIP also needs
    `client.request_object_trust_anchor_pem`.
+
+   Resolved [read, run]:
+   - `x5c` = `[leaf]`. The CA goes only in the trust-anchor PEM, never in `x5c`, and the leaf
+     must not be self-signed.
+   - The header `typ` is `oauth-authz-req+jwt`.
+   - The `x509_hash:` value is the base64url SHA-256 of the DER leaf.
+   - For `x509_san_dns` the suite checks only that `client_id` = `x509_san_dns:` + the config
+     field `client.client_id` (which is required). It does not check the certificate SAN or the
+     `response_uri` host.
+
+   Details: README §5b.
 3. **Response encryption.** Add an ECDH-ES P-256 path (`A128GCM` and `A256GCM` advertised) for
    a conformance mode. The HPKE-only Verifier build was a deliberate choice: josekit/SpruceID
    are kept out of the shipped binary, and `core_containment` / `verifier_without_sealing` hold
@@ -168,17 +187,45 @@ None of these is in scope for G7. Each needs its own decision record.
    the feature's build instead of pinning jose-ecdh-es out). It exists to observe #792 C3/C9;
    it is **not** the conformance mode. Whether and how a conformance mode serves ECDH-ES
    (TLS front, x509 client id, kill switch) remains the undecided C2 ADR below.
+
+   Resolved for the conformance mode [read, run]:
+   - The suite encrypts with the **first** entry of `encrypted_response_enc_values_supported`.
+   - Its JWE header carries `alg`, `enc`, `epk` (`kty`/`crv`/`x`/`y`), `kid`, `cty` `json`, and
+     distinct random `apu`/`apv`. The `jose-ecdh-es` header policy accepts all of these.
+   - Every JWK needs a unique `kid` and an `alg`.
+   - Under HAIP, a key already seen in an earlier request (within a 3 h window) is a FAILURE.
+     The research route's one shared key therefore cannot be used for C4: the conformance mode
+     needs a **fresh key per session**.
 4. **Configurable DCQL query.** Allow vct `urn:eudi:pid:1` and the claim paths the suite's
-   credential carries. Which PID claims the suite discloses is **UNKNOWN**. Also allow a
-   configurable trusted issuer key, set from the synthetic `credential.signing_jwk` given to the
-   suite. Whether that key needs an `x5c` is **UNKNOWN**.
+   credential carries. Also allow a configurable trusted issuer key, set from the synthetic
+   `credential.signing_jwk` given to the suite.
+
+   Resolved [read, run]:
+   - The suite discloses exactly the requested claim names, out of `given_name`,
+     `family_name`, `birthdate`, `nationalities`, `place_of_birth` (`country`),
+     `issuing_authority`, `issuing_country` and `picture`.
+   - The issuer JWT has no `kid`. It carries `x5c` only if the JWK has one, which the code
+     treats as optional.
+   - There is no `_sd_alg` (so the default `sha-256` applies), and the payload has a `status`
+     claim.
+   - The KB-JWT `aud` is the full client id, prefix included.
+
+   Details: README §5a.
 5. **Authorization Request URL.** The lab returns `client_id` and `request_uri` as JSON
    (`POST /lab/v1/sessions`). A small driver must turn these into
    `<suite authorization endpoint>?client_id=…&request_uri=…`.
-6. **Response URI answer.** The lab answers `200 {}`. Whether the suite expects or tolerates a
-   `redirect_uri` in that JSON is **UNKNOWN**. The lab rejects at the `response_uri` with the
-   generic 400, which takes the negative tests' 4xx path (PASSED). The lab never uses the
-   deferred 2xx path, which ends in REVIEW with a screenshot (§2.3).
+6. **Response URI answer.** The lab answers `200 {}`. The lab rejects at the `response_uri`
+   with the generic 400, which takes the negative tests' 4xx path (PASSED) [run]. The lab never
+   uses the deferred 2xx path, which ends in REVIEW with a screenshot (§2.3).
+
+   Resolved [read, run]:
+   - The plain plan accepts `{}` or `{"redirect_uri":"…"}`.
+   - **HAIP requires `redirect_uri`**; a response without it is a FAILURE.
+   - Any other member in the body is a WARNING.
+   - The status must be exactly 200, with `Content-Type: application/json`.
+   - Positive modules always end in REVIEW, which is completed through the image API.
+   - `…PresentRevokedCredential` FAILS for any verifier that does not fetch the status list.
+     The lab has no status support, so this module stays FAILED for the lab [run].
 7. `request_uri_method=post` (§5.10) is not supported. That module would be skipped: it calls
    `fireTestSkipped` when the request has no `request_uri_method=post`
    (`VP1FinalVerifierRequestUriMethodPost.java` L37).
@@ -190,7 +237,7 @@ None of these is in scope for G7. Each needs its own decision record.
 | C0 (this document) | Desk research, mapping of suite modules to lab tests | Read public pages only | none |
 | C1 | Offline gap tests inside the lab: `MinimalCnfJwk`-style `cnf`, a corrupted (not foreign) issuer signature, a corrupted KB-JWT signature. Configurable DCQL query and issuer key. | Loopback | Default gate stages |
 | C2 | ADR: conformance mode (TLS loopback front, x509 client id with a synthetic CA, ECDH-ES as a separate mode, kill switch) | none | ADR approved before any code |
-| C3 | Self-hosted suite (Option A), plain `oid4vp-1final-verifier-test-plan`, `sd_jwt_vc` + `direct_post.jwt` + `x509_san_dns` + `request_uri_signed`, against the ECDH-ES conformance mode. Synthetic credentials only. Results go into `evidence/` with commit SHAs. | Loopback + TLS (per ADR) | Explicit approval |
+| C3 | Self-hosted suite (`tools/oidf-suite/`, Option B on OrbStack), plain `oid4vp-1final-verifier-test-plan`, `sd_jwt_vc` + `direct_post.jwt` + `x509_san_dns` + `request_uri_signed`, against the ECDH-ES conformance mode. Synthetic credentials only. Results go into `evidence/` with commit SHAs. | Loopback + TLS (per ADR) | Explicit approval |
 | C4 | HAIP plan (`x509_hash`, A128GCM + A256GCM, trust anchor PEM) | Same | Explicit approval |
 | C5 | HPKE / OpenID4VP 1.1: wait for suite support. Track the suite repo for `HPKE` / `session_info` (read-only). Until then, HPKE-0 conformance rests on jose-hpke draft-22 vectors, the lab's own suite, and INTEROP-02. | none | — |
 
