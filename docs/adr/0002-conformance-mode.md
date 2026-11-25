@@ -105,7 +105,15 @@ run:
    claims), the issuer key, the public origin, the client id prefix, the response
    `redirect_uri` (`--response-redirect-uri`, needed for HAIP; default `200 {}`), the session TTL
    and the authorization endpoint the session creation response builds the Authorization
-   Request URL for (`authorization_request`).
+   Request URL for (`authorization_request`). Both URLs must be absolute `https://` URLs with a
+   host (the endpoint may also be the default `openid4vp://`), with no user info and no fragment,
+   or the server refuses to start.
+9. **A fresh Response Code in every redirect.** With a response `redirect_uri` configured, each
+   committed response gets its own 128-bit random `response_code`, appended as a query
+   parameter (OpenID4VP 1.0 §8.2: the Verifier "MUST include a fresh, cryptographically random
+   value in the URL"; §13.3 step 6). It is drawn before the claim and stored with the consumed
+   session; the result endpoint shows it. The lab has no frontend, so nothing redeems it the way
+   §13.3 step 8 / §14.2 describe; the result token remains the capability that reads a result.
 
 ## Consequences
 
