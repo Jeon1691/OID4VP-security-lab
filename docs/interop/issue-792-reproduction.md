@@ -310,7 +310,7 @@ Strategies:
 - **UU**: unique URI (Hardened).
 - **UK**: unique kid (Research, shared URI).
 - **BT**: bounded trial (Research, shared URI and key).
-- **EE**: the ECDH-ES research route (Research, `ecdh-es-research`; shared URI, one ECDH-ES
+- **EE**: the ECDH-ES research route (Research with `LabConfig::ecdh_es_route`, `ecdh-es-research`; shared URI, one ECDH-ES
   key and `kid`; the decrypted `state` selects).
 
 | ID | Sessions | Shared attributes | Sender capability | Expected Verifier behaviour | Observed (test) |
@@ -347,7 +347,12 @@ Strategies:
 | S30 | 2 (EE) | cid, uri, key, **nonce**, **state** | honest | EE: integrity failure, claim nothing | 2 open, 2 validate, `Ambiguous` (`ecdh_es_two_live_sessions_sharing_nonce_and_state_are_ambiguous`) |
 | S31 | 1 EE + 1 UU + 1 BT | cid | HPKE-0 JWE to EE; ECDH-ES JWE (either key, either `enc`) to UU and BT | no downgrade, no cross-route acceptance | `EcdhEsJweParse(UnsupportedAlg)` / `JweParse(UnsupportedAlg)`, 0 attempts, all pending, each then commits on its own route (`ecdh_es_and_hpke_routes_never_accept_each_others_jwes`) |
 | S32 | 1 (EE) | none | plaintext `vp_token`, alone or beside `response` | admission refusal | 400, `PlaintextVpToken`, 0 attempts, pending (`ecdh_es_route_refuses_plaintext_vp_token_at_admission`) |
-| S33 | none | none | asks a Hardened server for the ECDH-ES route or an ECDH-ES session | not served | 404 without an evidence record; creation 400 (`hardened_mode_has_no_ecdh_es_route_and_refuses_ecdh_es_sessions`) |
+| S33 | none | none | asks a Hardened server for the ECDH-ES route or an ECDH-ES session | not served | 404 without an evidence record; creation 400; a hardened config with `ecdh_es_route` is refused at start (`hardened_mode_has_no_ecdh_es_route_and_refuses_ecdh_es_sessions`) |
+| S34 | none | none | asks a Research server without `LabConfig::ecdh_es_route` (BT and UK) | not served: the route is opt-in per server | 404, creation 400, HPKE-0 flow unaffected (`research_mode_without_the_opt_in_has_no_ecdh_es_route`) |
+| S35 | 256 (EE) | cid, uri, key | creates one session more than the cap; honest response for the last | EE: cap at `MAX_CANDIDATE_BUDGET`; the POST costs one open per live session | 503 at creation (other routes still issue); 256 candidates, 256 attempts, `opened: 256`, committed (`ecdh_es_route_caps_pending_sessions_at_the_candidate_budget`) |
+| S36 | 2 (EE) | cid, uri, key, **state** (research knob); nonces fresh | honest for A, then the same JWE again | EE: `state` names both, holder binding disambiguates | 2 open, `validated: 1`, A committed; replay named for B alone: `KbNonceMismatch`, B pending then commits (`ecdh_es_duplicate_state_with_distinct_nonces_is_disambiguated_by_holder_binding`) |
+| S37 | 2 sequential (EE), short TTL | cid, uri, key | response for expired A while B is live; again once B has expired | EE: expired sessions are never candidates | `StateUnknown` (1 open, B pending); then `Resolve(SessionExpired)`, 0 attempts; nothing consumed (`ecdh_es_response_for_an_expired_session_is_refused`) |
+| S38 | 1 (unit) | none | ECDH-ES JWE tried with a session holding an HPKE-0 key, HPKE-0 JWE with one holding an ECDH-ES key | neither trial opens with the other route's key kind | 1 attempt, `opened: 0`, `Decrypt`; positive controls open (`ecdh_es::tests::ecdh_es_trial_never_opens_with_an_hpke_key`, `ecdh_es::tests::hpke_trial_never_opens_with_an_ecdh_es_key`) |
 
 ## 8. Open questions
 
@@ -357,7 +362,8 @@ Strategies:
 - ~~Should the lab add a 1.0-style ECDH-ES shared-key Verifier, to observe that every candidate
   decrypts (§4 item 1 is currently an inference)?~~ Resolved: it has one, research mode only
   and behind the non-default `ecdh-es-research` feature (ADR 0001; C3, C9, §4 item 1,
-  S23-S33). Every candidate decrypts; `state` is the only selector.
+  S23-S38). Every candidate decrypts; `state` selects, and when the research knob reuses
+  `state`, holder binding disambiguates.
 - ~~Should the lab issue `state` inside the JWE and check it after decryption, to exercise
   §14.4.2?~~ Resolved: it does (C7, §4 item 7, S17-S22). Under HPKE the check comes after
   decryption and helps only against inadvertent or misrouted responses.
