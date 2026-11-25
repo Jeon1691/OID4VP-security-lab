@@ -95,6 +95,7 @@ sha2 = { version = "0.11.1", default-features = false }
 # Workspace crates.
 protocol-model = { path = "crates/protocol-model" }
 jose-hpke = { path = "crates/jose-hpke" }
+jose-ecdh-es = { path = "crates/jose-ecdh-es" }
 session-core = { path = "crates/session-core" }
 session-redis = { path = "crates/session-redis" }
 lab-server = { path = "crates/lab-server" }
