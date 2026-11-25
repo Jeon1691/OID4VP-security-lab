@@ -113,6 +113,16 @@ REQUIRED_TESTS=(
   ecdh_es_rejects_bad_base64url_segments
   ecdh_es_rejects_wrong_iv_length
   ecdh_es_rejects_wrong_tag_length
+  ecdh_es_rejects_malformed_epk_coordinates
+  ecdh_es_rejects_unknown_epk_member
+  ecdh_es_rejects_unknown_header_parameter
+  ecdh_es_rejects_equal_or_malformed_apu_apv
+  ecdh_es_rejects_oversized_input_and_header
+  ecdh_es_rejects_wrong_segment_count_and_json_serialization
+  josekit_jwe_does_not_open_with_another_key
+  rfc7518_appendix_c_kdf_binds_every_input
+  # End-to-end KAT: the OpenID4VP 1.0 §8.3 encrypted response example opens to its payload.
+  openid4vp_1_0_section_8_3_example_opens_to_the_printed_payload
   # session-core (IMP-007/011/012): strategies, exactly-once claim, state machine.
   unique_uri_yields_exactly_one_candidate_among_sessions_sharing_kid
   unique_kid_yields_exactly_one_candidate_among_sessions_sharing_route
@@ -453,17 +463,27 @@ core_containment() {
 # sender-side sealing (jose-hpke `test-support`, the wallet simulator's HTTP client), the
 # SpruceID tree (`openid4vp`, `ssi*`: the wallet simulator's Request Object verification) or the
 # decryption pause lever. Both are only reachable through the `wallet-sim` /
-# `lab-instrumentation` features that tests enable via the self dev-dependency. jose-ecdh-es
-# `test-support` (ECDH-ES sealing) must not be reachable either; lab-server has no normal
-# dependency on jose-ecdh-es yet, so that query prints nothing until the research route lands.
+# `lab-instrumentation` features that tests enable via the self dev-dependency.
+#
+# jose-ecdh-es (ECDH-ES, research only) is pinned out of lab-server's normal graph under every
+# feature combination (`--all-features`), so an optional dependency behind a lab-server feature
+# trips it too. The PR that adds the research route must replace this pin with a real check
+# that the route's build reaches jose-ecdh-es without `test-support`; a query that prints
+# nothing would otherwise pass silently forever.
 verifier_without_sealing() {
   local features ecdh_es own normal
   features="$(cargo tree --locked -p lab-server -e normal,features -i jose-hpke)" || return 1
-  ecdh_es="$(cargo tree --locked -p lab-server -e normal,features -i jose-ecdh-es)" || return 1
+  # stderr carries only cargo's "nothing to print" note; a cargo failure still fails the step.
+  ecdh_es="$(cargo tree --locked -p lab-server --all-features -e normal -i jose-ecdh-es 2>/dev/null)" \
+    || return 1
+  if [[ -n "$ecdh_es" ]]; then
+    echo "lab-server now depends on jose-ecdh-es: replace this pin with the test-support check" \
+      "for the route's build/feature"
+    return 1
+  fi
   own="$(cargo tree --locked -p lab-server -e normal,features -i lab-server)" || return 1
   normal="$(cargo tree --locked -p lab-server -e normal --prefix none)" || return 1
   if grep -F 'feature "test-support"' <<<"$features" \
-    || grep -F 'feature "test-support"' <<<"$ecdh_es" \
     || grep -E 'lab-server feature "(wallet-sim|lab-instrumentation)"' <<<"$own" \
     || grep -E '^(reqwest|openid4vp|ssi|ssi-[a-z0-9-]+) ' <<<"$normal"; then
     echo "test-only feature reachable from the default lab-server build"
