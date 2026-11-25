@@ -32,7 +32,13 @@ fi
 SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || echo nogit)"
 RUN_ID="${BENCH_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-${SHA}}"
 OUT="${OUT_ROOT}/${RUN_ID}"
-mkdir -p "$OUT"
+# A run directory belongs to exactly one run: reusing one would mix old result files with the
+# new manifest. The parent may exist; the run directory must not (plain `mkdir`, atomic).
+mkdir -p "$OUT_ROOT"
+if ! mkdir "$OUT" 2>/dev/null; then
+  echo "run directory ${OUT} already exists; pick a new BENCH_RUN_ID" >&2
+  exit "$EXIT_BROKEN"
+fi
 LOG="$OUT/bench.log"
 : >"$LOG"
 
