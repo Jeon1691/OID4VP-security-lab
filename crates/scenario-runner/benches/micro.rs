@@ -19,7 +19,9 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use jose_hpke::rand_core::UnwrapErr;
 use jose_hpke::test_support::seal_compact;
 use jose_hpke::{CompactJwe, RecipientPrivateKey, SessionInfo};
-use protocol_model::{ClientIdWire, KeyId, NonceWire, RequestBinding, ResponseUriWire, SessionId};
+use protocol_model::{
+    ClientIdWire, KeyId, NonceWire, RequestBinding, ResponseUriWire, SessionId, StateWire,
+};
 use session_core::{
     CandidateBudget, IngressHint, MemoryRegistry, NewSession, RegistryConfig, ResolutionStrategy,
     RoutePolicy, RouteToken, SystemClock,
@@ -31,6 +33,8 @@ const SIZES: [usize; 6] = [1, 2, 8, 32, 64, 128];
 const CLIENT_ID: &str = "x509_san_dns:verifier.lab.invalid";
 const RESPONSE_URI: &str = "https://verifier.lab.invalid/post";
 const KID: &str = "g6-bench-kid";
+/// Synthetic `state` (not a `session_info` input, so it does not affect what is measured).
+const STATE: &str = "g6-bench-state";
 /// Plaintext about the size of an honest lab `vp_token` (one SD-JWT+KB, ~1.2 KB).
 const PLAINTEXT_BYTES: usize = 1200;
 /// Session lifetime: far longer than any benchmark.
@@ -41,6 +45,7 @@ fn binding(nonce: &str, response_uri: &str) -> RequestBinding {
         client_id: ClientIdWire::new(CLIENT_ID).expect("client_id"),
         nonce: NonceWire::new(nonce).expect("nonce"),
         response_uri: ResponseUriWire::new(response_uri).expect("response_uri"),
+        state: StateWire::new(STATE).expect("state"),
     }
 }
 

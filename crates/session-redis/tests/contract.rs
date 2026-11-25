@@ -19,7 +19,7 @@ mod suite {
     };
 
     use crate::common::{
-        Backend, SCALES, TTL, TestKey, TestResult, candidate, dc_api_binding, digest, kid,
+        Backend, SCALES, TTL, TestKey, TestResult, binding, candidate, dc_api_binding, digest, kid,
         new_session, pending, route, shared, sid, state,
     };
 
@@ -810,6 +810,41 @@ mod suite {
         }
         assert_eq!(committed.revision(), stored.revision());
     }
+
+    /// A `direct_post.jwt` binding comes back with its `state`, byte-exact, from the snapshot
+    /// and from the candidate a resolve hands to the Verifier (which compares the decrypted
+    /// `state` with it), and two sessions keep their own values.
+    pub async fn direct_post_binding_round_trips_with_its_state<B: Backend>() {
+        let h = B::make(shared()).await;
+        let (r0, r1) = (route(), route());
+        h.store
+            .insert(new_session(0, &r0, None))
+            .await
+            .expect("insert");
+        h.store
+            .insert(new_session(1, &r1, None))
+            .await
+            .expect("insert");
+        for (i, r) in [(0, r0), (1, r1)] {
+            let want = binding(i, &r);
+            assert!(want.state().is_some());
+            let stored = h
+                .store
+                .snapshot(&sid(i))
+                .await
+                .expect("store")
+                .expect("present");
+            assert_eq!(stored.binding(), &want);
+            let c = h
+                .store
+                .resolve(&IngressHint::new(r, None), ResolutionStrategy::UniqueUri)
+                .await
+                .expect("resolve")
+                .remove(0);
+            assert_eq!(c.binding(), &want);
+            assert_eq!(c.binding().state(), want.state());
+        }
+    }
 }
 
 /// One `#[tokio::test]` per suite function for `$backend`, with optional extra attributes.
@@ -843,6 +878,7 @@ macro_rules! contract_tests {
             insert_rejects_duplicate_id_and_zero_ttl,
             snapshots_are_point_in_time_copies,
             snapshot_round_trips_every_field,
+            direct_post_binding_round_trips_with_its_state,
         );
     };
     (@each $backend:ty, $attrs:tt, $($name:ident),* $(,)?) => {

@@ -28,11 +28,21 @@
 //!   legal in any of these values (URLs, origins, URL-safe tokens), so they are rejected too.
 //! * **Nonce.** §5.2 requires "ASCII URL safe characters (uppercase and lowercase letters,
 //!   decimal digits, hyphen, period, underscore, and tilde)"; [`NonceWire`] enforces that set.
+//! * **State.** §5.2: "`state` values MUST only contain ASCII URL safe characters" (the same
+//!   set); [`StateWire`] enforces it. `state` is not a `session_info` input; it is carried in
+//!   the encrypted payload (§8.3: the response parameters are "top-level JSON members") and
+//!   checked after decryption (§14.4.2).
 //! * **Origin.** §8.3.1: the origin "MUST NOT be prefixed with `origin:`" (that prefix belongs to
 //!   the audience in §5.9.3, not to `session_info`); [`OriginWire`] rejects it.
 //! * **Binding shape.** `dc_api.jwt` has no `client_id` or `response_uri` input and
 //!   `direct_post.jwt` has no `origin`, so [`RequestBinding`] is an enum whose variants carry
-//!   exactly the fields each mode's formula uses.
+//!   exactly the fields each mode's formula uses, plus, for `direct_post.jwt`, the `state` the
+//!   response must echo. `dc_api.jwt` has no `state`: Appendix A.2 says it "is not defined for
+//!   the DC API".
+//! * **`state` is required here.** §5.2 makes `state` RECOMMENDED (REQUIRED only under §5.3).
+//!   This model describes the requests the lab issues, and the lab always issues one, so a
+//!   `direct_post.jwt` binding without `state` cannot be built and no Verifier path has to
+//!   decide what an absent stored `state` means (lab policy, stricter than the spec).
 
 use std::fmt;
 use std::str::FromStr;
@@ -161,6 +171,20 @@ impl ClientIdWire {
     }
 }
 
+/// Non-empty and only §5.2's "ASCII URL safe characters" (`A-Za-z0-9-._~`), the set §5.2
+/// prescribes for both `nonce` and `state`.
+fn check_url_safe(field: &'static str, s: &str) -> Result<(), ModelError> {
+    check_non_empty(field, s)?;
+    if !s.is_ascii() {
+        return Err(ModelError::NotAscii { field });
+    }
+    let url_safe = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~');
+    if !s.bytes().all(url_safe) {
+        return Err(ModelError::DisallowedCharacter { field });
+    }
+    Ok(())
+}
+
 wire_newtype!(
     /// `nonce` exactly as sent. §5.2: ASCII URL-safe characters (`A-Za-z0-9-._~`).
     NonceWire
@@ -170,14 +194,22 @@ impl NonceWire {
     /// Empty, non-ASCII, or containing a character outside `A-Za-z0-9-._~`.
     pub fn new(value: impl Into<String>) -> Result<Self, ModelError> {
         let value = value.into();
-        check_non_empty("nonce", &value)?;
-        if !value.is_ascii() {
-            return Err(ModelError::NotAscii { field: "nonce" });
-        }
-        let url_safe = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~');
-        if !value.bytes().all(url_safe) {
-            return Err(ModelError::DisallowedCharacter { field: "nonce" });
-        }
+        check_url_safe("nonce", &value)?;
+        Ok(Self(value))
+    }
+}
+
+wire_newtype!(
+    /// `state` exactly as sent in the Authorization Request and echoed in the response
+    /// (RFC 6749 §4.1.1, §4.1.2). §5.2: ASCII URL-safe characters (`A-Za-z0-9-._~`).
+    StateWire
+);
+impl StateWire {
+    /// # Errors
+    /// Empty, non-ASCII, or containing a character outside `A-Za-z0-9-._~`.
+    pub fn new(value: impl Into<String>) -> Result<Self, ModelError> {
+        let value = value.into();
+        check_url_safe("state", &value)?;
         Ok(Self(value))
     }
 }
@@ -297,20 +329,23 @@ impl fmt::Display for EncryptedResponseMode {
     }
 }
 
-/// The signed-request values that feed HPKE `session_info`, per response mode. Each variant
-/// holds exactly the fields its §8.3.1 formula uses, so a mode/field mismatch cannot be built.
+/// The signed-request values a response is bound to, per response mode: the HPKE
+/// `session_info` inputs (each variant holds exactly the fields its §8.3.1 formula uses, so a
+/// mode/field mismatch cannot be built) and, for `direct_post.jwt`, the `state` the decrypted
+/// response must carry (§14.4.2). `state` is not part of `session_info`.
 ///
 /// `session_info` exists only in OpenID4VP 1.1, so this type is 1.1-only and carries no
 /// [`ProtocolVersion`]; that type is for reporting 1.0 (ECDH-ES) versus 1.1 (HPKE) elsewhere.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestBinding {
-    /// `direct_post.jwt`: `client_id`, `nonce`, `response_uri`.
+    /// `direct_post.jwt`: `client_id`, `nonce`, `response_uri` (`session_info`), and `state`.
     DirectPostJwt {
         client_id: ClientIdWire,
         nonce: NonceWire,
         response_uri: ResponseUriWire,
+        state: StateWire,
     },
-    /// `dc_api.jwt`: `origin`, `nonce`.
+    /// `dc_api.jwt`: `origin`, `nonce`. No `state` (Appendix A.2).
     DcApiJwt {
         origin: OriginWire,
         nonce: NonceWire,
@@ -332,6 +367,15 @@ impl RequestBinding {
     pub const fn nonce(&self) -> &NonceWire {
         match self {
             Self::DirectPostJwt { nonce, .. } | Self::DcApiJwt { nonce, .. } => nonce,
+        }
+    }
+
+    /// The `state`, present for `direct_post.jwt` only.
+    #[must_use]
+    pub const fn state(&self) -> Option<&StateWire> {
+        match self {
+            Self::DirectPostJwt { state, .. } => Some(state),
+            Self::DcApiJwt { .. } => None,
         }
     }
 }

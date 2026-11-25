@@ -6,7 +6,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use protocol_model::{ClientIdWire, KeyId, NonceWire, RequestBinding, ResponseUriWire, SessionId};
+use protocol_model::{
+    ClientIdWire, KeyId, NonceWire, RequestBinding, ResponseUriWire, SessionId, StateWire,
+};
 use session_core::{
     Candidate, IngressHint, ManualClock, MemoryRegistry, NewSession, RESPONSE_DIGEST_BYTES,
     RegistryConfig, ResolutionStrategy, ResponseDigest, RoutePolicy, RouteToken, Timestamp,
@@ -83,6 +85,7 @@ pub fn binding(i: usize, route: &RouteToken) -> RequestBinding {
             route.to_url_segment()
         ))
         .expect("valid response_uri"),
+        state: StateWire::new(format!("state-{i}")).expect("valid state"),
     }
 }
 

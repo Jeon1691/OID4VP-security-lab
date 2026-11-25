@@ -150,6 +150,27 @@ fn nonce_outside_url_safe_set_is_rejected() {
     }
 }
 
+/// §5.2: "`state` values MUST only contain ASCII URL safe characters (uppercase and lowercase
+/// letters, decimal digits, hyphen, period, underscore, and tilde)".
+#[test]
+fn state_is_limited_to_the_url_safe_set() {
+    let s = StateWire::new("aB-._~09").unwrap();
+    assert_eq!(s.as_str(), "aB-._~09");
+    assert_eq!(
+        StateWire::new(""),
+        Err(ModelError::Empty { field: "state" })
+    );
+    assert_eq!(
+        StateWire::new("stäte"),
+        Err(ModelError::NotAscii { field: "state" })
+    );
+    for bad in [
+        "a/b", "a+b", "a=b", "a%20b", "a&b", "a b", "a\nb", "a\u{ff}",
+    ] {
+        assert!(StateWire::new(bad).is_err(), "{bad}");
+    }
+}
+
 #[test]
 fn origin_prefix_is_rejected() {
     assert_eq!(
@@ -188,15 +209,18 @@ fn unknown_response_mode_is_rejected() {
 }
 
 #[test]
-fn binding_variants_report_their_mode_and_nonce() {
+fn binding_variants_report_their_mode_nonce_and_state() {
     let nonce = NonceWire::new("n1").unwrap();
+    let state = StateWire::new("s1").unwrap();
     let dp = RequestBinding::DirectPostJwt {
         client_id: ClientIdWire::new("redirect_uri:https://v.example/cb").unwrap(),
         nonce: nonce.clone(),
         response_uri: ResponseUriWire::new("https://v.example/cb/").unwrap(),
+        state: state.clone(),
     };
     assert_eq!(dp.mode(), EncryptedResponseMode::DirectPostJwt);
     assert_eq!(dp.nonce(), &nonce);
+    assert_eq!(dp.state(), Some(&state));
 
     let dc = RequestBinding::DcApiJwt {
         origin: OriginWire::new("https://origin.example").unwrap(),
@@ -204,4 +228,9 @@ fn binding_variants_report_their_mode_and_nonce() {
     };
     assert_eq!(dc.mode(), EncryptedResponseMode::DcApiJwt);
     assert_eq!(dc.nonce(), &nonce);
+    assert_eq!(
+        dc.state(),
+        None,
+        "state is not defined for the DC API (Appendix A.2)"
+    );
 }
