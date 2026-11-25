@@ -52,7 +52,8 @@ use crate::evidence::{
 use crate::jar::{REQUEST_OBJECT_AUD, REQUEST_OBJECT_MEDIA_TYPE, RequestSigner};
 use crate::sd_jwt::TrustedIssuerKey;
 use crate::validate::{
-    self, MAX_RESEARCH_NONCE_LEN, MAX_RESEARCH_STATE_LEN, ValidatedResponse, ValidationError,
+    self, MAX_RESEARCH_NONCE_LEN, MAX_RESEARCH_STATE_LEN, REQUEST_NONCE, RESPONSE_STATE,
+    ValidatedResponse, ValidationError,
 };
 
 /// Most digests the replay guard remembers at once, per kind (response and holder proof): four
@@ -749,7 +750,8 @@ fn parse_create(state: &AppState, body: &[u8]) -> Result<(RouteKind, FixedValues
             ("route", Some("unique")) => route = RouteKind::Unique,
             ("route", Some("shared")) if research => route = RouteKind::Shared,
             ("route", _) => return Err("unsupported route"),
-            ("nonce", Some(n)) if research => {
+            (REQUEST_NONCE, n) if research => {
+                let n = n.ok_or("invalid nonce")?;
                 // Bounded so an honest KB-JWT always fits `MAX_KB_JWT_LEN` (checked at
                 // compile time in `validate`).
                 if n.len() > MAX_RESEARCH_NONCE_LEN {
@@ -757,7 +759,8 @@ fn parse_create(state: &AppState, body: &[u8]) -> Result<(RouteKind, FixedValues
                 }
                 fixed.nonce = Some(NonceWire::new(n).map_err(|_| "invalid nonce")?);
             }
-            ("state", Some(s)) if research => {
+            (RESPONSE_STATE, s) if research => {
+                let s = s.ok_or("invalid state")?;
                 if s.len() > MAX_RESEARCH_STATE_LEN {
                     return Err("state too long");
                 }
@@ -940,8 +943,8 @@ fn request_object(
         "response_type": RESPONSE_TYPE_VP_TOKEN,
         "response_mode": EncryptedResponseMode::DirectPostJwt.as_str(),
         "response_uri": response_uri.as_str(),
-        "nonce": nonce.as_str(),
-        "state": state.as_str(),
+        REQUEST_NONCE: nonce.as_str(),
+        RESPONSE_STATE: state.as_str(),
         "dcql_query": validate::dcql_query(),
         "client_metadata": { "jwks": { "keys": [Value::Object(jwk)] } },
     })
