@@ -1,0 +1,20 @@
+{
+  "alias": "oid4vp-lab-c4",
+  "description": "OID4VP security lab C4 (HAIP), local run, synthetic data only",
+  "client": {
+    "request_object_trust_anchor_pem": "LAB: PEM of the synthetic reader CA that issued the request-object leaf; required; not in x5c; newlines as \\n"
+  },
+  "credential": {
+    "signing_jwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "alg": "ES256",
+      "x": "LAB: synthetic issuer public x",
+      "y": "LAB: synthetic issuer public y",
+      "d": "LAB: synthetic issuer private d",
+      "x5c": [
+        "LAB: base64 DER of the synthetic issuer certificate (copied into the SD-JWT header)"
+      ]
+    }
+  }
+}

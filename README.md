@@ -20,7 +20,8 @@ evidence.
 | `crates/lab-server` | axum lab Verifier for HPKE-0 `direct_post.jwt` (IMP-008..010) with SD-JWT VC + KB-JWT holder binding (Evidence level 3), wallet simulator and synthetic issuer (`wallet-sim` feature), OpenID4VP 1.0-style ECDH-ES research route (`ecdh-es-research` feature, research mode only, not in the binary); G0-C API smoke test, G0-D ECDH-ES loopback e2e |
 | `docs/adr/` | Lab design decisions (`0001-ecdh-es-research-route.md`) |
 | `docs/interop/` | G7: OIDF #792 reproduction map (`issue-792-reproduction.md`), OIDF conformance-suite plan and INTEROP-02 outline (`oidf-conformance-plan.md`) |
-| `scripts/` | Gate stages (shared by local and CI), upstream reproduction, evidence manifest |
+| `tools/oidf-suite/` | Self-hosted OIDF conformance suite for C3/C4: digest-pinned compose file, runbook, plan configs, suite-side findings |
+| `scripts/` | Gate stages (shared by local and CI), upstream reproduction, evidence manifest, OIDF suite reachability probe |
 | `.github/workflows/` | `ci.yml` PR/main gate, `security.yml` daily advisory scan, `bench.yml` manual G6 benchmark |
 | `docs/benchmarks.md` | G6 methodology, metrics, invariants, caveats, how to reproduce |
 | `evidence/g0/` | G0 run logs, upstream lockfile, advisory baseline, manifest |
