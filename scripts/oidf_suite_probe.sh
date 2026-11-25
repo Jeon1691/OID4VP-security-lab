@@ -25,13 +25,29 @@ MARKER="oidf-suite-probe-ok"
 WORK="$(mktemp -d)"
 SERVER_PID=""
 cleanup() {
-  [[ -n "$SERVER_PID" ]] && kill "$SERVER_PID" 2>/dev/null || true
+  if [[ -n "$SERVER_PID" ]]; then
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+  fi
   rm -rf "$WORK"
 }
 trap cleanup EXIT
 
+# True if the body served at URL (fetched by the given curl command) contains MARKER. The body is
+# captured first so that pipefail cannot turn an early-exiting grep into a false negative.
+serves_marker() {
+  local body
+  body="$("$@" 2>/dev/null || true)"
+  [[ "$body" == *"$MARKER"* ]]
+}
+
+SANS="DNS:localhost"
+for alias in "${ALIASES[@]}"; do
+  SANS+=",DNS:${alias}"
+done
+
 openssl req -x509 -nodes -newkey ec -pkeyopt ec_paramgen_curve:P-256 -days "$CERT_DAYS" \
-  -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,DNS:host.docker.internal,DNS:host.orb.internal" \
+  -subj "/CN=localhost" -addext "subjectAltName=${SANS}" \
   -keyout "$WORK/key.pem" -out "$WORK/cert.pem" 2>/dev/null
 mkdir "$WORK/www"
 printf '%s\n' "$MARKER" >"$WORK/www/index.html"
@@ -49,10 +65,10 @@ PY
 SERVER_PID=$!
 
 for _ in $(seq 1 "$LISTEN_WAIT_SECONDS"); do
-  curl -sk "https://127.0.0.1:${PROBE_PORT}/" | grep -q "$MARKER" && break
+  serves_marker curl -sk "https://127.0.0.1:${PROBE_PORT}/" && break
   sleep 1
 done
-curl -sk "https://127.0.0.1:${PROBE_PORT}/" | grep -q "$MARKER" || {
+serves_marker curl -sk "https://127.0.0.1:${PROBE_PORT}/" || {
   echo "probe server did not come up on 127.0.0.1:${PROBE_PORT}" >&2
   exit 1
 }
@@ -60,8 +76,8 @@ echo "probe server listening on 127.0.0.1:${PROBE_PORT} only"
 
 for alias in "${ALIASES[@]}"; do
   # -k: the suite's own HTTP client trusts all certificates (AbstractCondition trust-all manager).
-  if "${DOCKER[@]}" exec "$CONTAINER" curl -sk --max-time "$FETCH_TIMEOUT_SECONDS" \
-    "https://${alias}:${PROBE_PORT}/" 2>/dev/null | grep -q "$MARKER"; then
+  if serves_marker "${DOCKER[@]}" exec "$CONTAINER" curl -sk --max-time "$FETCH_TIMEOUT_SECONDS" \
+    "https://${alias}:${PROBE_PORT}/"; then
     echo "${alias} reachable"
   else
     echo "${alias} unreachable"
