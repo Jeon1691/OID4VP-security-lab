@@ -316,6 +316,9 @@ REDIS_REQUIRED_TESTS=(
   server_time_mode_inserts_resolves_claims_and_sweeps
   claim_delayed_past_the_ttl_in_transit_is_not_committed
   redis_matches_memory_registry_on_random_operation_sequences
+  # G6 benchmark store rows: the run removes exactly its own Redis namespace, also on failure.
+  store::tests::redis_namespace_is_removed_after_a_run_and_neighbours_survive
+  store::tests::redis_namespace_is_removed_when_a_bench_op_fails
 )
 
 # Disposable server when REDIS_URL is unset: Valkey 8.1 (BSD-3-Clause, Redis 7.2 protocol and
@@ -363,6 +366,8 @@ stage_redis() {
     exit 1
   fi
   step redis_test cargo test -p session-redis --all-features --locked -- --ignored
+  # Only the bin target: the criterion bench target (test = true) takes no libtest flags.
+  step redis_bench_test cargo test -p scenario-runner --bin scenario-runner --locked -- --ignored
   require_tests "${REDIS_REQUIRED_TESTS[@]}"
 }
 

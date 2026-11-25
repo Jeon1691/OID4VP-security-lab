@@ -190,34 +190,124 @@ pub async fn run(
     );
     if let Some(url) = redis_url {
         eprintln!("store: redis");
-        let namespace = format!(
-            "g6-{}",
-            RouteToken::generate()
-                .context("OS CSPRNG")?
-                .to_url_segment()
-        );
-        let redis: RedisRegistry<Key, String> = RedisRegistry::connect(
-            url,
+        let namespace = fresh_namespace()?;
+        let mut conn = connect(url).await?;
+        let ping = conn.clone();
+        let ops = in_namespace(
+            &mut conn,
             &namespace,
-            TimeSource::RedisServer,
-            RegistryConfig::default(),
-            KeyTable::new(),
+            measure_redis(url, &namespace, ping, iterations, warmup),
         )
-        .await
-        .context("Redis reachable")?;
-        // Errors are replaced, not wrapped: their text may repeat the URL.
-        let mut conn = redis::Client::open(url)
-            .map_err(|_| anyhow!("invalid Redis URL"))?
-            .get_multiplexed_async_connection()
-            .await
-            .map_err(|_| anyhow!("Redis unreachable"))?;
-        out.extend(rows(
-            run_id,
-            "redis",
-            measure(&redis, iterations, warmup, Some(&mut conn)).await?,
-        ));
+        .await?;
+        out.extend(rows(run_id, "redis", ops));
     }
     Ok(out)
+}
+
+/// A namespace no other run uses: `g6-` and 128 random bits, so `[A-Za-z0-9_-]` only (no
+/// glob metacharacter, which matters for the cleanup's `SCAN MATCH`).
+fn fresh_namespace() -> Result<String> {
+    Ok(format!(
+        "g6-{}",
+        RouteToken::generate()
+            .context("OS CSPRNG")?
+            .to_url_segment()
+    ))
+}
+
+/// A connection for `PING` and cleanup. Errors are replaced, not wrapped: their text may repeat
+/// the URL.
+async fn connect(url: &str) -> Result<redis::aio::MultiplexedConnection> {
+    redis::Client::open(url)
+        .map_err(|_| anyhow!("invalid Redis URL"))?
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|_| anyhow!("Redis unreachable"))
+}
+
+/// The Redis store cycles in `namespace`, with `PING` on `ping`.
+async fn measure_redis(
+    url: &str,
+    namespace: &str,
+    mut ping: redis::aio::MultiplexedConnection,
+    iterations: u64,
+    warmup: u64,
+) -> Result<Ops> {
+    let redis: RedisRegistry<Key, String> = RedisRegistry::connect(
+        url,
+        namespace,
+        TimeSource::RedisServer,
+        RegistryConfig::default(),
+        KeyTable::new(),
+    )
+    .await
+    .context("Redis reachable")?;
+    measure(&redis, iterations, warmup, Some(&mut ping)).await
+}
+
+/// Runs `work` and then removes `namespace` from Redis, whether `work` succeeded or not, so no
+/// run leaves its sessions behind on a shared server. The cleanup is outside every timed
+/// interval. The work's error wins over a cleanup error.
+async fn in_namespace<T>(
+    conn: &mut redis::aio::MultiplexedConnection,
+    namespace: &str,
+    work: impl Future<Output = Result<T>>,
+) -> Result<T> {
+    let outcome = work.await;
+    let cleaned = remove_namespace(conn, namespace).await;
+    let value = outcome?;
+    cleaned.context("removing the benchmark's Redis namespace")?;
+    Ok(value)
+}
+
+/// `SCAN` page size of the cleanup: Redis' own default is 10. A few hundred keys per round trip
+/// keeps the cleanup of a run's few thousand keys to a handful of calls without one long
+/// blocking command.
+const CLEANUP_SCAN_COUNT: usize = 500;
+
+/// Deletes every key of `namespace` and nothing else: `SCAN MATCH {ns}:*` (session-redis
+/// prefixes every key of a registry with the hash-tagged `{ns}:`; the store test checks that
+/// nothing of the run survives), each key re-checked for the exact prefix, then `UNLINK` (memory
+/// freed off the main thread) per page. Returns how many keys were removed.
+async fn remove_namespace(
+    conn: &mut redis::aio::MultiplexedConnection,
+    namespace: &str,
+) -> Result<u64> {
+    ensure!(
+        !namespace.is_empty()
+            && namespace
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')),
+        "namespace must be [A-Za-z0-9_-]"
+    );
+    let prefix = format!("{{{namespace}}}:");
+    let pattern = format!("{prefix}*");
+    let mut cursor: u64 = 0;
+    let mut removed = 0;
+    loop {
+        let (next, keys): (u64, Vec<String>) = redis::cmd("SCAN")
+            .arg(cursor)
+            .arg("MATCH")
+            .arg(&pattern)
+            .arg("COUNT")
+            .arg(CLEANUP_SCAN_COUNT)
+            .query_async(conn)
+            .await
+            .context("SCAN")?;
+        let own: Vec<&String> = keys.iter().filter(|k| k.starts_with(&prefix)).collect();
+        if !own.is_empty() {
+            let n: u64 = redis::cmd("UNLINK")
+                .arg(&own)
+                .query_async(conn)
+                .await
+                .context("UNLINK")?;
+            removed += n;
+        }
+        if next == 0 {
+            return Ok(removed);
+        }
+        cursor = next;
+    }
 }
 
 #[cfg(test)]
@@ -239,5 +329,148 @@ mod tests {
             assert_eq!(row.cpu_ms, None, "{}", row.case);
             assert_eq!(row.requests, ITERATIONS, "{}", row.case);
         }
+    }
+
+    /// Reason on the Redis-backed tests; the `redis` gate stage runs them with `--ignored`.
+    const REDIS_IGNORE: &str = "requires Redis; run via scripts/ci_local.sh <dir> redis";
+
+    fn redis_url() -> String {
+        std::env::var("REDIS_URL").unwrap_or_else(|_| panic!("REDIS_URL unset: {REDIS_IGNORE}"))
+    }
+
+    /// Keys next to the benchmark's namespace that cleanup must not touch: another namespace
+    /// sharing its text as a prefix, the same hash tag without the `:` separator, and an
+    /// unrelated key.
+    fn neighbours(namespace: &str) -> [String; 3] {
+        [
+            format!("{{{namespace}-other}}:k"),
+            format!("{{{namespace}}}x"),
+            format!("unrelated-{namespace}"),
+        ]
+    }
+
+    async fn set(conn: &mut redis::aio::MultiplexedConnection, keys: &[String]) {
+        for key in keys {
+            let _: () = redis::cmd("SET")
+                .arg(key)
+                .arg("v")
+                .query_async(conn)
+                .await
+                .expect("SET");
+        }
+    }
+
+    async fn exists(conn: &mut redis::aio::MultiplexedConnection, key: &str) -> bool {
+        let n: u64 = redis::cmd("EXISTS")
+            .arg(key)
+            .query_async(conn)
+            .await
+            .expect("EXISTS");
+        n == 1
+    }
+
+    async fn own_keys(conn: &mut redis::aio::MultiplexedConnection, namespace: &str) -> usize {
+        let keys: Vec<String> = redis::cmd("KEYS")
+            .arg(format!("{{{namespace}}}:*"))
+            .query_async(conn)
+            .await
+            .expect("KEYS");
+        keys.len()
+    }
+
+    async fn cleanup_neighbours(conn: &mut redis::aio::MultiplexedConnection, keys: &[String]) {
+        let _: u64 = redis::cmd("DEL")
+            .arg(keys)
+            .query_async(conn)
+            .await
+            .expect("DEL");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Redis; run via scripts/ci_local.sh <dir> redis"]
+    async fn redis_namespace_is_removed_after_a_run_and_neighbours_survive() {
+        let url = redis_url();
+        let namespace = fresh_namespace().expect("namespace");
+        let mut conn = connect(&url).await.expect("Redis");
+        let others = neighbours(&namespace);
+        set(&mut conn, &others).await;
+        let ping = conn.clone();
+        let mut probe = conn.clone();
+        let ns = namespace.clone();
+        let ops = in_namespace(&mut conn, &namespace, async move {
+            let ops = measure_redis(&url, &ns, ping, ITERATIONS, WARMUP).await?;
+            // The run really wrote session keys before the cleanup.
+            ensure!(own_keys(&mut probe, &ns).await > 0, "the run wrote no keys");
+            Ok(ops)
+        })
+        .await
+        .expect("measured and cleaned");
+        assert_eq!(ops.claim.len(), ITERATIONS);
+        assert_eq!(
+            own_keys(&mut conn, &namespace).await,
+            0,
+            "namespace left behind"
+        );
+        for key in &others {
+            assert!(exists(&mut conn, key).await, "{key} was removed");
+        }
+        cleanup_neighbours(&mut conn, &others).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Redis; run via scripts/ci_local.sh <dir> redis"]
+    async fn redis_namespace_is_removed_when_a_bench_op_fails() {
+        let url = redis_url();
+        let namespace = fresh_namespace().expect("namespace");
+        let mut conn = connect(&url).await.expect("Redis");
+        let others = neighbours(&namespace);
+        set(&mut conn, &others).await;
+        let ns = namespace.clone();
+        let mut probe = conn.clone();
+        let outcome: Result<()> = in_namespace(&mut conn, &namespace, async move {
+            let redis: RedisRegistry<Key, String> = RedisRegistry::connect(
+                &url,
+                &ns,
+                TimeSource::RedisServer,
+                RegistryConfig::default(),
+                KeyTable::new(),
+            )
+            .await?;
+            let route = RouteToken::generate()?;
+            redis
+                .insert(NewSession {
+                    id: SessionId::new("g6-failing")?,
+                    binding: RequestBinding::DirectPostJwt {
+                        client_id: ClientIdWire::new(CLIENT_ID)?,
+                        nonce: NonceWire::new("g6-nonce")?,
+                        response_uri: ResponseUriWire::new(format!(
+                            "{RESPONSE_URI_BASE}/{}",
+                            route.to_url_segment()
+                        ))?,
+                    },
+                    route_token: route,
+                    kid: None,
+                    key: (),
+                    ttl: STORE_TTL,
+                })
+                .await?;
+            ensure!(own_keys(&mut probe, &ns).await > 0, "the op wrote no keys");
+            Err(anyhow!("simulated bench op failure"))
+        })
+        .await;
+        let error = outcome.expect_err("the work's error is returned");
+        assert!(
+            error.to_string().contains("simulated bench op failure"),
+            "{error:#}"
+        );
+        assert_eq!(
+            own_keys(&mut conn, &namespace).await,
+            0,
+            "namespace left behind"
+        );
+        for key in &others {
+            assert!(exists(&mut conn, key).await, "{key} was removed");
+        }
+        cleanup_neighbours(&mut conn, &others).await;
     }
 }
