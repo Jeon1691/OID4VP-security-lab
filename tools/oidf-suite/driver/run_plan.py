@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Run one OIDF conformance plan (C3 plain or C4 HAIP) against the lab's conformance mode.
 
-Usage (repository root, suite stack up per tools/oidf-suite/README.md §2, lab binary built with
-`cargo build -p lab-server --features conformance --locked`):
+Usage (repository root, suite stack up per tools/oidf-suite/README.md §2):
 
     python3 -I tools/oidf-suite/driver/run_plan.py run --plan c3|c4 --out OUT_DIR
     python3 -I tools/oidf-suite/driver/run_plan.py summarize RUN_DIR   # RUN_DIR/{c3,c4} -> RUN_DIR
 
 `run` does, in order (README §5e):
-  1. renders tools/oidf-suite/config/<name>.local.json (git-ignored) from the committed
+  0. records the tree state (tracked changes, untracked files among the lab's build inputs)
+     and builds the lab itself (`cargo build -p lab-server --features conformance --locked`),
+     so the binary it runs belongs to the commit it records;
+  1. renders tools/oidf-suite/config/<name>.local.json (git-ignored, mode 0600, deleted when
+     the run ends) from the committed
      placeholder template: a fresh random alias, the synthetic reader CA as trust anchor, the
      synthetic issuer key (`crates/lab-server/tests/fixtures/lab_issuer.jwk`) as
      `credential.signing_jwk`, and an `x5c` with a throwaway self-signed certificate for that
@@ -27,10 +30,13 @@ Usage (repository root, suite stack up per tools/oidf-suite/README.md §2, lab b
      then fetches the final status, result and log;
   4. writes OUT_DIR: results.json, manifest.json, sanitized per-module logs (every private JWK
      `d`, and the issuer's private scalar wherever it appears, replaced by "REDACTED"), the
-     uploaded PNGs, the sanitized rendered config and the lab's console log. The raw plan
-     export (zip, holds the issuer private key) goes to tools/oidf-suite/ (git-ignored);
-     only its SHA-256 goes into the manifest;
-  5. stops the lab. The suite stack is left to the operator (`docker compose down`).
+     uploaded PNGs, the sanitized rendered config and the lab's console log. Every file is
+     then checked for any encoding of the issuer key (JWK, standard base64 and hex of the
+     scalar, its RFC 5915 DER in base64, a PEM `PRIVATE KEY` header); a hit stops the run with
+     an error. The raw plan export (zip, holds the issuer private key) goes to
+     tools/oidf-suite/ (git-ignored, mode 0600); only its SHA-256 goes into the manifest;
+  5. stops the lab, also on failure. No module starts after a deadline below the lab's time
+     box. The suite stack is left to the operator (`docker compose down`).
 
 OUT_DIR must not exist or be empty. Only the Python standard library and OpenSSL (for the issuer
 `x5c`) are used. Suite: https://localhost:8443 only; lab: 127.0.0.1 only; synthetic data only.
@@ -74,6 +80,16 @@ DEFAULT_LAB_PORT = 18444
 # Time box of the lab server for one plan run (ADR 0002: at most two hours for this run; a plan
 # takes minutes).
 LAB_MAX_RUNTIME_SECS = 3600
+# The driver stops starting modules this long before the lab's time box ends, leaving room for
+# the module in flight, the export and the shutdown.
+DRIVER_DEADLINE_MARGIN_SECS = 300
+DRIVER_DEADLINE_SECS = LAB_MAX_RUNTIME_SECS - DRIVER_DEADLINE_MARGIN_SECS
+# The driver builds the lab itself, so the binary it runs is the one of the commit it records.
+LAB_BUILD = ["cargo", "build", "-p", "lab-server", "--features", "conformance", "--locked"]
+# Untracked files here would change the lab build without showing in `git status` of tracked files.
+LAB_INPUT_PATHS = ["crates", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml"]
+# Owner read/write only: the rendered suite config holds the issuer private key.
+PRIVATE_FILE_MODE = 0o600
 # What the suite's mock wallet presents (README §5a): the PID type and three top-level claims.
 DCQL_VCT = "urn:eudi:pid:1"
 DCQL_CLAIMS = ("given_name", "family_name", "birthdate")
@@ -103,6 +119,14 @@ REDACTED = "REDACTED"
 # Any JWK private member that may appear in a suite log; only EC keys are expected.
 PRIVATE_JWK_MEMBERS = ("d", "p", "q", "dp", "dq", "qi", "k")
 PRIVATE_D_PATTERN = re.compile(r'(\\?"d\\?"\s*:\s*\\?")[A-Za-z0-9_-]{20,}')
+# Never in an evidence file, whatever the encoding (allowlist check after the redaction above).
+PEM_PRIVATE_KEY_MARKER = "PRIVATE KEY"
+# A base64 fragment this long cannot occur by chance; used for the line-wrapped PEM body.
+MIN_FRAGMENT_CHARS = 32
+# Compact JWE: five base64url parts, so four dots (RFC 7516 §7.1); a JSON header starts with
+# `{"`, which base64url-encodes to "ey".
+JWE_COMPACT_DOTS = 4
+JSON_OBJECT_B64U_PREFIX = "ey"
 
 PLANS = {
     "c3": {
@@ -209,9 +233,18 @@ SCALE = 2
 MARGIN = 8
 WRAP_COLUMNS = 110
 INK, PAPER = 0, 255
+# PNG (W3C PNG Specification, Second Edition / ISO/IEC 15948): signature §5.2; IHDR §11.2.2
+# with bit depth 8, colour type 0 (greyscale) and compression method, filter method and
+# interlace method all 0; filter type 0 (None) before each scanline §9.2; iTXt §11.3.4.5 =
+# keyword, NUL, compression
+# flag 0, compression method 0, empty language tag + NUL, empty translated keyword + NUL, text.
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-PNG_GRAYSCALE_8BIT = (8, 0)  # bit depth, colour type 0 (PNG §11.2.2)
+PNG_GRAYSCALE_8BIT = (8, 0)
+PNG_COMPRESSION_FILTER_INTERLACE = (0, 0, 0)
 PNG_FILTER_NONE = b"\x00"
+PNG_ITXT_KEYWORD = b"Description"
+PNG_ITXT_UNCOMPRESSED_NO_LANGUAGE = b"\x00" + b"\x00\x00" + b"\x00" + b"\x00"
+PNG_MAX_COMPRESSION = 9
 # The suite accepts images up to 500 KB (README §5d).
 MAX_UPLOAD_BYTES = 500 * 1024
 
@@ -242,10 +275,10 @@ def render_png(lines: list, text_chunk: str) -> bytes:
                             pixels[y0 + dy][x0:x0 + SCALE] = bytes([INK]) * SCALE
     raw = b"".join(PNG_FILTER_NONE + bytes(r) for r in pixels)
     depth, colour = PNG_GRAYSCALE_8BIT
-    header = struct.pack(">IIBBBBB", width, height, depth, colour, 0, 0, 0)
-    itxt = b"Description\x00\x00\x00\x00\x00" + text_chunk.encode()
+    header = struct.pack(">IIBBBBB", width, height, depth, colour, *PNG_COMPRESSION_FILTER_INTERLACE)
+    itxt = PNG_ITXT_KEYWORD + PNG_ITXT_UNCOMPRESSED_NO_LANGUAGE + text_chunk.encode()
     return (PNG_SIGNATURE + png_chunk(b"IHDR", header) + png_chunk(b"iTXt", itxt)
-            + png_chunk(b"IDAT", zlib.compress(raw, 9)) + png_chunk(b"IEND", b""))
+            + png_chunk(b"IDAT", zlib.compress(raw, PNG_MAX_COMPRESSION)) + png_chunk(b"IEND", b""))
 
 
 # --- HTTP ---------------------------------------------------------------------------------------
@@ -307,13 +340,41 @@ class LabClient:
 
 # --- configuration ------------------------------------------------------------------------------
 
+# RFC 5915 §3 ECPrivateKey ::= SEQUENCE { version INTEGER (1), privateKey OCTET STRING,
+# [0] parameters (the named curve), [1] publicKey BIT STRING }, DER (X.690) for P-256:
+DER_SEQUENCE = b"\x30"
+DER_VERSION_1 = bytes.fromhex("020101")  # INTEGER, length 1, value 1 (ecPrivkeyVer1)
+DER_P256_SCALAR = b"\x04\x20"  # OCTET STRING of 32 bytes
+DER_PARAMETERS_P256 = b"\xa0\x0a" + bytes.fromhex("06082a8648ce3d030107")  # [0] OID prime256v1 (RFC 5480 §2.1.1.1)
+# [1] { BIT STRING, 66 bytes: 0 unused bits, 0x04 uncompressed point (SEC 1 §2.3.3), X, Y }
+DER_PUBLIC_KEY_P256 = b"\xa1\x44\x03\x42\x00\x04"
+# DER short-form length: one byte, below 0x80 (X.690 §8.1.3.4).
+DER_SHORT_LENGTH_LIMIT = 0x80
+
+
 def sec1_der(jwk: dict) -> bytes:
     """RFC 5915 ECPrivateKey DER of an EC P-256 JWK (fixed-length encoding for P-256)."""
     d, x, y = (b64u_dec(jwk[k]) for k in ("d", "x", "y"))
-    prime256v1 = bytes.fromhex("06082a8648ce3d030107")
-    body = (bytes.fromhex("020101") + b"\x04\x20" + d + b"\xa0\x0a" + prime256v1
-            + b"\xa1\x44\x03\x42\x00\x04" + x + y)
-    return b"\x30" + bytes([len(body)]) + body
+    body = DER_VERSION_1 + DER_P256_SCALAR + d + DER_PARAMETERS_P256 + DER_PUBLIC_KEY_P256 + x + y
+    if len(body) >= DER_SHORT_LENGTH_LIMIT:
+        raise ValueError("ECPrivateKey body does not fit a DER short-form length")
+    return DER_SEQUENCE + bytes([len(body)]) + body
+
+
+def forbidden_forms(jwk: dict) -> list:
+    """Every encoding of the issuer private key the driver refuses to write as evidence."""
+    d = b64u_dec(jwk["d"])
+    der = sec1_der(jwk)
+    der_b64 = base64.b64encode(der).decode()
+    return [PEM_PRIVATE_KEY_MARKER, jwk["d"], base64.b64encode(d).decode(), base64.b64encode(d).decode().rstrip("="),
+            d.hex(), d.hex().upper(), der_b64, base64.urlsafe_b64encode(der).decode().rstrip("="),
+            der_b64[:MIN_FRAGMENT_CHARS]]
+
+
+def assert_clean(text: str, forms: list, where):
+    hits = [i for i, form in enumerate(forms) if form in text]
+    if hits:
+        raise SystemExit(f"refusing to write {where}: private key material (form #{hits[0]}) left after redaction")
 
 
 def issuer_x5c(jwk: dict) -> str:
@@ -356,10 +417,10 @@ def redact(value, secret: str):
     return value
 
 
-def write_json(path: Path, value, secret: str):
-    text = json.dumps(redact(value, secret), indent=1, sort_keys=False) + "\n"
-    if secret in text:
-        raise SystemExit(f"refusing to write {path}: private key material left after redaction")
+def write_json(path: Path, value, issuer_jwk: dict):
+    """Redacts (denylist), then refuses any known encoding of the issuer key (allowlist)."""
+    text = json.dumps(redact(value, issuer_jwk["d"]), indent=1, sort_keys=False) + "\n"
+    assert_clean(text, forbidden_forms(issuer_jwk), path)
     path.write_text(text)
 
 
@@ -438,9 +499,21 @@ def suite_images() -> dict:
     return images
 
 
+def lab_tree_state() -> dict:
+    """Tracked changes anywhere, and untracked files among the lab's build inputs."""
+    tracked = command(["git", "status", "--porcelain", "--untracked-files=no"])
+    untracked = command(["git", "ls-files", "--others", "--exclude-standard", "--"] + LAB_INPUT_PATHS)
+    return {"tracked_changes": tracked.splitlines(), "untracked_lab_inputs": untracked.splitlines()}
+
+
+def build_lab() -> dict:
+    """Builds the lab binary from the working tree, so it matches the commit recorded."""
+    subprocess.run(LAB_BUILD, check=True, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return {"built_by_driver": True, "build_command": " ".join(LAB_BUILD)}
+
+
 def manifest(plan_key: str, plan: dict, variant: dict, alias: str, plan_id: str, lab_cmd: str,
-             started: str, export_sha: str) -> dict:
-    tracked_changes = command(["git", "status", "--porcelain", "--untracked-files=no"])
+             started: str, export_sha: str, build: dict, tree: dict) -> dict:
     return {
         "what": "OIDF conformance suite run against the lab's conformance mode (local, synthetic data)",
         "not_a_certification": "nothing was submitted to the OpenID Foundation",
@@ -449,9 +522,11 @@ def manifest(plan_key: str, plan: dict, variant: dict, alias: str, plan_id: str,
         "finished_utc": utc_now(),
         "lab": {
             "commit": command(["git", "rev-parse", "HEAD"]),
-            "dirty": bool(tracked_changes),
+            "dirty": bool(tree["tracked_changes"] or tree["untracked_lab_inputs"]),
+            "tree": tree,
             "cargo_lock_sha256": sha256_file(ROOT / "Cargo.lock"),
-            "binary": "target/debug/lab-server (cargo build -p lab-server --features conformance --locked)",
+            "binary": "target/debug/lab-server",
+            "build": build,
             "binary_sha256": sha256_file(LAB_BIN),
             "command": lab_cmd,
             "rustc": command(["rustc", "--version"]),
@@ -494,7 +569,8 @@ def response_jwe_header(log: list):
     """The protected header of the suite's encrypted response, if its log shows it."""
     for entry in log:
         for value in entry.values():
-            if isinstance(value, str) and value.count(".") == 4 and value.startswith("ey"):
+            if (isinstance(value, str) and value.count(".") == JWE_COMPACT_DOTS
+                    and value.startswith(JSON_OBJECT_B64U_PREFIX)):
                 try:
                     header = json.loads(b64u_dec(value.split(".")[0]))
                 except ValueError:
@@ -504,7 +580,17 @@ def response_jwe_header(log: list):
     return None
 
 
-def run_module(module: str, plan_id: str, lab: LabClient, out: Path, secret: str) -> dict:
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """The authorize GET must be answered by the suite itself: a 3xx is an error, not followed."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+SUITE_NO_REDIRECT = urllib.request.build_opener(urllib.request.HTTPSHandler(context=SUITE_TLS), NoRedirect)
+
+
+def run_module(module: str, plan_id: str, lab: LabClient, out: Path, issuer_jwk: dict) -> dict:
     short = module.removeprefix(MODULE_PREFIX)
     test_id = suite_api("POST", "/api/runner?" + urllib.parse.urlencode({"test": module, "plan": plan_id}))["id"]
     state = wait_state(test_id, "WAITING,FINISHED,INTERRUPTED")
@@ -519,12 +605,14 @@ def run_module(module: str, plan_id: str, lab: LabClient, out: Path, secret: str
             raise SystemExit(f"lab session not created: {status} {body!r}")
         session = json.loads(body)
         authz = session["authorization_request"]
-        if not authz.startswith(endpoint + "?"):
-            raise SystemExit(f"lab authorization_request {authz} is not for {endpoint}")
+        if not (authz.startswith(endpoint + "?") and endpoint.startswith(SUITE + "/")):
+            raise SystemExit(f"lab authorization_request {authz} is not for {endpoint} on {SUITE}")
         record.update(session_id=session["session_id"], client_id=session["client_id"],
                       lab_tls=lab.last_tls)
         started = time.monotonic()
-        with urllib.request.urlopen(authz, context=SUITE_TLS, timeout=AUTHORIZE_TIMEOUT_SECS) as resp:
+        with SUITE_NO_REDIRECT.open(authz, timeout=AUTHORIZE_TIMEOUT_SECS) as resp:
+            if resp.url != authz:
+                raise SystemExit(f"authorize GET ended at {resp.url}, not {authz}")
             record["authorize_status"] = resp.status
         record["authorize_seconds"] = round(time.monotonic() - started, 2)
         state = wait_state(test_id, "WAITING,FINISHED,INTERRUPTED")
@@ -555,7 +643,7 @@ def run_module(module: str, plan_id: str, lab: LabClient, out: Path, secret: str
             state = wait_state(test_id, "FINISHED,INTERRUPTED")
     info = suite_api("GET", f"/api/info/{test_id}")
     log = suite_api("GET", f"/api/log/{test_id}")
-    write_json(out / "logs" / f"{short}.json", log, secret)
+    write_json(out / "logs" / f"{short}.json", log, issuer_jwk)
     expected, test_file, test_name = EXPECTED.get(short, (None, None, None))
     record.update(final_state=state, status=info.get("status"), result=info.get("result"),
                   expected=expected, as_expected=info.get("result") == expected,
@@ -569,26 +657,31 @@ def cmd_run(args):
     out = Path(args.out)
     if out.exists() and (not out.is_dir() or any(out.iterdir())):
         raise SystemExit(f"{out} exists and is not an empty directory; pick a new run directory")
-    if not LAB_BIN.exists():
-        raise SystemExit(f"{LAB_BIN} missing: cargo build -p lab-server --features conformance --locked")
     if suite_api("GET", "/api/currentuser") is None:
         raise SystemExit("suite not answering on " + SUITE)
+    tree = lab_tree_state()
+    build = build_lab()
     (out / "logs").mkdir(parents=True)
     started = utc_now()
     issuer_jwk = json.loads((FIXTURES / "lab_issuer.jwk").read_text())
-    secret = issuer_jwk["d"]
     alias = plan["alias_prefix"] + secrets.token_hex(ALIAS_SUFFIX_BYTES)
     anchor = (FIXTURES / "conformance_ca.pem").read_text()
     config = render_config(plan, alias, issuer_jwk, anchor)
-    local = SUITE_DIR / "config" / f"{plan['template']}.local.json"
-    local.write_text(json.dumps(config, indent=1) + "\n")
-    write_json(out / "config.sanitized.json", config, secret)
+    write_json(out / "config.sanitized.json", config, issuer_jwk)
     variant = json.loads((SUITE_DIR / "config" / f"{plan['template']}.variant.json").read_text())
+    # The rendered config (issuer private key) exists only for the run: 0600, deleted at the end.
+    local = SUITE_DIR / "config" / f"{plan['template']}.local.json"
+    local.unlink(missing_ok=True)
+    fd = os.open(local, os.O_WRONLY | os.O_CREAT | os.O_EXCL, PRIVATE_FILE_MODE)
+    with os.fdopen(fd, "w") as f:
+        f.write(json.dumps(config, indent=1) + "\n")
 
-    proc, lab_cmd = start_lab(plan, args.lab_port, alias, out / "lab-console.log")
     results = {"plan": plan["plan_name"], "variant": variant, "alias": alias, "modules": []}
     export_sha = None
+    proc = None
     try:
+        proc, lab_cmd = start_lab(plan, args.lab_port, alias, out / "lab-console.log")
+        deadline = time.monotonic() + DRIVER_DEADLINE_SECS
         lab = LabClient(args.lab_port, FIXTURES / "conformance_ca.pem")
         status, _ = lab.request("GET", "/health")
         if status != http.client.OK:
@@ -599,19 +692,30 @@ def cmd_run(args):
         results["plan_id"] = plan_id
         modules = [m["testModule"] for m in created["modules"]]
         for module in modules:
-            record = run_module(module, plan_id, lab, out, secret)
+            if time.monotonic() > deadline:
+                raise SystemExit(f"driver deadline ({DRIVER_DEADLINE_SECS} s) passed before {module}")
+            record = run_module(module, plan_id, lab, out, issuer_jwk)
             results["modules"].append(record)
             print(f"{module}: {record['status']} {record['result']} (expected {record['expected']})", flush=True)
+        # The export holds the issuer private key too: owner-only, git-ignored, kept for review.
         export = SUITE_DIR / f"{plan['template']}-{alias}.zip"
-        export.write_bytes(suite_bytes(f"/api/plan/export/{plan_id}"))
+        fd = os.open(export, os.O_WRONLY | os.O_CREAT | os.O_EXCL, PRIVATE_FILE_MODE)
+        with os.fdopen(fd, "wb") as f:
+            f.write(suite_bytes(f"/api/plan/export/{plan_id}"))
         export_sha = sha256_file(export)
     finally:
-        stop_lab(proc)
-    write_json(out / "results.json", results, secret)
+        if proc is not None:
+            stop_lab(proc)
+        local.unlink(missing_ok=True)
+    write_json(out / "results.json", results, issuer_jwk)
     write_json(out / "manifest.json",
-               manifest(args.plan, plan, variant, alias, results.get("plan_id"), lab_cmd, started, export_sha),
-               secret)
-    print(f"evidence in {out}; raw export (git-ignored) in {SUITE_DIR.relative_to(ROOT)}/")
+               manifest(args.plan, plan, variant, alias, results.get("plan_id"), lab_cmd, started, export_sha,
+                        build, tree),
+               issuer_jwk)
+    forms = forbidden_forms(issuer_jwk)
+    for path in sorted(p for p in out.rglob("*") if p.is_file()):
+        assert_clean(path.read_bytes().decode("latin-1"), forms, path)
+    print(f"evidence in {out}; raw export (git-ignored, mode 0600) in {SUITE_DIR.relative_to(ROOT)}/")
 
 
 # --- summary ------------------------------------------------------------------------------------
