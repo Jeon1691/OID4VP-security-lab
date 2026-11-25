@@ -6,7 +6,7 @@
 //! | Member | Policy |
 //! | --- | --- |
 //! | `state` | Required, a string equal to the session's stored `state` (§14.4.2; RFC 6749 §4.1.2: echoed because the request carried one). Absent: [`ValidationError::StateMissing`]; not a string or another value: [`ValidationError::StateMismatch`]. Compared as SHA-256 digests without early exit. Checked first, before any holder-binding work |
-//! | `vp_token` | Required: answers the lab's single DCQL Credential Query (OpenID4VP 1.1 §6.1, B.3.5) with exactly one presentation (§8.1: keyed by the query `id`, an array of one Presentation since `multiple` is omitted), a compact SD-JWT+KB string (B.3.6) |
+//! | `vp_token` | Required: answers the server's single DCQL Credential Query ([`CredentialRequest`]) (OpenID4VP 1.1 §6.1, B.3.5) with exactly one presentation (§8.1: keyed by the query `id`, an array of one Presentation since `multiple` is omitted), a compact SD-JWT+KB string (B.3.6) |
 //! | anything else | Ignored: §8.1 "The Client MUST ignore any unrecognized parameters" (`unrecognized_payload_members_are_ignored`) |
 //!
 //! The presentation is verified by [`crate::verify_sd_jwt_vc`] against the configured trusted
@@ -50,11 +50,25 @@ pub const SYNTHETIC_CREDENTIAL_VCT: &str = "https://credentials.lab.invalid/synt
 /// `claims` without `claim_sets`). The synthetic credential also carries a `birthdate`, which
 /// the lab does not request.
 pub const REQUESTED_CLAIMS: [&str; 3] = ["given_name", "family_name", "age_over_18"];
-/// The lab's Credential Query as the verifier evaluates it.
+/// The lab's default Credential Query as the verifier evaluates it
+/// ([`CredentialRequest::synthetic`]).
 pub const SYNTHETIC_CREDENTIAL_QUERY: CredentialQuery<'static> = CredentialQuery {
     vct: SYNTHETIC_CREDENTIAL_VCT,
     claims: &REQUESTED_CLAIMS,
 };
+/// Longest configured DCQL Credential Query `id` (lab policy): ids are short labels
+/// (OpenID4VP §6.1 sets no length), and one is repeated in every `vp_token`.
+pub const MAX_CREDENTIAL_QUERY_ID_LEN: usize = 128;
+/// Longest configured `vct` (lab policy): type identifiers are URIs or URNs (SD-JWT VC
+/// draft-27 §2.2.2.1), typically under 100 characters; the value is committed with every
+/// consumed session.
+pub const MAX_VCT_LEN: usize = 1024;
+/// Longest configured claim name (lab policy): claim names are short JSON member names, and
+/// each is committed with every consumed session.
+pub const MAX_CLAIM_NAME_LEN: usize = 128;
+/// Claim names with SD-JWT meaning, never a credential claim (RFC 9901 §4.1.1, §4.2.4.1,
+/// §4.2.4.2), so never requestable.
+const RESERVED_CLAIM_NAMES: [&str; 3] = ["_sd", "...", "_sd_alg"];
 /// Authorization Response parameter carrying the presentations (OpenID4VP 1.1 §8.1).
 pub(crate) const VP_TOKEN: &str = "vp_token";
 /// Request parameter and response member `state` (OpenID4VP 1.1 §5.2; RFC 6749 §4.1.1,
@@ -303,23 +317,129 @@ impl ValidatedResponse {
     }
 }
 
-/// The `dcql_query` of every lab Request Object (OpenID4VP 1.1 §6): one `dc+sd-jwt` Credential
-/// Query for [`SYNTHETIC_CREDENTIAL_VCT`] with [`REQUESTED_CLAIMS`], holder binding required
-/// (the §6.1 default, stated explicitly).
-pub(crate) fn dcql_query() -> Value {
-    let claims: Vec<Value> = REQUESTED_CLAIMS
-        .iter()
-        .map(|name| json!({ DCQL_PATH: [name] }))
-        .collect();
-    json!({
-        DCQL_CREDENTIALS: [{
-            DCQL_ID: SYNTHETIC_CREDENTIAL_QUERY_ID,
-            DCQL_FORMAT: SD_JWT_VC_TYP,
-            DCQL_META: { DCQL_VCT_VALUES: [SYNTHETIC_CREDENTIAL_VCT] },
-            DCQL_HOLDER_BINDING: true,
-            DCQL_CLAIMS: claims,
-        }]
-    })
+/// The one `dc+sd-jwt` Credential Query of every Request Object a server issues (OpenID4VP
+/// 1.0 / 1.1 §6.1, B.3.5): its `id`, the single `vct` in `meta.vct_values`, and the requested
+/// claims as one-element claims paths (§7.1), all required (§6.4.1: `claims` without
+/// `claim_sets`). Comes from [`crate::LabConfig::credential_request`]; the default is the
+/// synthetic lab credential. The Verifier accepts exactly this: the `vp_token` must be keyed by
+/// `id`, the credential's `vct` must equal `vct`, and nothing outside `claims` may be disclosed
+/// (lab data-minimisation policy, [`crate::verify_sd_jwt_vc`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CredentialRequest {
+    id: String,
+    vct: String,
+    claims: Vec<String>,
+}
+
+/// Why a configured Credential Query was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum CredentialRequestError {
+    /// `id` empty, over [`MAX_CREDENTIAL_QUERY_ID_LEN`], or outside the §6.1 charset
+    /// (alphanumeric, `_`, `-`).
+    #[error("credential query id must be 1-128 characters of [A-Za-z0-9_-]")]
+    Id,
+    /// `vct` empty, over [`MAX_VCT_LEN`], or not visible ASCII.
+    #[error("vct must be 1-1024 visible ASCII characters")]
+    Vct,
+    /// No claims, more than [`crate::MAX_DISCLOSURES`], a duplicate, or an empty, over-long
+    /// ([`MAX_CLAIM_NAME_LEN`]) or reserved (`_sd`, `...`, `_sd_alg`) claim name.
+    #[error("claims must be 1-16 distinct, non-reserved claim names")]
+    Claims,
+}
+
+impl CredentialRequest {
+    /// A Credential Query for `vct` asking for the top-level `claims`, keyed by `id`.
+    ///
+    /// # Errors
+    /// [`CredentialRequestError`].
+    pub fn new(
+        id: impl Into<String>,
+        vct: impl Into<String>,
+        claims: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<Self, CredentialRequestError> {
+        let (id, vct) = (id.into(), vct.into());
+        let claims: Vec<String> = claims.into_iter().map(Into::into).collect();
+        let id_ok = !id.is_empty()
+            && id.len() <= MAX_CREDENTIAL_QUERY_ID_LEN
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+        if !id_ok {
+            return Err(CredentialRequestError::Id);
+        }
+        if vct.is_empty() || vct.len() > MAX_VCT_LEN || !vct.bytes().all(|b| b.is_ascii_graphic()) {
+            return Err(CredentialRequestError::Vct);
+        }
+        let distinct = claims
+            .iter()
+            .enumerate()
+            .all(|(i, name)| !claims[..i].contains(name));
+        let names_ok = claims.iter().all(|name| {
+            !name.is_empty()
+                && name.len() <= MAX_CLAIM_NAME_LEN
+                && !RESERVED_CLAIM_NAMES.contains(&name.as_str())
+        });
+        if claims.is_empty() || claims.len() > sd_jwt::MAX_DISCLOSURES || !distinct || !names_ok {
+            return Err(CredentialRequestError::Claims);
+        }
+        Ok(Self { id, vct, claims })
+    }
+
+    /// The synthetic lab credential: [`SYNTHETIC_CREDENTIAL_QUERY_ID`],
+    /// [`SYNTHETIC_CREDENTIAL_VCT`], [`REQUESTED_CLAIMS`].
+    #[must_use]
+    pub fn synthetic() -> Self {
+        Self {
+            id: SYNTHETIC_CREDENTIAL_QUERY_ID.to_owned(),
+            vct: SYNTHETIC_CREDENTIAL_VCT.to_owned(),
+            claims: REQUESTED_CLAIMS.iter().map(|c| (*c).to_owned()).collect(),
+        }
+    }
+
+    /// The Credential Query `id` (the `vp_token` key).
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// The requested `vct`.
+    #[must_use]
+    pub fn vct(&self) -> &str {
+        &self.vct
+    }
+
+    /// The requested top-level claim names, in query order.
+    #[must_use]
+    pub fn claims(&self) -> &[String] {
+        &self.claims
+    }
+
+    /// The `dcql_query` Request Object parameter (OpenID4VP §6): this one Credential Query,
+    /// holder binding required (the §6.1 default, stated explicitly).
+    pub(crate) fn dcql_query(&self) -> Value {
+        let claims: Vec<Value> = self
+            .claims
+            .iter()
+            .map(|name| json!({ DCQL_PATH: [name] }))
+            .collect();
+        json!({
+            DCQL_CREDENTIALS: [{
+                DCQL_ID: self.id,
+                DCQL_FORMAT: SD_JWT_VC_TYP,
+                DCQL_META: { DCQL_VCT_VALUES: [self.vct] },
+                DCQL_HOLDER_BINDING: true,
+                DCQL_CLAIMS: claims,
+            }]
+        })
+    }
+}
+
+/// What every presentation is verified against: the configured trusted issuer and Credential
+/// Query. Shared (`Arc`) with the decryption trials on the blocking pool.
+#[derive(Debug, Clone)]
+pub(crate) struct Acceptance {
+    pub(crate) issuer: TrustedIssuerKey,
+    pub(crate) request: CredentialRequest,
 }
 
 /// A validated response: what is committed, and the digest the replay guard binds to the
@@ -367,15 +487,15 @@ fn check_state(received: Option<&Value>, stored: &StateWire) -> Result<(), Valid
     }
 }
 
-/// Validates `plaintext` against the session's stored `binding`, the trusted issuer and `now`
-/// (seconds since the Unix epoch).
+/// Validates `plaintext` against the session's stored `binding`, the trusted issuer and
+/// Credential Query of `acceptance`, and `now` (seconds since the Unix epoch).
 pub(crate) fn validate(
     plaintext: &[u8],
     binding: &RequestBinding,
-    issuer: &TrustedIssuerKey,
+    acceptance: &Acceptance,
     now: u64,
 ) -> Result<Validated, ValidationError> {
-    validate_payload(&parse_payload(plaintext)?, binding, issuer, now)
+    validate_payload(&parse_payload(plaintext)?, binding, acceptance, now)
 }
 
 /// The decrypted payload as a JSON object with unique member names at every depth.
@@ -403,7 +523,7 @@ pub(crate) fn has_state(payload: &Map<String, Value>) -> bool {
 pub(crate) fn validate_payload(
     payload: &Map<String, Value>,
     binding: &RequestBinding,
-    issuer: &TrustedIssuerKey,
+    acceptance: &Acceptance,
     now: u64,
 ) -> Result<Validated, ValidationError> {
     let RequestBinding::DirectPostJwt {
@@ -422,16 +542,25 @@ pub(crate) fn validate_payload(
         .ok_or(ValidationError::MissingVpToken)?;
     let answers = Some(vp_token)
         .filter(|m| m.len() == 1)
-        .and_then(|m| m.get(SYNTHETIC_CREDENTIAL_QUERY_ID))
+        .and_then(|m| m.get(acceptance.request.id()))
         .ok_or(ValidationError::QueryMismatch)?;
     let presentation = match answers.as_array().map(Vec::as_slice) {
         Some([Value::String(p)]) => p,
         _ => return Err(ValidationError::PresentationShape),
     };
+    let claims: Vec<&str> = acceptance
+        .request
+        .claims()
+        .iter()
+        .map(String::as_str)
+        .collect();
     let response = sd_jwt::verify_sd_jwt_vc(
         presentation,
-        issuer,
-        &SYNTHETIC_CREDENTIAL_QUERY,
+        &acceptance.issuer,
+        &CredentialQuery {
+            vct: acceptance.request.vct(),
+            claims: &claims,
+        },
         &KeyBindingContext {
             audience: client_id.as_str(),
             nonce: nonce.as_str(),

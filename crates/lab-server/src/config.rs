@@ -9,7 +9,7 @@ use session_core::{CandidateBudget, ResolutionStrategy};
 
 use crate::jar::{self, RequestSigningKey};
 use crate::sd_jwt::TrustedIssuerKey;
-use crate::validate::MAX_CLIENT_ID_LEN;
+use crate::validate::{CredentialRequest, MAX_CLIENT_ID_LEN};
 
 /// Default request lifetime: five minutes, the typical request TTL session-core's consumed
 /// retention window is sized for (`DEFAULT_CONSUMED_RETENTION` = two TTLs).
@@ -158,6 +158,10 @@ pub struct LabConfig {
     /// must carry an issuer-signed JWT that verifies with this EC P-256 public key. Comes from
     /// configuration; no build contains one.
     pub trusted_issuer: TrustedIssuerKey,
+    /// The one Credential Query every Request Object carries and every presentation must
+    /// answer (`dcql_query`, OpenID4VP §6). Default [`CredentialRequest::synthetic`], the
+    /// synthetic lab credential.
+    pub credential_request: CredentialRequest,
     /// Lifetime of each session from creation.
     pub session_ttl: Duration,
     /// Interval of the background expiry/purge sweep.
@@ -203,6 +207,7 @@ impl LabConfig {
             client_id: ClientIdWire::new(DEFAULT_CLIENT_ID).expect("constant client_id is valid"),
             request_signing_key,
             trusted_issuer,
+            credential_request: CredentialRequest::synthetic(),
             session_ttl: DEFAULT_SESSION_TTL,
             sweep_interval: DEFAULT_SWEEP_INTERVAL,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,

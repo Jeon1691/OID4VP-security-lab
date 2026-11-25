@@ -63,6 +63,8 @@ const STATUS_NOT_FOUND: u16 = 404;
 const SEC1_UNCOMPRESSED_TAG: u8 = 0x04;
 /// Index of the JWE Ciphertext in a compact JWE (RFC 7516 §7.1).
 const CIPHERTEXT_SEGMENT: usize = 3;
+/// Index of the JWS Signature in a compact JWS (RFC 7515 §7.1).
+const JWS_SIGNATURE_SEGMENT: usize = 2;
 /// JOSE header parameters the wallet checks (RFC 7515 §4.1).
 const HEADER_ALG: &str = "alg";
 const HEADER_TYP: &str = "typ";
@@ -296,6 +298,11 @@ pub enum PresentationTamper {
     UntrustedIssuer,
     /// The issuer-signed JWT re-encoded with `alg: none` and an empty signature.
     IssuerAlgNone,
+    /// The trusted issuer's own signature, corrupted in transit (one signature character
+    /// changed, still canonical base64url): not a foreign key, a broken signature.
+    CorruptIssuerSignature,
+    /// The holder's own KB-JWT signature, corrupted in transit (as above).
+    CorruptKbSignature,
 }
 
 /// An HTTP answer.
@@ -312,6 +319,8 @@ pub struct HttpReply {
 /// A synthetic SD-JWT VC issuer (ES256). Never in the default build.
 pub struct SyntheticIssuer {
     key: SigningKey,
+    /// `vct` of the credentials it issues.
+    vct: String,
 }
 
 impl fmt::Debug for SyntheticIssuer {
@@ -331,7 +340,17 @@ impl SyntheticIssuer {
             .map_err(|_| WalletError::Malformed("issuer jwk"))?;
         Ok(Self {
             key: key.into_signing_key(),
+            vct: SYNTHETIC_CREDENTIAL_VCT.to_owned(),
         })
+    }
+
+    /// The same issuer, issuing credentials of type `vct` instead of
+    /// [`SYNTHETIC_CREDENTIAL_VCT`] (for a server configured with another
+    /// [`crate::CredentialRequest`]). The claims stay the synthetic ones.
+    #[must_use]
+    pub fn with_vct(mut self, vct: impl Into<String>) -> Self {
+        self.vct = vct.into();
+        self
     }
 
     /// An issuer with a fresh random key (one no Verifier trusts).
@@ -341,6 +360,7 @@ impl SyntheticIssuer {
     pub fn generate() -> Result<Self, WalletError> {
         Ok(Self {
             key: random_signing_key()?,
+            vct: SYNTHETIC_CREDENTIAL_VCT.to_owned(),
         })
     }
 
@@ -374,13 +394,14 @@ impl SyntheticIssuer {
             "iss": SYNTHETIC_ISSUER_ID,
             "iat": now,
             "exp": now + CREDENTIAL_LIFETIME_SECS,
-            "vct": SYNTHETIC_CREDENTIAL_VCT,
+            "vct": self.vct,
             "cnf": { "jwk": Value::Object(jose::p256_jwk_value(holder)) },
             "_sd_alg": "sha-256",
             "_sd": digests,
         });
         Ok(Credential {
             issuer_jwt: sign_jws(&self.key, SD_JWT_VC_TYP, &payload),
+            vct: self.vct.clone(),
             disclosures,
         })
     }
@@ -390,6 +411,7 @@ impl SyntheticIssuer {
 #[derive(Debug, Clone)]
 struct Credential {
     issuer_jwt: String,
+    vct: String,
     disclosures: Vec<(String, String)>,
 }
 
@@ -479,17 +501,15 @@ impl WalletSim {
         tamper: &PresentationTamper,
     ) -> Result<String, WalletError> {
         use PresentationTamper as T;
-        if !request
-            .vct_values
-            .iter()
-            .any(|v| v == SYNTHETIC_CREDENTIAL_VCT)
-        {
+        if !request.vct_values.contains(&self.credential.vct) {
             return Err(WalletError::NoMatchingCredential);
         }
         let now = now_secs()?;
         let reissued;
         let credential = if *tamper == T::UntrustedIssuer {
-            reissued = SyntheticIssuer::generate()?.issue(self.holder.verifying_key(), now)?;
+            reissued = SyntheticIssuer::generate()?
+                .with_vct(self.credential.vct.clone())
+                .issue(self.holder.verifying_key(), now)?;
             &reissued
         } else {
             &self.credential
@@ -526,10 +546,10 @@ impl WalletSim {
             }
             _ => {}
         }
-        let issuer_jwt = if *tamper == T::IssuerAlgNone {
-            unsecured(&credential.issuer_jwt, SD_JWT_VC_TYP)?
-        } else {
-            credential.issuer_jwt.clone()
+        let issuer_jwt = match tamper {
+            T::IssuerAlgNone => unsecured(&credential.issuer_jwt, SD_JWT_VC_TYP)?,
+            T::CorruptIssuerSignature => corrupt_signature(&credential.issuer_jwt),
+            _ => credential.issuer_jwt.clone(),
         };
         let sd_jwt = sd_jwt_string(&issuer_jwt, &disclosures);
         if *tamper == T::MissingKb {
@@ -570,8 +590,10 @@ impl WalletSim {
             &self.holder
         };
         let mut kb_jwt = sign_jws(signer, KB_JWT_TYP, &kb_payload);
-        if *tamper == T::KbAlgNone {
-            kb_jwt = unsecured(&kb_jwt, KB_JWT_TYP)?;
+        match tamper {
+            T::KbAlgNone => kb_jwt = unsecured(&kb_jwt, KB_JWT_TYP)?,
+            T::CorruptKbSignature => kb_jwt = corrupt_signature(&kb_jwt),
+            _ => {}
         }
         if *tamper == T::AlteredDisclosure {
             let altered = sd_jwt_string(&issuer_jwt, &alter_first_disclosure(&disclosures)?);
@@ -1113,12 +1135,23 @@ fn alter_first_disclosure(disclosures: &[String]) -> Result<Vec<String>, WalletE
 /// character of a segment carries six full bits, so the result stays canonical and only the
 /// AEAD check can catch it.
 fn tamper_ciphertext(jwe: &str) -> String {
-    let mut segments: Vec<String> = jwe.split('.').map(str::to_owned).collect();
-    if let Some(ct) = segments.get_mut(CIPHERTEXT_SEGMENT)
-        && let Some(first) = ct.chars().next()
+    tamper_segment(jwe, CIPHERTEXT_SEGMENT)
+}
+
+/// `jws` with the first character of its signature replaced, as [`tamper_ciphertext`] does:
+/// canonical base64url of 64 bytes whose `R` differs, so only the signature check catches it.
+fn corrupt_signature(jws: &str) -> String {
+    tamper_segment(jws, JWS_SIGNATURE_SEGMENT)
+}
+
+/// `compact` with the first character of segment `index` replaced by another base64url one.
+fn tamper_segment(compact: &str, index: usize) -> String {
+    let mut segments: Vec<String> = compact.split('.').map(str::to_owned).collect();
+    if let Some(segment) = segments.get_mut(index)
+        && let Some(first) = segment.chars().next()
     {
         let replacement = if first == 'A' { "B" } else { "A" };
-        ct.replace_range(..first.len_utf8(), replacement);
+        segment.replace_range(..first.len_utf8(), replacement);
     }
     segments.join(".")
 }

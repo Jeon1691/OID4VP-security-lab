@@ -70,11 +70,10 @@ use session_core::{
 
 use crate::config::{RouteKind, StartError};
 use crate::evidence::{EvidenceRecord, Rejection};
-use crate::sd_jwt::TrustedIssuerKey;
 use crate::server::{
     self, AppState, JWK_USE_ENC, KID_BYTES, LabKey, MILLIS_PER_SECOND, Registry, SessionKey, Trial,
 };
-use crate::validate::{self, ValidationError};
+use crate::validate::{self, Acceptance, ValidationError};
 
 /// Last path segment of the ECDH-ES route. Never a valid route token (wrong length), so it
 /// cannot collide with a unique route.
@@ -192,13 +191,13 @@ async fn pipeline(
     record.candidate_count = candidates.len();
 
     let slot = server::decryption_slot(state).await?;
-    let issuer = state.trusted_issuer.clone();
+    let acceptance = Arc::clone(&state.acceptance);
     // KB-JWT freshness is judged on this clock, in NumericDate seconds (RFC 7519 §2).
     let now = SystemClock.now().as_unix_millis() / MILLIS_PER_SECOND;
     let (trial, trial_time, candidates) = tokio::task::spawn_blocking(move || {
         let _slot = slot;
         let started = Instant::now();
-        let trial = trial(&jwe, &candidates, &issuer, now);
+        let trial = trial(&jwe, &candidates, &acceptance, now);
         (trial, started.elapsed(), candidates)
     })
     .await
@@ -230,7 +229,7 @@ async fn pipeline(
 pub(crate) fn trial(
     jwe: &CompactJwe,
     candidates: &[Candidate<SessionKey>],
-    issuer: &TrustedIssuerKey,
+    acceptance: &Acceptance,
     now: u64,
 ) -> Trial {
     let mut out = Trial::default();
@@ -269,7 +268,7 @@ pub(crate) fn trial(
         if !validate::names_session(&payload, candidate.binding()) {
             continue;
         }
-        match validate::validate_payload(&payload, candidate.binding(), issuer, now) {
+        match validate::validate_payload(&payload, candidate.binding(), acceptance, now) {
             Ok(result) => {
                 out.validated += 1;
                 if out.first.is_none() {
@@ -309,6 +308,7 @@ mod tests {
     use crate::evidence::{EvidenceRecord, Rejection};
     use crate::sd_jwt::TrustedIssuerKey;
     use crate::server::{self, LabKey, Registry, SessionKey};
+    use crate::validate::{Acceptance, CredentialRequest};
 
     const ISSUER_PUBLIC_JWK: &str = include_str!("../tests/fixtures/lab_issuer.pub.jwk");
     /// Synthetic wire values of the one test session.
@@ -364,8 +364,11 @@ mod tests {
         jose_hpke::rand_core::UnwrapErr(getrandom::SysRng)
     }
 
-    fn issuer() -> TrustedIssuerKey {
-        TrustedIssuerKey::from_jwk(ISSUER_PUBLIC_JWK).expect("issuer key")
+    fn acceptance() -> Acceptance {
+        Acceptance {
+            issuer: TrustedIssuerKey::from_jwk(ISSUER_PUBLIC_JWK).expect("issuer key"),
+            request: CredentialRequest::synthetic(),
+        }
     }
 
     /// An ECDH-ES JWE never opens for a session holding an HPKE-0 key (`Decrypt`, one attempt),
@@ -384,7 +387,7 @@ mod tests {
         let jwe = jose_ecdh_es::CompactJwe::parse(&jwe).expect("parse");
 
         let hpke = candidates(Arc::new(LabKey::Hpke(HpkeKey::generate(&mut rng()))));
-        let refused = trial(&jwe, &hpke, &issuer(), NOW);
+        let refused = trial(&jwe, &hpke, &acceptance(), NOW);
         assert_eq!((refused.attempts, refused.opened), (1, 0));
         let mut record = EvidenceRecord::new(RouteKind::EcdhEs, super::EcdhEsRoute::strategy());
         assert!(matches!(
@@ -393,7 +396,7 @@ mod tests {
         ));
 
         let own = candidates(Arc::new(LabKey::EcdhEs(ecdh_es)));
-        let control = trial(&jwe, &own, &issuer(), NOW);
+        let control = trial(&jwe, &own, &acceptance(), NOW);
         assert_eq!(
             (control.attempts, control.opened),
             (1, 1),
@@ -418,7 +421,7 @@ mod tests {
         let jwe = jose_hpke::CompactJwe::parse(&jwe).expect("parse");
 
         let ecdh_es = candidates(Arc::new(LabKey::EcdhEs(EcdhEsKey::generate(&mut rng()))));
-        let refused = server::trial(&jwe, &ecdh_es, &issuer(), NOW);
+        let refused = server::trial(&jwe, &ecdh_es, &acceptance(), NOW);
         assert_eq!((refused.attempts, refused.opened), (1, 0));
         let mut record = EvidenceRecord::new(RouteKind::Shared, super::EcdhEsRoute::strategy());
         assert!(matches!(
@@ -427,7 +430,7 @@ mod tests {
         ));
 
         let own = candidates(Arc::new(LabKey::Hpke(hpke)));
-        let control = server::trial(&jwe, &own, &issuer(), NOW);
+        let control = server::trial(&jwe, &own, &acceptance(), NOW);
         assert_eq!(
             (control.attempts, control.opened),
             (1, 1),

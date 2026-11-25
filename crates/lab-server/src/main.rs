@@ -3,11 +3,14 @@
 //! ```text
 //! lab-server --signing-key <jwk file> --issuer-key <public jwk file> [--client-id <id>]
 //!            [--mode hardened|research-kid|research-trial=<budget>] [--bind <ip:port>]
+//!            [--credential-query-id <id>] [--vct <vct>] [--claims <name,name,...>]
 //! ```
 //!
-//! `LAB_SIGNING_KEY` / `LAB_ISSUER_KEY` / `LAB_CLIENT_ID` / `LAB_MODE` / `LAB_BIND` are used
-//! when the flag is absent. Defaults: hardened on `127.0.0.1:0`, `client_id` =
-//! `DEFAULT_CLIENT_ID`.
+//! `LAB_SIGNING_KEY` / `LAB_ISSUER_KEY` / `LAB_CLIENT_ID` / `LAB_MODE` / `LAB_BIND` /
+//! `LAB_CREDENTIAL_QUERY_ID` / `LAB_VCT` / `LAB_CLAIMS` are used when the flag is absent.
+//! Defaults: hardened on `127.0.0.1:0`, `client_id` = `DEFAULT_CLIENT_ID`, and the synthetic
+//! lab Credential Query (`CredentialRequest::synthetic`); `--credential-query-id`, `--vct` and
+//! `--claims` replace its parts (claims are top-level claim names, comma-separated).
 //!
 //! The trusted SD-JWT VC issuer key (EC P-256 public JWK, no `d`) is required too: only
 //! presentations whose issuer JWT verifies with it are accepted. The synthetic lab issuer's
@@ -26,14 +29,18 @@
 use std::process::ExitCode;
 
 use lab_server::{
-    LabConfig, LabServer, Mode, RequestSigningKey, SharedRouteStrategy, TrustedIssuerKey,
+    CredentialRequest, LabConfig, LabServer, Mode, RequestSigningKey, SharedRouteStrategy,
+    TrustedIssuerKey,
 };
 use protocol_model::ClientIdWire;
 use session_core::CandidateBudget;
 use zeroize::Zeroizing;
 
 const USAGE: &str = "usage: lab-server --signing-key <jwk file> --issuer-key <public jwk file> \
-[--client-id <id>] [--mode hardened|research-kid|research-trial=<budget>] [--bind <ip:port>]";
+[--client-id <id>] [--mode hardened|research-kid|research-trial=<budget>] [--bind <ip:port>] \
+[--credential-query-id <id>] [--vct <vct>] [--claims <name,name,...>]";
+/// Separator of the `--claims` list.
+const CLAIMS_SEPARATOR: char = ',';
 const TRIAL_PREFIX: &str = "research-trial=";
 
 fn parse_mode(value: &str) -> Result<Mode, String> {
@@ -57,6 +64,9 @@ fn config() -> Result<LabConfig, String> {
     let mut client_id = std::env::var("LAB_CLIENT_ID").ok();
     let mut mode = std::env::var("LAB_MODE").ok();
     let mut bind = std::env::var("LAB_BIND").ok();
+    let mut query_id = std::env::var("LAB_CREDENTIAL_QUERY_ID").ok();
+    let mut vct = std::env::var("LAB_VCT").ok();
+    let mut claims = std::env::var("LAB_CLAIMS").ok();
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {
         let slot = match flag.as_str() {
@@ -65,6 +75,9 @@ fn config() -> Result<LabConfig, String> {
             "--client-id" => &mut client_id,
             "--mode" => &mut mode,
             "--bind" => &mut bind,
+            "--credential-query-id" => &mut query_id,
+            "--vct" => &mut vct,
+            "--claims" => &mut claims,
             _ => return Err(USAGE.to_owned()),
         };
         *slot = Some(args.next().ok_or_else(|| USAGE.to_owned())?);
@@ -85,6 +98,19 @@ fn config() -> Result<LabConfig, String> {
     if let Some(client_id) = client_id {
         config.client_id =
             ClientIdWire::new(client_id).map_err(|_| "invalid client_id".to_owned())?;
+    }
+    if query_id.is_some() || vct.is_some() || claims.is_some() {
+        let synthetic = CredentialRequest::synthetic();
+        let claims: Vec<String> = match claims {
+            Some(list) => list.split(CLAIMS_SEPARATOR).map(str::to_owned).collect(),
+            None => synthetic.claims().to_vec(),
+        };
+        config.credential_request = CredentialRequest::new(
+            query_id.unwrap_or_else(|| synthetic.id().to_owned()),
+            vct.unwrap_or_else(|| synthetic.vct().to_owned()),
+            claims,
+        )
+        .map_err(|e| format!("credential query: {e}"))?;
     }
     if let Some(bind) = bind {
         config.bind = bind
