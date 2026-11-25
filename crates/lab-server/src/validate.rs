@@ -128,6 +128,7 @@ const _: () = assert!(LONGEST_HONEST_KB_JWT <= MAX_KB_JWT_LEN);
 /// Why a decrypted payload was not accepted. Internal evidence only: every variant answers the
 /// same generic HTTP error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum ValidationError {
     /// The plaintext is not a JSON object with unique member names.
     #[error("payload is not a JSON object")]
@@ -374,6 +375,37 @@ pub(crate) fn validate(
     issuer: &TrustedIssuerKey,
     now: u64,
 ) -> Result<Validated, ValidationError> {
+    validate_payload(&parse_payload(plaintext)?, binding, issuer, now)
+}
+
+/// The decrypted payload as a JSON object with unique member names at every depth.
+pub(crate) fn parse_payload(plaintext: &[u8]) -> Result<Map<String, Value>, ValidationError> {
+    jose::parse_strict_object(plaintext).ok_or(ValidationError::NotJsonObject)
+}
+
+/// Whether the payload's `state` is a string equal to the stored `state` of `binding`
+/// (the comparison of `check_state`). The ECDH-ES route selects its session(s) with it.
+#[cfg(feature = "ecdh-es-research")]
+pub(crate) fn names_session(payload: &Map<String, Value>, binding: &RequestBinding) -> bool {
+    let RequestBinding::DirectPostJwt { state, .. } = binding else {
+        return false;
+    };
+    check_state(payload.get(RESPONSE_STATE), state).is_ok()
+}
+
+/// `true` when the payload has a `state` member at all (of any type).
+#[cfg(feature = "ecdh-es-research")]
+pub(crate) fn has_state(payload: &Map<String, Value>) -> bool {
+    payload.contains_key(RESPONSE_STATE)
+}
+
+/// [`validate`] on an already parsed payload.
+pub(crate) fn validate_payload(
+    payload: &Map<String, Value>,
+    binding: &RequestBinding,
+    issuer: &TrustedIssuerKey,
+    now: u64,
+) -> Result<Validated, ValidationError> {
     let RequestBinding::DirectPostJwt {
         client_id,
         nonce,
@@ -383,7 +415,6 @@ pub(crate) fn validate(
     else {
         return Err(ValidationError::UnsupportedMode);
     };
-    let payload = jose::parse_strict_object(plaintext).ok_or(ValidationError::NotJsonObject)?;
     check_state(payload.get(RESPONSE_STATE), state)?;
     let vp_token = payload
         .get(VP_TOKEN)

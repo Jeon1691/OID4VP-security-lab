@@ -20,13 +20,15 @@
 //!    alone (ECDH-ES has no `session_info` or other transaction binding). All of them open, or
 //!    none: decryption cannot select a session, and the evidence records it
 //!    (`hpke_attempts` = live sessions, `CryptoResult::Opened` = how many opened).
-//! 6. 1.0 correlation: the decrypted `state` selects the session. `validate` checks `state`
-//!    first, so a session whose `state` differs is simply not this response's
-//!    (`ValidationError::StateMismatch`, not recorded); holder binding (KB-JWT `aud` /
+//! 6. 1.0 correlation: the plaintext (the same for every candidate that opened) is parsed
+//!    once, and its `state` selects the session. A session whose `state` differs is simply not
+//!    this response's and is skipped without any further work; holder binding (KB-JWT `aud` /
 //!    `nonce` / `sd_hash`) runs only for the session(s) the `state` names. A `state` that names
 //!    no live session on the route is `ValidationError::StateUnknown`; a missing one
-//!    `StateMissing`. More than one session that validates (research `nonce` and `state`
-//!    knobs reused) is `Ambiguous`, as under bounded trial.
+//!    `StateMissing`, a non-JSON plaintext `NotJsonObject`. When the research knob gives
+//!    several sessions the same `state`, holder binding disambiguates (the KB-JWT `nonce`
+//!    validates for one); more than one that validates (research `nonce` and `state` knobs
+//!    both reused) is `Ambiguous`, as under bounded trial.
 //! 7. The Verifier-wide replay guard and the atomic claim, shared with the HPKE-0 routes.
 //!
 //! # Indexing sessions by `state`
@@ -35,13 +37,19 @@
 //! by [`MAX_ECDH_ES_SESSIONS`], and step 6 scans their stored `state`. That needs no change to
 //! session-core (no new strategy, no store-backend contract for session-redis) and no second
 //! map that would have to follow the registry through claims, expiry, purge and the consumed
-//! retention window. The scan costs at most [`MAX_ECDH_ES_SESSIONS`] SHA-256 comparisons next
-//! to as many ECDH operations, which step 5 performs anyway as the measurement.
+//! retention window. The scan costs at most [`MAX_ECDH_ES_SESSIONS`] `state` comparisons (two
+//! SHA-256 digests of short strings each), small next to step 5.
 //!
 //! # Cost
 //!
-//! Like bounded trial, one unauthenticated POST costs one ECDH per live session on the route,
-//! at most [`MAX_ECDH_ES_SESSIONS`]. Research mode only, loopback only.
+//! One unauthenticated POST costs, per live session on the route (at most
+//! [`MAX_ECDH_ES_SESSIONS`]): one P-256 ECDH, one Concat KDF and one AES-GCM decryption of the
+//! whole ciphertext, which may be close to the body limit (`MAX_RESPONSE_BODY_BYTES`, about
+//! 1 MiB, e.g. a payload padded with ignored members). That is up to 256 full-ciphertext
+//! AES-GCM passes per POST, the same order as bounded trial, whose rejected candidates also
+//! run AES-GCM over the whole ciphertext before the tag fails. The plaintext is parsed as JSON
+//! once per POST, and holder binding runs only for the session(s) the `state` names. Trials run behind `max_concurrent_decryptions`. Research mode only,
+//! loopback only, and only on servers configured with `LabConfig::ecdh_es_route`.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -210,42 +218,220 @@ async fn pipeline(
 }
 
 /// Steps 5-6: opens the JWE with every candidate's key (the measurement: with one shared key,
-/// all open or none), then lets the decrypted `state` select. Each opened plaintext is
-/// validated against its own candidate with `state` checked first, so a candidate the `state`
-/// does not name ends at `StateMismatch`, which is not an error of this response and is not
-/// recorded. Errors of the candidate(s) it does name (holder binding), or a missing `state` or
-/// non-JSON plaintext, are; if nothing else was recorded, no live session has this `state`.
-fn trial(
+/// all open or none), then parses the plaintext once and lets its `state` select.
+///
+/// Every candidate that opens yields the same plaintext: opening means the AES-GCM tag
+/// verified under the CEK that candidate's key derived from the one `epk`, and the ciphertext
+/// decrypts to one plaintext under that CEK. So only the first is kept and parsed (once per
+/// POST, not once per candidate). A non-JSON plaintext is `NotJsonObject`, one without `state`
+/// `StateMissing`. Only the opened candidates the `state` names are validated (holder
+/// binding); their first error is recorded. If the `state` names none of them, the response is
+/// `StateUnknown`.
+pub(crate) fn trial(
     jwe: &CompactJwe,
     candidates: &[Candidate<SessionKey>],
     issuer: &TrustedIssuerKey,
     now: u64,
 ) -> Trial {
     let mut out = Trial::default();
+    let mut opened = Vec::new();
+    let mut plaintext = None;
     for (index, candidate) in candidates.iter().enumerate() {
         out.attempts += 1;
         let Some(key) = candidate.key().ecdh_es() else {
             continue;
         };
-        let Ok(plaintext) = jwe.open(key) else {
+        let Ok(opened_plaintext) = jwe.open(key) else {
             continue;
         };
         out.opened += 1;
-        match validate::validate(&plaintext, candidate.binding(), issuer, now) {
+        opened.push(index);
+        plaintext.get_or_insert(opened_plaintext);
+    }
+    let Some(plaintext) = plaintext else {
+        return out;
+    };
+    let payload = match validate::parse_payload(&plaintext) {
+        Ok(payload) => payload,
+        Err(e) => {
+            out.first_error = Some(e);
+            return out;
+        }
+    };
+    if !validate::has_state(&payload) {
+        out.first_error = Some(ValidationError::StateMissing);
+        return out;
+    }
+    for index in opened {
+        let Some(candidate) = candidates.get(index) else {
+            continue;
+        };
+        if !validate::names_session(&payload, candidate.binding()) {
+            continue;
+        }
+        match validate::validate_payload(&payload, candidate.binding(), issuer, now) {
             Ok(result) => {
                 out.validated += 1;
                 if out.first.is_none() {
                     out.first = Some((index, result));
                 }
             }
-            Err(ValidationError::StateMismatch) => {}
             Err(e) => {
                 out.first_error.get_or_insert(e);
             }
         }
     }
-    if out.opened > 0 && out.validated == 0 {
+    if out.validated == 0 {
         out.first_error.get_or_insert(ValidationError::StateUnknown);
     }
     out
+}
+
+/// A candidate whose key is of the other route's kind never opens, in either trial: the
+/// per-session `LabKey` is what keeps either route from falling back to the other algorithm.
+/// Sealing needs the codecs' `test-support`, which `wallet-sim` brings in.
+#[cfg(all(test, feature = "wallet-sim"))]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use jose_ecdh_es::{ContentEncryption, RecipientPrivateKey as EcdhEsKey};
+    use jose_hpke::RecipientPrivateKey as HpkeKey;
+    use protocol_model::{
+        ClientIdWire, KeyId, NonceWire, RequestBinding, ResponseUriWire, SessionId, StateWire,
+    };
+    use session_core::{
+        IngressHint, MemoryRegistry, RegistryConfig, RoutePolicy, RouteToken, SystemClock,
+    };
+
+    use super::{BUDGET, trial};
+    use crate::config::{DEFAULT_CLIENT_ID, RouteKind};
+    use crate::evidence::{EvidenceRecord, Rejection};
+    use crate::sd_jwt::TrustedIssuerKey;
+    use crate::server::{self, LabKey, Registry, SessionKey};
+
+    const ISSUER_PUBLIC_JWK: &str = include_str!("../tests/fixtures/lab_issuer.pub.jwk");
+    /// Synthetic wire values of the one test session.
+    const NONCE: &str = "lab-unit-nonce";
+    const STATE: &str = "lab-unit-state";
+    const RESPONSE_URI: &str = "http://127.0.0.1/lab/v1/response/ecdh-es";
+    const SESSION_ID: &str = "lab-unit-session";
+    const KID: &str = "lab-unit-kid";
+    /// Any positive lifetime; the test resolves at once.
+    const TTL: Duration = Duration::from_secs(60);
+    /// KB-JWT freshness clock; nothing reaches holder binding here.
+    const NOW: u64 = 0;
+
+    fn binding() -> RequestBinding {
+        RequestBinding::DirectPostJwt {
+            client_id: ClientIdWire::new(DEFAULT_CLIENT_ID).expect("client_id"),
+            nonce: NonceWire::new(NONCE).expect("nonce"),
+            response_uri: ResponseUriWire::new(RESPONSE_URI).expect("response_uri"),
+            state: StateWire::new(STATE).expect("state"),
+        }
+    }
+
+    /// The live candidates of a one-session registry holding `key`.
+    fn candidates(key: SessionKey) -> Vec<session_core::Candidate<SessionKey>> {
+        let registry: Registry = MemoryRegistry::with_config(
+            Arc::new(SystemClock),
+            RegistryConfig {
+                route_policy: RoutePolicy::Shared,
+                ..RegistryConfig::default()
+            },
+        );
+        let route_token = RouteToken::generate().expect("route token");
+        let kid = KeyId::new(KID).expect("kid");
+        registry
+            .insert(session_core::NewSession {
+                id: SessionId::new(SESSION_ID).expect("session id"),
+                binding: binding(),
+                route_token: route_token.clone(),
+                kid: Some(kid.clone()),
+                key,
+                ttl: TTL,
+            })
+            .expect("insert");
+        registry
+            .resolve(
+                &IngressHint::new(route_token, Some(kid)),
+                session_core::ResolutionStrategy::BoundedTrial(BUDGET),
+            )
+            .expect("one live candidate")
+    }
+
+    fn rng() -> jose_hpke::rand_core::UnwrapErr<getrandom::SysRng> {
+        jose_hpke::rand_core::UnwrapErr(getrandom::SysRng)
+    }
+
+    fn issuer() -> TrustedIssuerKey {
+        TrustedIssuerKey::from_jwk(ISSUER_PUBLIC_JWK).expect("issuer key")
+    }
+
+    /// An ECDH-ES JWE never opens for a session holding an HPKE-0 key (`Decrypt`, one attempt),
+    /// while the same JWE opens for a session holding the ECDH-ES key it was sealed to.
+    #[test]
+    fn ecdh_es_trial_never_opens_with_an_hpke_key() {
+        let ecdh_es = EcdhEsKey::generate(&mut rng());
+        let jwe = jose_ecdh_es::test_support::seal_compact(
+            &ecdh_es.public_key(),
+            ContentEncryption::A128Gcm,
+            Some(KID),
+            b"{}",
+            &mut rng(),
+        )
+        .expect("seal");
+        let jwe = jose_ecdh_es::CompactJwe::parse(&jwe).expect("parse");
+
+        let hpke = candidates(Arc::new(LabKey::Hpke(HpkeKey::generate(&mut rng()))));
+        let refused = trial(&jwe, &hpke, &issuer(), NOW);
+        assert_eq!((refused.attempts, refused.opened), (1, 0));
+        let mut record = EvidenceRecord::new(RouteKind::EcdhEs, super::EcdhEsRoute::strategy());
+        assert!(matches!(
+            server::select(&mut record, refused),
+            Err(Rejection::Decrypt)
+        ));
+
+        let own = candidates(Arc::new(LabKey::EcdhEs(ecdh_es)));
+        let control = trial(&jwe, &own, &issuer(), NOW);
+        assert_eq!(
+            (control.attempts, control.opened),
+            (1, 1),
+            "positive control"
+        );
+    }
+
+    /// An HPKE-0 JWE never opens for a session holding an ECDH-ES key (`Decrypt`, one attempt),
+    /// while the same JWE opens for a session holding the HPKE-0 key it was sealed to.
+    #[test]
+    fn hpke_trial_never_opens_with_an_ecdh_es_key() {
+        let hpke = HpkeKey::generate(&mut rng());
+        let info = jose_hpke::SessionInfo::from_binding(&binding());
+        let jwe = jose_hpke::test_support::seal_compact(
+            &hpke.public_key(),
+            Some(KID),
+            info.as_bytes(),
+            b"{}",
+            &mut rng(),
+        )
+        .expect("seal");
+        let jwe = jose_hpke::CompactJwe::parse(&jwe).expect("parse");
+
+        let ecdh_es = candidates(Arc::new(LabKey::EcdhEs(EcdhEsKey::generate(&mut rng()))));
+        let refused = server::trial(&jwe, &ecdh_es, &issuer(), NOW);
+        assert_eq!((refused.attempts, refused.opened), (1, 0));
+        let mut record = EvidenceRecord::new(RouteKind::Shared, super::EcdhEsRoute::strategy());
+        assert!(matches!(
+            server::select(&mut record, refused),
+            Err(Rejection::Decrypt)
+        ));
+
+        let own = candidates(Arc::new(LabKey::Hpke(hpke)));
+        let control = server::trial(&jwe, &own, &issuer(), NOW);
+        assert_eq!(
+            (control.attempts, control.opened),
+            (1, 1),
+            "positive control"
+        );
+    }
 }

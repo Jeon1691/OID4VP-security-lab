@@ -43,6 +43,7 @@ pub enum AdmissionError {
 
 /// Where a request was finally refused. `None` in [`EvidenceRecord::rejection`] means success.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Rejection {
     /// Admission control (body, media type, form).
     Admission(AdmissionError),

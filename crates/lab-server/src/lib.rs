@@ -13,7 +13,7 @@
 //! | `GET /lab/v1/requests/{id}` | Signed Request Object (JAR), body = compact JWS, `Content-Type: application/oauth-authz-req+jwt`. Payload: exact `client_id`, `nonce`, `state` (fresh per session, 128 random bits as base64url in the §5.2 charset, unless a research session fixed it), `response_uri`, `response_mode=direct_post.jwt`, `aud`, `dcql_query` (one `dc+sd-jwt` query for [`SYNTHETIC_CREDENTIAL_VCT`] and [`REQUESTED_CLAIMS`]), `client_metadata.jwks` with the HPKE-0 key (`alg` `HPKE-0`, `kid`) |
 //! | `POST /lab/v1/response/{token}` | Unique response_uri (unique-uri strategy) |
 //! | `POST /lab/v1/response/shared` | Shared response_uri, research mode only (404 in hardened mode) |
-//! | `POST /lab/v1/response/ecdh-es` | `ecdh-es-research` feature only: the OpenID4VP 1.0-style ECDH-ES route, research mode only (404 in hardened mode, which also refuses `{"route": "ecdh_es_shared"}`). One ECDH-ES P-256 key and `kid` for every session on it; its Request Objects advertise that key (`alg` `ECDH-ES`, `use` `enc`, `kid`) and `encrypted_response_enc_values_supported` `["A128GCM","A256GCM"]` instead of the HPKE-0 key (docs/adr/0001-ecdh-es-research-route.md) |
+//! | `POST /lab/v1/response/ecdh-es` | `ecdh-es-research` feature only: the OpenID4VP 1.0-style ECDH-ES route, served only in research mode with `LabConfig::ecdh_es_route` set (404 otherwise, and `{"route": "ecdh_es_shared"}` is refused). One ECDH-ES P-256 key and `kid` for every session on it; its Request Objects advertise that key (`alg` `ECDH-ES`, `use` `enc`, `kid`) and `encrypted_response_enc_values_supported` `["A128GCM","A256GCM"]` instead of the HPKE-0 key (docs/adr/0001-ecdh-es-research-route.md) |
 //! | `GET /lab/v1/results/{result_token}` | `pending` / `consumed` (with the committed `credential`: requested claims, `vct`, holder key thumbprint, disclosed claim names) / `expired`. The request id does not unlock it |
 //! | `GET /health` | Liveness; exempt from the in-flight limit and request timeout |
 //!
@@ -61,9 +61,10 @@
 //!   ([`SharedRouteStrategy`]): `BoundedTrial(budget)` with one key and `kid` shared by every
 //!   session on the route (the OIDF #792 shape), or `UniqueKid` with a key and `kid` per
 //!   session. Shared-route sessions live in a separate `RoutePolicy::Shared` registry, so
-//!   unique-uri sessions keep the hardened guarantees. With the `ecdh-es-research` feature it
-//!   also serves the ECDH-ES route, whose sessions live in a third registry with their own
-//!   shared ECDH-ES key; it is a separate route, never a fallback for the HPKE-0 ones.
+//!   unique-uri sessions keep the hardened guarantees. With the `ecdh-es-research` feature and
+//!   `LabConfig::ecdh_es_route` it also serves the ECDH-ES route, whose sessions live in a
+//!   third registry with their own shared ECDH-ES key; it is a separate route, never a
+//!   fallback for the HPKE-0 ones.
 //!
 //! Every mode refuses a non-loopback bind before binding (`IpAddr::is_loopback`: `127.0.0.0/8`
 //! and `::1`; `0.0.0.0`, `::` and IPv4-mapped `::ffff:127.0.0.1` are refused).
@@ -104,9 +105,11 @@
 //! resolve every live session on the route (bounded trial, at most 256: they share route token,
 //! `kid` and key, so this selects nothing); open with each one's key, i.e. the route's key
 //! alone, which opens for all of them or none (recorded as `hpke_attempts` / `opened`); then
-//! the decrypted `state` selects: `validate` checks it first, a session it does not name is
-//! skipped, a `state` that names no live session is `ValidationError::StateUnknown` (missing:
-//! `StateMissing`), and holder binding runs for the named session only; then steps 9-10. The
+//! the plaintext (the same for every candidate that opened) is parsed once and its `state`
+//! selects: a session it does not name is skipped, a `state` that names no live session is
+//! `ValidationError::StateUnknown` (missing: `StateMissing`), and holder binding runs for the
+//! named session(s) only, which also disambiguates a `state` the research knob reused; then
+//! steps 9-10. The
 //! HPKE-0 routes, conversely, refuse an `ECDH-ES` JWE at step 4 (`Rejection::JweParse`).
 //!
 //! Around every route except `/health`: [`LabConfig::max_in_flight_requests`] (503 above it,
@@ -170,7 +173,11 @@
 //!   correlator, not authentication: A's holder proof sent with B's `state` is refused by B's
 //!   KB-JWT nonce binding, and a reused nonce and `state` (research knobs) is refused by the
 //!   replay guard or as `Ambiguous`, as on the shared HPKE-0 route. Every POST costs one ECDH
-//!   per live session on the route. Research mode only; the default build has no such route.
+//!   and one AES-GCM pass over the ciphertext per live session on the route. Accepted for the
+//!   lab: response timing reveals whether a known `state` is still live (holder binding runs
+//!   only when it names a live session), and `state` is public to anyone holding a
+//!   `request_uri`. Research mode only, opt-in per server (`LabConfig::ecdh_es_route`); the
+//!   default build has no such route.
 //! * Results are readable only with the result token, so the request id (visible to the
 //!   wallet and anyone who sees the `request_uri`) does not reveal the outcome.
 //! * Consumed records retain only the bounded [`ValidatedResponse`], never decrypted input or

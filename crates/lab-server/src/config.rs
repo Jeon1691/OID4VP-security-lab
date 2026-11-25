@@ -93,6 +93,7 @@ const DEFAULT_BIND: SocketAddr = SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::
 
 /// Which route a session's `response_uri` points to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum RouteKind {
     /// `POST /lab/v1/response/{token}`: one unguessable route token per session (unique-uri).
     Unique,
@@ -174,6 +175,13 @@ pub struct LabConfig {
     pub header_read_timeout: Duration,
     /// Graceful-shutdown drain deadline; see [`DEFAULT_SHUTDOWN_DRAIN`].
     pub shutdown_drain: Duration,
+    /// Serve the ECDH-ES research route (`ecdh-es-research` feature;
+    /// docs/adr/0001-ecdh-es-research-route.md). Default `false`: a research-mode server then
+    /// creates no ECDH-ES key, registry or route, and refuses `ecdh_es_shared` sessions.
+    /// Requires [`Mode::Research`]; with [`Mode::Hardened`] the server refuses to start
+    /// ([`StartError::EcdhEsRouteNeedsResearchMode`]).
+    #[cfg(feature = "ecdh-es-research")]
+    pub ecdh_es_route: bool,
 }
 
 impl LabConfig {
@@ -203,6 +211,8 @@ impl LabConfig {
             max_connections: DEFAULT_MAX_CONNECTIONS,
             header_read_timeout: DEFAULT_HEADER_READ_TIMEOUT,
             shutdown_drain: DEFAULT_SHUTDOWN_DRAIN,
+            #[cfg(feature = "ecdh-es-research")]
+            ecdh_es_route: false,
         }
     }
 }
@@ -235,6 +245,11 @@ pub enum StartError {
     /// `origin`; OpenID4VP 1.1 §5.9.3).
     #[error("the lab cannot sign request objects for this client_id prefix")]
     UnsupportedClientIdPrefix,
+    /// [`LabConfig::ecdh_es_route`] set in [`Mode::Hardened`]: the ECDH-ES route is research
+    /// mode only.
+    #[cfg(feature = "ecdh-es-research")]
+    #[error("the ECDH-ES route is served in research mode only")]
+    EcdhEsRouteNeedsResearchMode,
 }
 
 /// Checks `config` before anything is bound; returns the Request Object `kid` for its
@@ -254,6 +269,10 @@ pub(crate) fn check(config: &LabConfig) -> Result<Option<String>, StartError> {
         || config.header_read_timeout.is_zero()
     {
         return Err(StartError::ZeroLimit);
+    }
+    #[cfg(feature = "ecdh-es-research")]
+    if config.ecdh_es_route && config.mode == Mode::Hardened {
+        return Err(StartError::EcdhEsRouteNeedsResearchMode);
     }
     jar::request_kid(config.client_id.as_str(), &config.request_signing_key)
 }
