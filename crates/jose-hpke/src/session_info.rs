@@ -53,6 +53,9 @@ impl SessionInfo {
                 client_id,
                 nonce,
                 response_uri,
+                // `state` is checked after decryption (OpenID4VP 1.1 §14.4.2); §8.3.1 does
+                // not make it a `session_info` input.
+                state: _,
             } => Self::direct_post_jwt(client_id, nonce, response_uri),
             RequestBinding::DcApiJwt { origin, nonce } => Self::dc_api_jwt(origin, nonce),
         }

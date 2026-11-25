@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use protocol_model::{
     ClientIdWire, KeyId, NonceWire, OriginWire, RequestBinding, ResponseUriWire, SessionId,
+    StateWire,
 };
 use session_core::{
     Candidate, IngressHint, ManualClock, MemoryRegistry, NewSession, RESPONSE_DIGEST_BYTES,
@@ -150,6 +151,7 @@ pub fn binding(i: usize, route: &RouteToken) -> RequestBinding {
             route.to_url_segment()
         ))
         .expect("valid response_uri"),
+        state: StateWire::new(format!("state-{i}")).expect("valid state"),
     }
 }
 

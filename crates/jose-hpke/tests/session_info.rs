@@ -9,13 +9,15 @@ use common::{fresh_key, hex, rng};
 use jose_hpke::test_support::seal_compact;
 use jose_hpke::{Error, RecipientPrivateKey, SessionInfo, open_compact};
 use protocol_model::{
-    ClientIdWire, ModelError, NonceWire, OriginWire, RequestBinding, ResponseUriWire,
+    ClientIdWire, ModelError, NonceWire, OriginWire, RequestBinding, ResponseUriWire, StateWire,
 };
 
 const EXAMPLE_CLIENT_ID: &str = "x509_san_dns:example.com";
 const EXAMPLE_NONCE: &str = "exc7gBkxjx1rdc9udRrveKvSsJIq80avlXeLHhGwqtA";
 const EXAMPLE_RESPONSE_URI: &str = "https://example.com/response";
 const EXAMPLE_ORIGIN: &str = "https://example.com";
+/// Synthetic `state` for the bindings; §8.3.1 does not make it a `session_info` input.
+const SYNTHETIC_STATE: &str = "synthetic-state";
 
 /// OpenID4VP 1.1 §8.3.1, direct_post.jwt example, hexadecimal representation.
 const DIRECT_POST_EXAMPLE_HEX: &str = "4f70656e49443456502d7369ff783530395f73616e5f646e733a6578616d706c652e636f6dff6578633767426b786a7831726463397564527276654b7653734a4971383061766c58654c48684777717441ff68747470733a2f2f6578616d706c652e636f6d2f726573706f6e7365";
@@ -29,6 +31,7 @@ fn direct_post_binding(client_id: &str, nonce: &str, response_uri: &str) -> Requ
         client_id: ClientIdWire::new(client_id).expect("client_id"),
         nonce: NonceWire::new(nonce).expect("nonce"),
         response_uri: ResponseUriWire::new(response_uri).expect("response_uri"),
+        state: StateWire::new(SYNTHETIC_STATE).expect("state"),
     }
 }
 
@@ -44,6 +47,7 @@ fn direct_post(client_id: &str, nonce: &str, response_uri: &str) -> SessionInfo 
         client_id,
         nonce,
         response_uri,
+        ..
     } = direct_post_binding(client_id, nonce, response_uri)
     else {
         unreachable!("direct_post_binding builds DirectPostJwt")
@@ -96,6 +100,40 @@ fn from_binding_matches_openid4vp_examples() {
     assert_eq!(
         SessionInfo::from_binding(&dc).as_bytes(),
         hex(DC_API_EXAMPLE_HEX).as_slice()
+    );
+}
+
+/// §8.3.1's `direct_post.jwt` formula has no `state` input: two bindings that differ only in
+/// `state` give the same `session_info`, so HPKE binds nothing about `state` and the Verifier
+/// has to compare it after decryption (OpenID4VP 1.1 §14.4.2).
+#[test]
+fn state_is_not_a_session_info_input() {
+    let with_state = |state: &str| {
+        let RequestBinding::DirectPostJwt {
+            client_id,
+            nonce,
+            response_uri,
+            ..
+        } = direct_post_binding(EXAMPLE_CLIENT_ID, EXAMPLE_NONCE, EXAMPLE_RESPONSE_URI)
+        else {
+            unreachable!("direct_post_binding builds DirectPostJwt")
+        };
+        RequestBinding::DirectPostJwt {
+            client_id,
+            nonce,
+            response_uri,
+            state: StateWire::new(state).expect("state"),
+        }
+    };
+    let (a, b) = (with_state("state-a"), with_state("state-b"));
+    assert_ne!(a, b);
+    assert_eq!(
+        SessionInfo::from_binding(&a).as_bytes(),
+        SessionInfo::from_binding(&b).as_bytes()
+    );
+    assert_eq!(
+        SessionInfo::from_binding(&a).as_bytes(),
+        hex(DIRECT_POST_EXAMPLE_HEX).as_slice()
     );
 }
 

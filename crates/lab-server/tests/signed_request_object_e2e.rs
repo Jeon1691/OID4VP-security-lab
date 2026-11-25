@@ -226,6 +226,7 @@ fn binding_parts(binding: &RequestBinding) -> (&ClientIdWire, &NonceWire, &Respo
             client_id,
             nonce,
             response_uri,
+            ..
         } => (client_id, nonce, response_uri),
         RequestBinding::DcApiJwt { .. } => panic!("lab issues direct_post.jwt only"),
     }

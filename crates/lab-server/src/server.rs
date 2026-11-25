@@ -28,7 +28,7 @@ use jose_hpke::rand_core::UnwrapErr;
 use jose_hpke::{ALG_HPKE_0, CompactJwe, RecipientPrivateKey, SessionInfo};
 use protocol_model::{
     ClientIdWire, EncryptedResponseMode, KeyId, NonceWire, RequestBinding, ResponseUriWire,
-    SessionId,
+    SessionId, StateWire,
 };
 use serde_json::{Map, Value, json};
 use session_core::{
@@ -160,6 +160,11 @@ const RESPONSE_PARAM: &str = "response";
 /// Random bytes in a nonce: 128 bits, so it is fresh and unpredictable per request
 /// (OpenID4VP 1.1 §14.1); base64url output stays inside the §5.2 nonce charset.
 const NONCE_BYTES: usize = 16;
+/// Random bytes in a `state`: 128 bits, the entropy OpenID4VP 1.1 §5.3 requires when `state`
+/// carries the request/response binding ("at least 128 bits of entropy"), so one session's
+/// `state` cannot be guessed from another's. Unpadded base64url (22 characters) stays inside
+/// the §5.2 `state` charset.
+const STATE_BYTES: usize = 16;
 /// Random bytes in a session id and in a per-session `kid`: 128 bits, so ids never collide
 /// and unique-kid resolution is never ambiguous by accident.
 const SESSION_ID_BYTES: usize = 16;
@@ -789,10 +794,13 @@ async fn issue(
         }
     };
     let response_uri = ResponseUriWire::new(response_uri).map_err(|_| fail())?;
+    // Fresh per session, on every route and in every mode (OpenID4VP 1.1 §5.2, §14.4.2).
+    let response_state = StateWire::new(random(STATE_BYTES)?).map_err(|_| fail())?;
     let binding = RequestBinding::DirectPostJwt {
         client_id: state.client_id.clone(),
         nonce,
         response_uri,
+        state: response_state,
     };
     let response_uri = match &binding {
         RequestBinding::DirectPostJwt { response_uri, .. } => response_uri.as_str().to_owned(),
@@ -889,6 +897,7 @@ fn request_object(
         client_id,
         nonce,
         response_uri,
+        ..
     } = binding
     else {
         return Value::Null;

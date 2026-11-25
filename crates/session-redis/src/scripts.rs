@@ -12,8 +12,8 @@ use std::sync::LazyLock;
 use redis::Script;
 
 /// Session hash fields returned per record by `resolve` and read by `snapshot`, in order.
-pub(crate) const RECORD_FIELDS: [&str; 11] = [
-    "inc", "rev", "exp", "state", "route", "kid", "keyref", "mode", "b1", "b2", "b3",
+pub(crate) const RECORD_FIELDS: [&str; 12] = [
+    "inc", "rev", "exp", "state", "route", "kid", "keyref", "mode", "b1", "b2", "b3", "b4",
 ];
 
 /// Largest timestamp (and sorted-set score) written: 2^53 - 1, the largest integer a Lua 5.1
@@ -82,7 +82,7 @@ end
 ";
 
 /// `ARGV`: prefix, id, now (`''` = server time), TTL (ms), route, kid (`''` = none), key ref,
-/// unique route (`1`/`0`), max pending, mode, binding fields b1..b3. `expires_at` is computed
+/// unique route (`1`/`0`), max pending, mode, binding fields b1..b4. `expires_at` is computed
 /// here, on the same clock that later judges expiry.
 /// Returns `{status, ...}`: `ok, incarnation, expires_at, refs...` / `capacity, refs...` /
 /// `zero_ttl` / `duplicate_session` / `duplicate_route`. `refs` are key references the lazy
@@ -108,7 +108,8 @@ if redis.call('ZCARD', P .. 'pending') >= max then
 end
 local inc = redis.call('INCR', P .. 'incarnation')
 redis.call('HSET', s, 'inc', fmt(inc), 'rev', 0, 'exp', fmt(exp), 'state', 'pending', 'route', route,
-  'keyref', ARGV[7], 'mode', ARGV[10], 'b1', ARGV[11], 'b2', ARGV[12], 'b3', ARGV[13])
+  'keyref', ARGV[7], 'mode', ARGV[10], 'b1', ARGV[11], 'b2', ARGV[12], 'b3', ARGV[13],
+  'b4', ARGV[14])
 if kid then
   redis.call('HSET', s, 'kid', kid)
   redis.call('ZADD', P .. 'pk:' .. kid, inc, id)

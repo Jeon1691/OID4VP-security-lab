@@ -54,6 +54,7 @@ REQUIRED_TESTS=(
   non_ascii_values_are_rejected
   accepted_session_info_values_are_all_below_0x80
   unknown_response_mode_is_rejected
+  state_is_limited_to_the_url_safe_set
   ecdh_es_direct_post_jwt_round_trip_completes_with_success
   tampered_jwe_ciphertext_is_not_accepted
   jwe_with_unadvertised_enc_is_rejected
@@ -85,6 +86,7 @@ REQUIRED_TESTS=(
   direct_post_bound_jwe_fails_with_any_single_field_changed
   dc_api_bound_jwe_fails_with_any_single_field_changed
   direct_post_and_dc_api_session_info_never_cross_open
+  state_is_not_a_session_info_input
   # session-core (IMP-007/011/012): strategies, exactly-once claim, state machine.
   unique_uri_yields_exactly_one_candidate_among_sessions_sharing_kid
   unique_kid_yields_exactly_one_candidate_among_sessions_sharing_route
@@ -214,6 +216,9 @@ REQUIRED_TESTS=(
   memory::insert_beyond_pending_capacity_is_rejected
   memory::consumed_records_are_purged_after_retention
   memory::candidate_from_another_registry_cannot_claim_its_session
+  memory::direct_post_binding_round_trips_with_its_state
+  codec::tests::direct_post_binding_round_trips_with_its_state
+  codec::tests::undecodable_state_fails_closed
   unreachable_redis_fails_closed_at_connect
   connect_rejects_malformed_namespace
   # G6 benchmark harness (IMP-015/016): report columns and the reproducible case schedule.
@@ -295,6 +300,7 @@ REDIS_REQUIRED_TESTS=(
   redis::snapshots_are_point_in_time_copies
   redis::snapshot_round_trips_every_field
   redis::candidate_from_another_registry_cannot_claim_its_session
+  redis::direct_post_binding_round_trips_with_its_state
   # STATE-03: two workers (separate connections) racing 2/16/128-way.
   two_workers_racing_claims_commit_exactly_once
   # STATE-05: fail closed, no in-memory fallback.

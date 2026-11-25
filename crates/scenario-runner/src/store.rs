@@ -8,7 +8,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, anyhow, ensure};
 use evidence_report::{Invariant, Row};
-use protocol_model::{ClientIdWire, NonceWire, RequestBinding, ResponseUriWire, SessionId};
+use protocol_model::{
+    ClientIdWire, NonceWire, RequestBinding, ResponseUriWire, SessionId, StateWire,
+};
 use session_core::{
     IngressHint, MemoryRegistry, NewSession, RESPONSE_DIGEST_BYTES, RegistryConfig,
     ResolutionStrategy, ResponseDigest, RouteToken, SessionStore, SystemClock,
@@ -87,6 +89,7 @@ async fn measure<S: SessionStore<Key, String>>(
                     "{RESPONSE_URI_BASE}/{}",
                     route.to_url_segment()
                 ))?,
+                state: StateWire::new(format!("g6-state-{i}"))?,
             },
             route_token: route.clone(),
             kid: None,
@@ -447,6 +450,7 @@ mod tests {
                             "{RESPONSE_URI_BASE}/{}",
                             route.to_url_segment()
                         ))?,
+                        state: StateWire::new("g6-state")?,
                     },
                     route_token: route,
                     kid: None,

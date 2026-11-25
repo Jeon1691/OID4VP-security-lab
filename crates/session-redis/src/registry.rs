@@ -244,7 +244,7 @@ impl<K, R> RedisRegistry<K, R> {
         self.keys
             .insert(key_ref.clone(), entry, cap, self.local_now())?;
         let route = route_token.to_url_segment();
-        let [mode, b1, b2, b3] = codec::encode_binding(&binding);
+        let [mode, b1, b2, b3, b4] = codec::encode_binding(&binding);
         let unique = if self.config.route_policy == RoutePolicy::UniquePerSession {
             "1"
         } else {
@@ -256,7 +256,7 @@ impl<K, R> RedisRegistry<K, R> {
             self.config.max_pending.to_string(),
         );
         let kid_s = kid.as_ref().map_or("", KeyId::as_str);
-        let args: [&[u8]; 12] = [
+        let args: [&[u8]; 13] = [
             id.as_bytes(),
             now_s.as_bytes(),
             ttl_s.as_bytes(),
@@ -269,6 +269,7 @@ impl<K, R> RedisRegistry<K, R> {
             b1.as_bytes(),
             b2.as_bytes(),
             b3.as_bytes(),
+            b4.as_bytes(),
         ];
         let mut f = match self.invoke(&SCRIPTS.insert, &args).await {
             Ok(f) => f,

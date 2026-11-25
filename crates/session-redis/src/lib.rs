@@ -13,7 +13,7 @@
 //!
 //! | Key | Type | Content |
 //! | --- | --- | --- |
-//! | `{ns}:s:<id>` | hash | `inc`, `rev`, `exp`, `state` (`pending`/`consumed`/`expired`), `route`, `kid`, `keyref`, binding (`mode`, `b1`..`b3`); once consumed also `digest`, `result` |
+//! | `{ns}:s:<id>` | hash | `inc`, `rev`, `exp`, `state` (`pending`/`consumed`/`expired`), `route`, `kid`, `keyref`, binding (`mode`, `b1`..`b4`: the `session_info` inputs, then the `state`); once consumed also `digest`, `result` |
 //! | `{ns}:incarnation` | string | counter; `INCR` gives every insert a fresh incarnation |
 //! | `{ns}:pr:<route>` | zset | pending ids on a route, score = incarnation (insertion order) |
 //! | `{ns}:pk:<kid>` | zset | pending ids with a `kid`, score = incarnation |
