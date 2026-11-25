@@ -69,6 +69,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import zlib
@@ -645,6 +646,11 @@ def response_jwe_header(log: list):
     return None
 
 
+# 3xx (RFC 9110 §15.4): the authorize GET's redirects are recorded and never followed.
+HTTP_REDIRECT_MIN = 300
+HTTP_REDIRECT_MAX = 399
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     """The authorize GET must be answered by the suite itself: a 3xx is an error, not followed."""
 
@@ -714,10 +720,18 @@ def run_module(module: str, plan_id: str, lab: LabClient, out: Path, issuer_jwk:
         record.update(session_id=session["session_id"], client_id=session["client_id"],
                       lab_tls=lab.last_tls)
         started = time.monotonic()
-        with SUITE_NO_REDIRECT.open(authz, timeout=AUTHORIZE_TIMEOUT_SECS) as resp:
-            if resp.url != authz:
-                raise SystemExit(f"authorize GET ended at {resp.url}, not {authz}")
-            record["authorize_status"] = resp.status
+        try:
+            with SUITE_NO_REDIRECT.open(authz, timeout=AUTHORIZE_TIMEOUT_SECS) as resp:
+                if resp.url != authz:
+                    raise SystemExit(f"authorize GET ended at {resp.url}, not {authz}")
+                record["authorize_status"] = resp.status
+        except urllib.error.HTTPError as e:
+            # The suite answers a module it skips (request-uri-method-post without
+            # request_uri_method=post) with a redirect of its own: recorded, never followed.
+            if not HTTP_REDIRECT_MIN <= e.code <= HTTP_REDIRECT_MAX:
+                raise
+            record["authorize_status"] = e.code
+            record["authorize_redirect_not_followed"] = True
         record["authorize_seconds"] = round(time.monotonic() - started, 2)
         state = wait_state(test_id, "WAITING,FINISHED,INTERRUPTED")
         result_status, result_body = lab.request("GET", session["result_uri"])
