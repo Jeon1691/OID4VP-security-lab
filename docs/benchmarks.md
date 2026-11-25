@@ -21,7 +21,8 @@ cargo bench -p scenario-runner               # criterion micro-benchmarks (HPKE 
 `<out-root>/<run-id>/` (run id `<UTC yyyymmddThhmmssZ>-<git sha>`, or `BENCH_RUN_ID`). Then it
 writes `manifest.json` with `scripts/evidence_manifest.sh`. The manifest records the commit
 SHA and the git tree hash of `crates/` (`lab_crates_tree`), which stays the same across rebases
-of identical sources. `<out-root>` is optional, and runner arguments always follow `--`.
+of identical sources. `<out-root>` is optional, and runner arguments always follow `--`. An
+existing run directory is refused, so a run id is never reused (pick a new `BENCH_RUN_ID`).
 Exit status: 0 = every invariant held, 1 = an invariant broke (all files are still written),
 2 = the run could not complete (build failure, bad arguments, broken run). `bench.sh` is not a
 stage of `scripts/ci_local.sh`, and `ci.yml` never runs it.
