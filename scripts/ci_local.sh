@@ -253,6 +253,11 @@ REQUIRED_TESTS=(
   ssi_kb_jwt_payload_with_null_exp_is_rejected_as_malformed
   lab_wallet_presentation_verifies_with_ssi
   trusted_issuer_key_config_accepts_only_p256_public_jwks
+  # OIDF conformance plan §5 C1: offline gap tests and the configurable Credential Query.
+  issuer_jwt_with_corrupted_signature_is_rejected
+  kb_jwt_with_corrupted_signature_is_rejected
+  credential_with_minimal_cnf_jwk_is_accepted
+  configured_credential_query_is_requested_and_enforced
   rfc9901_fixture_provenance_is_pinned
   rfc9901_disclosure_digests_match_the_printed_hashes
   rfc9901_section_5_2_presentation_verifies_and_yields_the_printed_payload

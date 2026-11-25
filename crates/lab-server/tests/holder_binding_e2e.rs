@@ -18,10 +18,10 @@ use lab_server::wallet_sim::{
     CreatedSession, PresentationTamper, RequestObject, SealOptions, SyntheticIssuer, WalletSim,
 };
 use lab_server::{
-    CommitResult, CryptoResult, EvidenceRecord, GENERIC_REJECTION_BODY, LabConfig, LabServer, Mode,
-    REQUESTED_CLAIMS, Rejection, RequestSigningKey, RouteKind, SYNTHETIC_CREDENTIAL_QUERY_ID,
-    SYNTHETIC_CREDENTIAL_VCT, SharedRouteStrategy, TrustedIssuerKey, ValidationError,
-    ValidationResult,
+    CommitResult, CredentialRequest, CredentialRequestError, CryptoResult, EvidenceRecord,
+    GENERIC_REJECTION_BODY, LabConfig, LabServer, Mode, REQUESTED_CLAIMS, Rejection,
+    RequestSigningKey, RouteKind, SYNTHETIC_CREDENTIAL_QUERY_ID, SYNTHETIC_CREDENTIAL_VCT,
+    SharedRouteStrategy, TrustedIssuerKey, ValidationError, ValidationResult,
 };
 use protocol_model::ClientIdWire;
 use serde_json::{Value, json};
@@ -88,12 +88,14 @@ struct Lab {
 
 impl Lab {
     async fn start(mode: Mode) -> Self {
-        let server = LabServer::start(config(mode))
-            .await
-            .expect("lab server starts");
+        Self::start_with(config(mode), &issuer()).await
+    }
+
+    async fn start_with(config: LabConfig, issuer: &SyntheticIssuer) -> Self {
+        let server = LabServer::start(config).await.expect("lab server starts");
         Self {
             server,
-            wallet: WalletSim::new(&issuer()).expect("wallet builds"),
+            wallet: WalletSim::new(issuer).expect("wallet builds"),
         }
     }
 
@@ -313,6 +315,141 @@ tamper_is_rejected! {
         PresentationTamper::UntrustedIssuer => IssuerSignature;
     /// RFC 9901 §4.1 / §7.1 step 2a: the issuer JWT MUST NOT use `none`.
     issuer_jwt_with_alg_none_is_rejected: PresentationTamper::IssuerAlgNone => IssuerAlg;
+    /// RFC 9901 §7.1 step 2b-c, OIDF `InvalidCredentialSignature` (C1): the trusted issuer's
+    /// own signature with one character changed in transit, not a foreign key.
+    issuer_jwt_with_corrupted_signature_is_rejected:
+        PresentationTamper::CorruptIssuerSignature => IssuerSignature;
+    /// RFC 9901 §7.3 step 5c, OIDF `InvalidKbJwtSignature` (C1): the holder's own KB-JWT
+    /// signature with one character changed, not a signature by another key.
+    kb_jwt_with_corrupted_signature_is_rejected:
+        PresentationTamper::CorruptKbSignature => KbSignature;
+}
+
+/// OIDF `MinimalCnfJwk` (C1): the credential's `cnf.jwk` carries only the RFC 7518 §6.2.1
+/// members `kty`, `crv`, `x`, `y` (no `kid`, `use`, `alg`), and the presentation commits with
+/// that key's thumbprint (RFC 7800 §3.2; RFC 9901 §4.1.2).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn credential_with_minimal_cnf_jwk_is_accepted() {
+    let lab = Lab::start(Mode::Hardened).await;
+    let session = lab.session().await;
+    let request = lab.request(&session).await;
+    let presentation = lab
+        .wallet
+        .present(&request, &PresentationTamper::None)
+        .expect("presentation");
+    let issuer_jwt = presentation.split('~').next().expect("issuer JWT");
+    let payload: Value = serde_json::from_slice(
+        &URL_SAFE_NO_PAD
+            .decode(issuer_jwt.split('.').nth(JWS_PAYLOAD).expect("payload"))
+            .expect("base64url"),
+    )
+    .expect("JSON payload");
+    let cnf_jwk = payload["cnf"]["jwk"].as_object().expect("cnf.jwk object");
+    let mut members: Vec<&str> = cnf_jwk.keys().map(String::as_str).collect();
+    members.sort_unstable();
+    assert_eq!(members, ["crv", "kty", "x", "y"]);
+
+    let opts = SealOptions {
+        vp_token: Some(vp_token(&presentation)),
+        ..SealOptions::default()
+    };
+    let (status, _) = lab.respond(&session, &opts).await;
+    assert_eq!(status, OK);
+    assert_eq!(lab.record().commit_result, CommitResult::Committed);
+    assert_eq!(
+        lab.result(&session).await["credential"]["holder_key_thumbprint"],
+        lab.wallet.holder_key_thumbprint()
+    );
+    lab.shutdown().await;
+}
+
+/// Plan §4 item 4 (C1): a configured Credential Query (`LabConfig::credential_request`, here
+/// the OIDF suite's `urn:eudi:pid:1` shape) is what the signed Request Object asks for
+/// (OpenID4VP §6.1, B.3.5) and what the Verifier enforces: a credential of that `vct` with
+/// those claims commits them; the default synthetic `vct` is `VctMismatch`; a `vp_token` keyed
+/// by the default query id is `QueryMismatch`. Invalid queries are refused at construction.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn configured_credential_query_is_requested_and_enforced() {
+    const PID_VCT: &str = "urn:eudi:pid:1";
+    const PID_QUERY_ID: &str = "pid";
+    let pid_claims = ["given_name", "birthdate"];
+    let mut cfg = config(Mode::Hardened);
+    cfg.credential_request =
+        CredentialRequest::new(PID_QUERY_ID, PID_VCT, pid_claims).expect("valid query");
+    let lab = Lab::start_with(cfg, &issuer().with_vct(PID_VCT)).await;
+    let session = lab.session().await;
+    let request = lab.request(&session).await;
+    assert_eq!(request.credential_query_id, PID_QUERY_ID);
+    assert_eq!(request.vct_values, [PID_VCT]);
+    assert_eq!(request.requested_claims, pid_claims);
+
+    // The default synthetic credential type is not the requested one.
+    let other_type = WalletSim::new(&issuer()).expect("wallet");
+    let mut claimed = request.clone();
+    claimed.vct_values = vec![SYNTHETIC_CREDENTIAL_VCT.to_owned()];
+    let presentation = other_type
+        .present(&claimed, &PresentationTamper::None)
+        .expect("presentation of the synthetic type");
+    let opts = SealOptions {
+        vp_token: Some(json!({ PID_QUERY_ID: [presentation] })),
+        ..SealOptions::default()
+    };
+    let (status, body) = lab.respond(&session, &opts).await;
+    assert_generic(status, &body);
+    assert_validation_failed(&lab.record(), ValidationError::VctMismatch);
+
+    // The right credential under the default query id answers no query of this request.
+    let presentation = lab
+        .wallet
+        .present(&request, &PresentationTamper::None)
+        .expect("presentation");
+    let opts = SealOptions {
+        vp_token: Some(vp_token(&presentation)),
+        ..SealOptions::default()
+    };
+    let (status, body) = lab.respond(&session, &opts).await;
+    assert_generic(status, &body);
+    assert_validation_failed(&lab.record(), ValidationError::QueryMismatch);
+    lab.assert_pending(&session).await;
+
+    let (status, _) = lab.respond(&session, &SealOptions::default()).await;
+    assert_eq!(status, OK);
+    assert_eq!(lab.record().commit_result, CommitResult::Committed);
+    let result = lab.result(&session).await;
+    assert_eq!(
+        result["credential"]["claims"],
+        json!({ "given_name": "Alex", "birthdate": "2000-01-01" })
+    );
+    assert_eq!(result["credential"]["vct"], PID_VCT);
+    lab.shutdown().await;
+
+    let refused = [
+        CredentialRequest::new("", PID_VCT, pid_claims),
+        CredentialRequest::new("pid query", PID_VCT, pid_claims),
+        CredentialRequest::new(PID_QUERY_ID, "", pid_claims),
+        CredentialRequest::new(PID_QUERY_ID, "urn:with space", pid_claims),
+        CredentialRequest::new(PID_QUERY_ID, PID_VCT, Vec::<String>::new()),
+        CredentialRequest::new(PID_QUERY_ID, PID_VCT, ["given_name", "given_name"]),
+        CredentialRequest::new(PID_QUERY_ID, PID_VCT, ["_sd"]),
+        CredentialRequest::new(PID_QUERY_ID, PID_VCT, [""]),
+    ];
+    let errors: Vec<_> = refused
+        .into_iter()
+        .map(|r| r.expect_err("refused"))
+        .collect();
+    assert_eq!(
+        errors,
+        [
+            CredentialRequestError::Id,
+            CredentialRequestError::Id,
+            CredentialRequestError::Vct,
+            CredentialRequestError::Vct,
+            CredentialRequestError::Claims,
+            CredentialRequestError::Claims,
+            CredentialRequestError::Claims,
+            CredentialRequestError::Claims,
+        ]
+    );
 }
 
 /// OpenID4VP 1.1 §14.2.2: a valid SD-JWT+KB for session A, sealed for session B on the same

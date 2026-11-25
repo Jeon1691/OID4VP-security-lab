@@ -50,10 +50,9 @@ use crate::evidence::{
     ValidationResult,
 };
 use crate::jar::{REQUEST_OBJECT_AUD, REQUEST_OBJECT_MEDIA_TYPE, RequestSigner};
-use crate::sd_jwt::TrustedIssuerKey;
 use crate::validate::{
-    self, MAX_RESEARCH_NONCE_LEN, MAX_RESEARCH_STATE_LEN, REQUEST_NONCE, RESPONSE_STATE,
-    ValidatedResponse, ValidationError,
+    self, Acceptance, MAX_RESEARCH_NONCE_LEN, MAX_RESEARCH_STATE_LEN, REQUEST_NONCE,
+    RESPONSE_STATE, ValidatedResponse, ValidationError,
 };
 
 /// Most digests the replay guard remembers at once, per kind (response and holder proof): four
@@ -258,7 +257,7 @@ pub(crate) struct AppState {
     /// Signs each request object once, at issue time.
     signer: RequestSigner,
     /// Verifies the issuer signature of every presented SD-JWT VC.
-    pub(crate) trusted_issuer: TrustedIssuerKey,
+    pub(crate) acceptance: Arc<Acceptance>,
     session_ttl: Duration,
     base_url: String,
     /// Unique-uri sessions; `RoutePolicy::UniquePerSession`, in every mode.
@@ -472,7 +471,10 @@ impl LabServer {
             mode: config.mode,
             client_id: config.client_id,
             signer,
-            trusted_issuer: config.trusted_issuer,
+            acceptance: Arc::new(Acceptance {
+                issuer: config.trusted_issuer,
+                request: config.credential_request,
+            }),
             session_ttl: config.session_ttl,
             base_url: base_url.clone(),
             unique: registry(RoutePolicy::UniquePerSession),
@@ -918,9 +920,14 @@ async fn issue(
     // published below only once signed; `request_uri` serves these bytes unchanged.
     let lifetime = Lifetime::for_session(issued_at, stored.expires_at());
     let request_object = state.signer.sign(
-        request_object(stored.binding(), client_metadata(&key, &kid), lifetime)
-            .to_string()
-            .as_bytes(),
+        request_object(
+            stored.binding(),
+            client_metadata(&key, &kid),
+            state.acceptance.request.dcql_query(),
+            lifetime,
+        )
+        .to_string()
+        .as_bytes(),
     );
     let request_uri = format!("{}{REQUESTS_PATH}/{id}", state.base_url);
     let result_token = RouteToken::generate().map_err(|_| fail())?;
@@ -990,10 +997,16 @@ fn client_metadata(key: &LabKey, kid: &KeyId) -> Value {
 }
 
 /// The request object payload for `binding`: exactly the stored wire values (`state` included,
-/// OpenID4VP 1.1 §5.2), `client_metadata` with the encryption key ([`client_metadata`]), `aud`
-/// (OpenID4VP 1.1 §5.8, Static Discovery), `iat` and `exp` ([`Lifetime`]). No `iss`: it MAY be
-/// present and Wallets MUST ignore it (§5). Signed by `RequestSigner::sign`.
-fn request_object(binding: &RequestBinding, client_metadata: Value, lifetime: Lifetime) -> Value {
+/// OpenID4VP 1.1 §5.2), `client_metadata` with the encryption key ([`client_metadata`]), the
+/// configured `dcql_query` (`CredentialRequest::dcql_query`), `aud` (OpenID4VP 1.1 §5.8, Static
+/// Discovery), `iat` and `exp` ([`Lifetime`]). No `iss`: it MAY be present and Wallets MUST
+/// ignore it (§5). Signed by `RequestSigner::sign`.
+fn request_object(
+    binding: &RequestBinding,
+    client_metadata: Value,
+    dcql_query: Value,
+    lifetime: Lifetime,
+) -> Value {
     let RequestBinding::DirectPostJwt {
         client_id,
         nonce,
@@ -1013,7 +1026,7 @@ fn request_object(binding: &RequestBinding, client_metadata: Value, lifetime: Li
         "response_uri": response_uri.as_str(),
         REQUEST_NONCE: nonce.as_str(),
         RESPONSE_STATE: state.as_str(),
-        "dcql_query": validate::dcql_query(),
+        "dcql_query": dcql_query,
         "client_metadata": client_metadata,
     })
 }
@@ -1208,13 +1221,13 @@ async fn pipeline(
 
     // HPKE is CPU-bound: run it on the blocking pool, at most `decryptions` trials at once.
     let slot = decryption_slot(state).await?;
-    let issuer = state.trusted_issuer.clone();
+    let acceptance = Arc::clone(&state.acceptance);
     // KB-JWT freshness is judged on this clock, in NumericDate seconds (RFC 7519 §2).
     let now = SystemClock.now().as_unix_millis() / MILLIS_PER_SECOND;
     let (trial, trial_time, candidates) = tokio::task::spawn_blocking(move || {
         let _slot = slot;
         let started = Instant::now();
-        let trial = trial(&jwe, &candidates, &issuer, now);
+        let trial = trial(&jwe, &candidates, &acceptance, now);
         (trial, started.elapsed(), candidates)
     })
     .await
@@ -1352,7 +1365,7 @@ pub(crate) async fn commit(
 pub(crate) fn trial(
     jwe: &CompactJwe,
     candidates: &[Candidate<SessionKey>],
-    issuer: &TrustedIssuerKey,
+    acceptance: &Acceptance,
     now: u64,
 ) -> Trial {
     let mut out = Trial::default();
@@ -1366,7 +1379,7 @@ pub(crate) fn trial(
             continue;
         };
         out.opened += 1;
-        match validate::validate(&plaintext, candidate.binding(), issuer, now) {
+        match validate::validate(&plaintext, candidate.binding(), acceptance, now) {
             Ok(result) => {
                 out.validated += 1;
                 if out.first.is_none() {
