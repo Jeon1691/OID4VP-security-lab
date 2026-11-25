@@ -1,0 +1,565 @@
+{
+ "plan": "oid4vp-1final-verifier-test-plan",
+ "variant": {
+  "vp_profile": "plain_vp",
+  "credential_format": "sd_jwt_vc",
+  "client_id_prefix": "x509_san_dns",
+  "request_method": "request_uri_signed",
+  "response_mode": "direct_post.jwt"
+ },
+ "alias": "oid4vp-lab-c3-9bcef8f26a2d0c4b",
+ "modules": [
+  {
+   "module": "oid4vp-1final-verifier-happy-flow",
+   "test_id": "aUrx42Ji2QWZQEx",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+   "session_id": "UCbNp0KpbCT69Qa0UwEsug",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.92,
+   "lab_result": {
+    "credential": {
+     "claims": {
+      "birthdate": "1980-05-23",
+      "family_name": "Dupont",
+      "given_name": "Jean"
+     },
+     "disclosed_claim_names": [
+      "/birthdate",
+      "/family_name",
+      "/given_name"
+     ],
+     "holder_key_thumbprint": "BwCVajCC60T1e9CM0BoLrswDxFqXv_wR-x7m9Fa5cDI",
+     "vct": "urn:eudi:pid:1"
+    },
+    "state": "consumed"
+   },
+   "screenshot": "screenshots/happy-flow.png",
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "findings": [
+    {
+     "src": "EnsureVerifierFetchedRevocationList",
+     "result": "WARNING",
+     "msg": "The verifier did not fetch the revocation list referenced by the presented credential, so it cannot have checked the credential's revocation status"
+    }
+   ],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "oehXRWdMOaxVlsBoMMsIWQ"
+   },
+   "log": "logs/happy-flow.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/conformance_mode_e2e.rs",
+    "test": "conformance_round_trip_over_https_commits_with_x509_san_dns"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-minimal-cnf-jwk",
+   "test_id": "hoGyraL6r74S1Cy",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+   "session_id": "yKv0fodlhjQWKJh00GUSsQ",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.18,
+   "lab_result": {
+    "credential": {
+     "claims": {
+      "birthdate": "1980-05-23",
+      "family_name": "Dupont",
+      "given_name": "Jean"
+     },
+     "disclosed_claim_names": [
+      "/birthdate",
+      "/family_name",
+      "/given_name"
+     ],
+     "holder_key_thumbprint": "BwCVajCC60T1e9CM0BoLrswDxFqXv_wR-x7m9Fa5cDI",
+     "vct": "urn:eudi:pid:1"
+    },
+    "state": "consumed"
+   },
+   "screenshot": "screenshots/minimal-cnf-jwk.png",
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "findings": [
+    {
+     "src": "EnsureVerifierFetchedRevocationList",
+     "result": "WARNING",
+     "msg": "The verifier did not fetch the revocation list referenced by the presented credential, so it cannot have checked the credential's revocation status"
+    }
+   ],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "nFbAGAM2-_dYgIx5ty_x6Q"
+   },
+   "log": "logs/minimal-cnf-jwk.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "credential_with_minimal_cnf_jwk_is_accepted"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-request-uri-method-post",
+   "test_id": "brJS1IRpruSvlPV",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+   "session_id": "zsueE_ofn3MZSZSEDsiS-Q",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.05,
+   "lab_result": {
+    "state": "pending"
+   },
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "SKIPPED",
+   "expected": "SKIPPED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": null,
+   "log": "logs/request-uri-method-post.json",
+   "lab_test": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-request-uri-fetched-twice",
+   "test_id": "4s7Nb9V82SM7oMp",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+   "session_id": "MAseQ6PnCdTEVO3OAgVvcQ",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.2,
+   "lab_result": {
+    "credential": {
+     "claims": {
+      "birthdate": "1980-05-23",
+      "family_name": "Dupont",
+      "given_name": "Jean"
+     },
+     "disclosed_claim_names": [
+      "/birthdate",
+      "/family_name",
+      "/given_name"
+     ],
+     "holder_key_thumbprint": "BwCVajCC60T1e9CM0BoLrswDxFqXv_wR-x7m9Fa5cDI",
+     "vct": "urn:eudi:pid:1"
+    },
+    "state": "consumed"
+   },
+   "screenshot": "screenshots/request-uri-fetched-twice.png",
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "findings": [
+    {
+     "src": "EnsureVerifierFetchedRevocationList",
+     "result": "WARNING",
+     "msg": "The verifier did not fetch the revocation list referenced by the presented credential, so it cannot have checked the credential's revocation status"
+    }
+   ],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "EZALNPjk_9VqQ7emo87Sdg"
+   },
+   "log": "logs/request-uri-fetched-twice.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/signed_request_object_e2e.rs",
+    "test": "served_request_object_is_signed_once_and_never_changes"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-signature",
+   "test_id": "GL7XMmh9oh4Ofnb",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+   "session_id": "yDImgQHTqIS73h47iRUWCw",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.14,
+   "lab_result": {
+    "state": "pending"
+   },
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "lri6NxAuC2w0b5P6ZpLXzw"
+   },
+   "log": "logs/invalid-kb-jwt-signature.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_corrupted_signature_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-credential-signature",
+   "test_id": "mluIKubiKed5hfu",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+   "session_id": "LGx5oHqwhkHAmcFSv8LIPw",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.14,
+   "lab_result": {
+    "state": "pending"
+   },
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "R95ntj2es4TtEBK8iWX5xQ"
+   },
+   "log": "logs/invalid-credential-signature.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "issuer_jwt_with_corrupted_signature_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-sd-hash",
+   "test_id": "sIrtoXK0S5DBr1L",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+   "session_id": "YMve4flDi-Heta52uOBeiQ",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.12,
+   "lab_result": {
+    "state": "pending"
+   },
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "JnEBVc-X1TnV_XkFmwTWxA"
+   },
+   "log": "logs/invalid-sd-hash.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_sd_hash_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-nonce",
+   "test_id": "8AviYds05yNII1E",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+   "session_id": "VHGCmm0FKQnSeyD9qOMQQg",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.12,
+   "lab_result": {
+    "state": "pending"
+   },
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "mTm2yJYAmByNZP3qfEkrvQ"
+   },
+   "log": "logs/invalid-kb-jwt-nonce.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_nonce_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-aud",
+   "test_id": "2Q6LfBwB7BFXp8j",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+   "session_id": "F1O_p7gQ8J8-YVWr1ve1LA",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.1,
+   "lab_result": {
+    "state": "pending"
+   },
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "qIf2NbbzUNv0534ONxvmKA"
+   },
+   "log": "logs/invalid-kb-jwt-aud.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_aud_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-kb-jwt-iat-in-past",
+   "test_id": "8670MGwYKB2utOk",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+   "session_id": "AF9x_vDrxMbdUBZ2_uJkSw",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.09,
+   "lab_result": {
+    "state": "pending"
+   },
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "cCJXQjgkXWpXSaWn3hVQKw"
+   },
+   "log": "logs/kb-jwt-iat-in-past.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_stale_iat_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-kb-jwt-iat-in-future",
+   "test_id": "nYuHylA10Z3VVX6",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+   "session_id": "l4o_V6P4nJJ1QyCN2UVbPw",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.09,
+   "lab_result": {
+    "state": "pending"
+   },
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "y4I_OYYhb-JdXg-V-5vZbQ"
+   },
+   "log": "logs/kb-jwt-iat-in-future.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_future_iat_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-present-revoked-credential",
+   "test_id": "knjS5JC8VY9ac1m",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+   "session_id": "MxBDkWxk7-NeFbOw3tGukw",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.09,
+   "lab_result": {
+    "credential": {
+     "claims": {
+      "birthdate": "1980-05-23",
+      "family_name": "Dupont",
+      "given_name": "Jean"
+     },
+     "disclosed_claim_names": [
+      "/birthdate",
+      "/family_name",
+      "/given_name"
+     ],
+     "holder_key_thumbprint": "BwCVajCC60T1e9CM0BoLrswDxFqXv_wR-x7m9Fa5cDI",
+     "vct": "urn:eudi:pid:1"
+    },
+    "state": "consumed"
+   },
+   "screenshot": "screenshots/present-revoked-credential.png",
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "FAILED",
+   "expected": "FAILED",
+   "as_expected": true,
+   "findings": [
+    {
+     "src": "EnsureVerifierFetchedRevocationList",
+     "result": "FAILURE",
+     "msg": "The verifier did not fetch the revocation list referenced by the presented credential, so it cannot have checked the credential's revocation status"
+    }
+   ],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "sYaaSowm0dlDePmrwDHzKg"
+   },
+   "log": "logs/present-revoked-credential.json",
+   "lab_test": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-present-credential-without-status",
+   "test_id": "3HWttVid6d8eQZa",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+   "session_id": "X39iYHhiB_uMnpd7ZV0BOw",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.08,
+   "lab_result": {
+    "credential": {
+     "claims": {
+      "birthdate": "1980-05-23",
+      "family_name": "Dupont",
+      "given_name": "Jean"
+     },
+     "disclosed_claim_names": [
+      "/birthdate",
+      "/family_name",
+      "/given_name"
+     ],
+     "holder_key_thumbprint": "BwCVajCC60T1e9CM0BoLrswDxFqXv_wR-x7m9Fa5cDI",
+     "vct": "urn:eudi:pid:1"
+    },
+    "state": "consumed"
+   },
+   "screenshot": "screenshots/present-credential-without-status.png",
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "UTI9I6MPOWeMitwMEEboHQ"
+   },
+   "log": "logs/present-credential-without-status.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "honest_sd_jwt_kb_presentation_commits_only_the_requested_claims"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-wrong-vct",
+   "test_id": "2Qynb5QORKHW9KI",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+   "session_id": "F_4qjn57MGY2gZ0u5MdnUw",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.1,
+   "lab_result": {
+    "state": "pending"
+   },
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "zkMJ9utL9YS8ce6dM6BBIA"
+   },
+   "log": "logs/wrong-vct.json",
+   "lab_test": {
+    "file": "crates/lab-server/src/sd_jwt.rs",
+    "test": "sd_jwt_vc_profile_enforces_vct_and_exactly_the_requested_claims"
+   }
+  }
+ ],
+ "plan_id": "u7YNnUcFmNcfQ"
+}

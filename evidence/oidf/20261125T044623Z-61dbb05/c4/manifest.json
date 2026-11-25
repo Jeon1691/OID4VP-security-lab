@@ -1,0 +1,66 @@
+{
+ "what": "OIDF conformance suite run against the lab's conformance mode (local, synthetic data)",
+ "not_a_certification": "nothing was submitted to the OpenID Foundation",
+ "stage": "C4",
+ "started_utc": "2026-11-25T04:46:34Z",
+ "finished_utc": "2026-11-25T04:46:36Z",
+ "lab": {
+  "commit": "61dbb05d3b4f02a62a0239ff2bf7147b4f1f1cf0",
+  "dirty": false,
+  "cargo_lock_sha256": "cc3cbc019e9ea2d343dcb4b62b1fc00c8bc50bedee06a8d8ffe92caf1cd46e06",
+  "binary": "target/debug/lab-server (cargo build -p lab-server --features conformance --locked)",
+  "binary_sha256": "101933c3cb15e930f8c17cfa34381fa6e9755be41182aee1c0ac5c01371d637a",
+  "command": "target/debug/lab-server --mode conformance --signing-key crates/lab-server/tests/fixtures/conformance_leaf.jwk --issuer-key crates/lab-server/tests/fixtures/lab_issuer.pub.jwk --tls-cert crates/lab-server/tests/fixtures/conformance_leaf.pem --tls-key crates/lab-server/tests/fixtures/conformance_leaf.key.pem --trust-anchor crates/lab-server/tests/fixtures/conformance_ca.pem --public-origin https://host.docker.internal:18444 --bind 127.0.0.1:18444 --client-id-prefix x509_hash --max-runtime-secs 3600 --credential-query-id pid --vct urn:eudi:pid:1 --claims given_name,family_name,birthdate --authorization-endpoint https://localhost:8443/test/a/oid4vp-lab-c4-6518fdc772e10759/authorize --response-redirect-uri https://host.docker.internal:18444/lab/v1/complete",
+  "rustc": "rustc 1.100.0 (0ef1bc386 2026-11-09)"
+ },
+ "suite": {
+  "base_url": "https://localhost:8443",
+  "compose_file": "tools/oidf-suite/docker-compose.yml",
+  "compose_file_sha256": "4dce675987923d92224ec8393354c0cca8f2abc0a3eae49704d7536c48dbcb4f",
+  "images": {
+   "server": {
+    "container": "oidf-suite-server-1",
+    "image_id": "sha256:d9a71ec37f821197150a323124f6ef3ac2ef2d3a3489ff3e4ad9420602d5aee5",
+    "repo_digests": [
+     "registry.gitlab.com/openid/conformance-suite@sha256:576ad9d6ea4230a6d58623a03c17c74e2ae1438cceec252f8721daa53a705961"
+    ]
+   },
+   "nginx": {
+    "container": "oidf-suite-nginx-1",
+    "image_id": "sha256:3a18f8a7d25016671e110ab0cd85c0fce15023f98370d59571a89b2d78047b15",
+    "repo_digests": [
+     "registry.gitlab.com/openid/conformance-suite/nginx@sha256:fd5ae05bf2a8f246f600b16a198dd670051bbad44f0b59d903da6e294e02707d"
+    ]
+   },
+   "mongodb": {
+    "container": "oidf-suite-mongodb-1",
+    "image_id": "sha256:55f75ddb7e071fe60e4d07c37f02c99c108dc0b0c655b8d427584290469e6446",
+    "repo_digests": [
+     "mongo@sha256:8b6d8f5bbedb25cb73517b65cf99f13aeb75ad5b157a56c479287a840bbad3ac"
+    ]
+   }
+  },
+  "java": "openjdk version \"21.0.13\" 2026-10-20 LTS\nOpenJDK Runtime Environment Temurin-21.0.13+9 (build 21.0.13+9-LTS)\nOpenJDK 64-Bit Server VM Temurin-21.0.13+9 (build 21.0.13+9-LTS, mixed mode, sharing)",
+  "plan_name": "oid4vp-1final-verifier-haip-test-plan",
+  "variant": {
+   "credential_format": "sd_jwt_vc",
+   "response_mode": "direct_post.jwt"
+  },
+  "plan_id": "nOQ075JZjBnxH",
+  "alias": "oid4vp-lab-c4-6518fdc772e10759",
+  "export_zip_sha256": "42b92258e0804276d65a43e632313d970155712806747bdf34cc1f064c3aa051",
+  "export_zip_note": "raw export kept out of git (holds the synthetic issuer private key)"
+ },
+ "driver": {
+  "path": "tools/oidf-suite/driver/run_plan.py",
+  "sha256": "020b2876b529b5231b7e6c0a81db5d08fe4c01dbe89a73b5f0db0743d4bfb58c"
+ },
+ "host": {
+  "os": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "python": "3.14.6",
+  "docker": "client 29.8.2, server 29.8.2",
+  "orbstack": "Version: 2.2.5 (2020500)",
+  "openssl": "OpenSSL 3.5.9 29 Sep 2026 (Library: OpenSSL 3.5.9 29 Sep 2026)"
+ }
+}

@@ -1,0 +1,2283 @@
+[
+ {
+  "_id": "8AviYds05yNII1E-ekcRsTrKGpkfRqxegki0LhWEQBepk55d",
+  "msg": "Test instance 8AviYds05yNII1E created",
+  "result": "INFO",
+  "baseUrl": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b",
+  "variant": {
+   "credential_format": "sd_jwt_vc",
+   "request_method": "request_uri_signed",
+   "vp_profile": "plain_vp",
+   "client_id_prefix": "x509_san_dns",
+   "response_mode": "direct_post.jwt"
+  },
+  "alias": "oid4vp-lab-c3-9bcef8f26a2d0c4b",
+  "description": "OID4VP security lab C3, local run, synthetic data only",
+  "planId": "u7YNnUcFmNcfQ",
+  "config": {
+   "alias": "oid4vp-lab-c3-9bcef8f26a2d0c4b",
+   "description": "OID4VP security lab C3, local run, synthetic data only",
+   "client": {
+    "client_id": "host.docker.internal",
+    "request_object_trust_anchor_pem": "-----BEGIN CERTIFICATE-----\nMIIB0TCCAXigAwIBAgIBATAKBggqhkjOPQQDAjBPMRwwGgYDVQQKDBNPSUQ0VlAg\nc2VjdXJpdHkgbGFiMS8wLQYDVQQDDCZTWU5USEVUSUMgY29uZm9ybWFuY2UgQ0Eg\nLSBuZXZlciB0cnVzdDAeFw0yNjExMDEwMDAwMDBaFw0zNjExMDEwMDAwMDBaME8x\nHDAaBgNVBAoME09JRDRWUCBzZWN1cml0eSBsYWIxLzAtBgNVBAMMJlNZTlRIRVRJ\nQyBjb25mb3JtYW5jZSBDQSAtIG5ldmVyIHRydXN0MFkwEwYHKoZIzj0CAQYIKoZI\nzj0DAQcDQgAE2ckwe/GLRofWBfSrG13b2kdbyhbnIMSF4+IiqOsYiW0J/7s6gTno\nUzt84Gut71SYwuxR7e2d3Gy+D+SJf8ocs6NFMEMwEgYDVR0TAQH/BAgwBgEB/wIB\nADAOBgNVHQ8BAf8EBAMCAQYwHQYDVR0OBBYEFFppeEhKxrEXHJtd7/TO6MnCu1Lr\nMAoGCCqGSM49BAMCA0cAMEQCIFq6/DtYmd9bOuCcY86Jyw0GOnQF0yeST/OyNEB+\n2idUAiA18uZHfKOvEiiYU5pVDfzAK0D7NljhvXxUVBq52a0Dpg==\n-----END CERTIFICATE-----\n"
+   },
+   "credential": {
+    "signing_jwk": {
+     "kty": "EC",
+     "crv": "P-256",
+     "alg": "ES256",
+     "x": "F0M28IStyCyfS4W_rq3IxtuKGgeD68gij3X01jThzmI",
+     "y": "xLEncM0EpOa1CJT_gMZTchaoe85votOGdAEg5HrrCKE",
+     "d": "REDACTED",
+     "x5c": [
+      "MIIBvDCCAWOgAwIBAgIUVeDppH6FHFpXTAAkV0Bg5LOmjUAwCgYIKoZIzj0EAwIwNDEyMDAGA1UEAwwpU1lOVEhFVElDIE9JRDRWUCBsYWIgaXNzdWVyIC0gbmV2ZXIgdHJ1c3QwHhcNMjYxMTI1MDQ0NjI4WhcNMjYxMTI3MDQ0NjI4WjA0MTIwMAYDVQQDDClTWU5USEVUSUMgT0lENFZQIGxhYiBpc3N1ZXIgLSBuZXZlciB0cnVzdDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABBdDNvCErcgsn0uFv66tyMbbihoHg+vIIo919NY04c5ixLEncM0EpOa1CJT/gMZTchaoe85votOGdAEg5HrrCKGjUzBRMB0GA1UdDgQWBBTbmzEWp1Km2/p93oXFqbgL7Rs4pTAfBgNVHSMEGDAWgBTbmzEWp1Km2/p93oXFqbgL7Rs4pTAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMCA0cAMEQCIAhwGD/moEkR+9Jugy05weog8Ki/JAsc/ESW2twd2ScsAiBQ1Eg5oI/ggCMerO7A1uHExwQ3MkLCQksxao87UXwXhA=="
+     ]
+    }
+   }
+  },
+  "baseMtlsUrl": "https://localhost:8444/test-mtls/a/oid4vp-lab-c3-9bcef8f26a2d0c4b",
+  "testName": "oid4vp-1final-verifier-invalid-kb-jwt-nonce",
+  "testId": "8AviYds05yNII1E",
+  "src": "TEST-RUNNER",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991413
+ },
+ {
+  "_id": "8AviYds05yNII1E-fTYLryNqYbKetbGBALvUlI33VJaIxmeM",
+  "server_configuration": {
+   "issuer": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+   "token_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/token",
+   "jwks_uri": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/jwks",
+   "userinfo_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/userinfo",
+   "registration_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/register",
+   "scopes_supported": [
+    "openid",
+    "phone",
+    "profile",
+    "email",
+    "address",
+    "offline_access"
+   ],
+   "response_types_supported": [
+    "code",
+    "id_token code",
+    "token code id_token",
+    "id_token",
+    "token id_token",
+    "token code",
+    "token"
+   ],
+   "response_modes_supported": [
+    "query",
+    "fragment",
+    "form_post"
+   ],
+   "token_endpoint_auth_methods_supported": [
+    "client_secret_basic",
+    "client_secret_post",
+    "client_secret_jwt",
+    "private_key_jwt"
+   ],
+   "token_endpoint_auth_signing_alg_values_supported": [
+    "HS256",
+    "HS384",
+    "HS512",
+    "RS256",
+    "RS384",
+    "RS512",
+    "PS256",
+    "PS384",
+    "PS512",
+    "ES256",
+    "ES256K",
+    "ES384",
+    "ES512",
+    "EdDSA",
+    "Ed25519",
+    "Ed448"
+   ],
+   "grant_types_supported": [
+    "authorization_code",
+    "implicit"
+   ],
+   "claims_parameter_supported": true,
+   "acr_values_supported": [
+    "PASSWORD"
+   ],
+   "subject_types_supported": [
+    "public",
+    "pairwise"
+   ],
+   "claim_types_supported": [
+    "normal",
+    "aggregated",
+    "distributed"
+   ],
+   "claims_supported": [
+    "sub",
+    "name",
+    "given_name",
+    "family_name",
+    "middle_name",
+    "nickname",
+    "preferred_username",
+    "gender",
+    "birthdate",
+    "address",
+    "zoneinfo",
+    "locale",
+    "phone_number",
+    "phone_number_verified",
+    "email",
+    "email_verified",
+    "website",
+    "profile",
+    "updated_at",
+    "txn"
+   ],
+   "id_token_signing_alg_values_supported": [
+    "none",
+    "RS256",
+    "RS384",
+    "RS512",
+    "PS256",
+    "PS384",
+    "PS512",
+    "ES256",
+    "ES256K",
+    "ES384",
+    "ES512",
+    "EdDSA",
+    "Ed25519",
+    "Ed448"
+   ],
+   "id_token_encryption_alg_values_supported": [
+    "RSA1_5",
+    "RSA-OAEP",
+    "RSA-OAEP-256",
+    "RSA-OAEP-384",
+    "RSA-OAEP-512",
+    "ECDH-ES",
+    "ECDH-ES+A128KW",
+    "ECDH-ES+A192KW",
+    "ECDH-ES+A256KW",
+    "A128KW",
+    "A192KW",
+    "A256KW",
+    "A128GCMKW",
+    "A192GCMKW",
+    "A256GCMKW",
+    "dir"
+   ],
+   "id_token_encryption_enc_values_supported": [
+    "A128CBC-HS256",
+    "A192CBC-HS384",
+    "A256CBC-HS512",
+    "A128GCM",
+    "A192GCM",
+    "A256GCM"
+   ],
+   "request_object_signing_alg_values_supported": [
+    "none",
+    "RS256",
+    "RS384",
+    "RS512",
+    "PS256",
+    "PS384",
+    "PS512",
+    "ES256",
+    "ES256K",
+    "ES384",
+    "ES512",
+    "EdDSA",
+    "Ed25519",
+    "Ed448"
+   ],
+   "request_object_encryption_alg_values_supported": [
+    "RSA1_5",
+    "RSA-OAEP",
+    "RSA-OAEP-256",
+    "RSA-OAEP-384",
+    "RSA-OAEP-512",
+    "ECDH-ES",
+    "ECDH-ES+A128KW",
+    "ECDH-ES+A192KW",
+    "ECDH-ES+A256KW",
+    "A128KW",
+    "A192KW",
+    "A256KW",
+    "A128GCMKW",
+    "A192GCMKW",
+    "A256GCMKW",
+    "dir"
+   ],
+   "request_object_encryption_enc_values_supported": [
+    "A128CBC-HS256",
+    "A192CBC-HS384",
+    "A256CBC-HS512",
+    "A128GCM",
+    "A192GCM",
+    "A256GCM"
+   ],
+   "userinfo_signing_alg_values_supported": [
+    "RS256",
+    "RS384",
+    "RS512",
+    "PS256",
+    "PS384",
+    "PS512",
+    "ES256",
+    "ES256K",
+    "ES384",
+    "ES512",
+    "EdDSA",
+    "Ed25519",
+    "Ed448"
+   ],
+   "userinfo_encryption_alg_values_supported": [
+    "RSA1_5",
+    "RSA-OAEP",
+    "RSA-OAEP-256",
+    "RSA-OAEP-384",
+    "RSA-OAEP-512",
+    "ECDH-ES",
+    "ECDH-ES+A128KW",
+    "ECDH-ES+A192KW",
+    "ECDH-ES+A256KW",
+    "A128KW",
+    "A192KW",
+    "A256KW",
+    "A128GCMKW",
+    "A192GCMKW",
+    "A256GCMKW",
+    "dir"
+   ],
+   "userinfo_encryption_enc_values_supported": [
+    "A128CBC-HS256",
+    "A192CBC-HS384",
+    "A256CBC-HS512",
+    "A128GCM",
+    "A192GCM",
+    "A256GCM"
+   ]
+  },
+  "msg": "Generated default server configuration",
+  "result": "SUCCESS",
+  "testId": "8AviYds05yNII1E",
+  "src": "OIDCCGenerateServerConfiguration",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991413
+ },
+ {
+  "_id": "8AviYds05yNII1E-cecKuuxQzrr0LCQFkOxuJjAsxR1WZraU",
+  "msg": "Enabled request_uri support in server configuration",
+  "server": {
+   "issuer": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+   "token_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/token",
+   "jwks_uri": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/jwks",
+   "userinfo_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/userinfo",
+   "registration_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/register",
+   "scopes_supported": [
+    "openid",
+    "phone",
+    "profile",
+    "email",
+    "address",
+    "offline_access"
+   ],
+   "response_types_supported": [
+    "code",
+    "id_token code",
+    "token code id_token",
+    "id_token",
+    "token id_token",
+    "token code",
+    "token"
+   ],
+   "response_modes_supported": [
+    "query",
+    "fragment",
+    "form_post"
+   ],
+   "token_endpoint_auth_methods_supported": [
+    "client_secret_basic",
+    "client_secret_post",
+    "client_secret_jwt",
+    "private_key_jwt"
+   ],
+   "token_endpoint_auth_signing_alg_values_supported": [
+    "HS256",
+    "HS384",
+    "HS512",
+    "RS256",
+    "RS384",
+    "RS512",
+    "PS256",
+    "PS384",
+    "PS512",
+    "ES256",
+    "ES256K",
+    "ES384",
+    "ES512",
+    "EdDSA",
+    "Ed25519",
+    "Ed448"
+   ],
+   "grant_types_supported": [
+    "authorization_code",
+    "implicit"
+   ],
+   "claims_parameter_supported": true,
+   "acr_values_supported": [
+    "PASSWORD"
+   ],
+   "subject_types_supported": [
+    "public",
+    "pairwise"
+   ],
+   "claim_types_supported": [
+    "normal",
+    "aggregated",
+    "distributed"
+   ],
+   "claims_supported": [
+    "sub",
+    "name",
+    "given_name",
+    "family_name",
+    "middle_name",
+    "nickname",
+    "preferred_username",
+    "gender",
+    "birthdate",
+    "address",
+    "zoneinfo",
+    "locale",
+    "phone_number",
+    "phone_number_verified",
+    "email",
+    "email_verified",
+    "website",
+    "profile",
+    "updated_at",
+    "txn"
+   ],
+   "id_token_signing_alg_values_supported": [
+    "none",
+    "RS256",
+    "RS384",
+    "RS512",
+    "PS256",
+    "PS384",
+    "PS512",
+    "ES256",
+    "ES256K",
+    "ES384",
+    "ES512",
+    "EdDSA",
+    "Ed25519",
+    "Ed448"
+   ],
+   "id_token_encryption_alg_values_supported": [
+    "RSA1_5",
+    "RSA-OAEP",
+    "RSA-OAEP-256",
+    "RSA-OAEP-384",
+    "RSA-OAEP-512",
+    "ECDH-ES",
+    "ECDH-ES+A128KW",
+    "ECDH-ES+A192KW",
+    "ECDH-ES+A256KW",
+    "A128KW",
+    "A192KW",
+    "A256KW",
+    "A128GCMKW",
+    "A192GCMKW",
+    "A256GCMKW",
+    "dir"
+   ],
+   "id_token_encryption_enc_values_supported": [
+    "A128CBC-HS256",
+    "A192CBC-HS384",
+    "A256CBC-HS512",
+    "A128GCM",
+    "A192GCM",
+    "A256GCM"
+   ],
+   "request_object_signing_alg_values_supported": [
+    "none",
+    "RS256",
+    "RS384",
+    "RS512",
+    "PS256",
+    "PS384",
+    "PS512",
+    "ES256",
+    "ES256K",
+    "ES384",
+    "ES512",
+    "EdDSA",
+    "Ed25519",
+    "Ed448"
+   ],
+   "request_object_encryption_alg_values_supported": [
+    "RSA1_5",
+    "RSA-OAEP",
+    "RSA-OAEP-256",
+    "RSA-OAEP-384",
+    "RSA-OAEP-512",
+    "ECDH-ES",
+    "ECDH-ES+A128KW",
+    "ECDH-ES+A192KW",
+    "ECDH-ES+A256KW",
+    "A128KW",
+    "A192KW",
+    "A256KW",
+    "A128GCMKW",
+    "A192GCMKW",
+    "A256GCMKW",
+    "dir"
+   ],
+   "request_object_encryption_enc_values_supported": [
+    "A128CBC-HS256",
+    "A192CBC-HS384",
+    "A256CBC-HS512",
+    "A128GCM",
+    "A192GCM",
+    "A256GCM"
+   ],
+   "userinfo_signing_alg_values_supported": [
+    "RS256",
+    "RS384",
+    "RS512",
+    "PS256",
+    "PS384",
+    "PS512",
+    "ES256",
+    "ES256K",
+    "ES384",
+    "ES512",
+    "EdDSA",
+    "Ed25519",
+    "Ed448"
+   ],
+   "userinfo_encryption_alg_values_supported": [
+    "RSA1_5",
+    "RSA-OAEP",
+    "RSA-OAEP-256",
+    "RSA-OAEP-384",
+    "RSA-OAEP-512",
+    "ECDH-ES",
+    "ECDH-ES+A128KW",
+    "ECDH-ES+A192KW",
+    "ECDH-ES+A256KW",
+    "A128KW",
+    "A192KW",
+    "A256KW",
+    "A128GCMKW",
+    "A192GCMKW",
+    "A256GCMKW",
+    "dir"
+   ],
+   "userinfo_encryption_enc_values_supported": [
+    "A128CBC-HS256",
+    "A192CBC-HS384",
+    "A256CBC-HS512",
+    "A128GCM",
+    "A192GCM",
+    "A256GCM"
+   ],
+   "request_uri_parameter_supported": true,
+   "require_request_uri_registration": false
+  },
+  "requirements": [
+   "OIDCC-6.2"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "SetRequestUriParameterSupportedToTrueInServerConfiguration",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991414
+ },
+ {
+  "_id": "8AviYds05yNII1E-nEfJr04lDqWYUoA6jmYebJwUB1d0sc8H",
+  "client_id": "host.docker.internal",
+  "request_object_trust_anchor_pem": "-----BEGIN CERTIFICATE-----\nMIIB0TCCAXigAwIBAgIBATAKBggqhkjOPQQDAjBPMRwwGgYDVQQKDBNPSUQ0VlAg\nc2VjdXJpdHkgbGFiMS8wLQYDVQQDDCZTWU5USEVUSUMgY29uZm9ybWFuY2UgQ0Eg\nLSBuZXZlciB0cnVzdDAeFw0yNjExMDEwMDAwMDBaFw0zNjExMDEwMDAwMDBaME8x\nHDAaBgNVBAoME09JRDRWUCBzZWN1cml0eSBsYWIxLzAtBgNVBAMMJlNZTlRIRVRJ\nQyBjb25mb3JtYW5jZSBDQSAtIG5ldmVyIHRydXN0MFkwEwYHKoZIzj0CAQYIKoZI\nzj0DAQcDQgAE2ckwe/GLRofWBfSrG13b2kdbyhbnIMSF4+IiqOsYiW0J/7s6gTno\nUzt84Gut71SYwuxR7e2d3Gy+D+SJf8ocs6NFMEMwEgYDVR0TAQH/BAgwBgEB/wIB\nADAOBgNVHQ8BAf8EBAMCAQYwHQYDVR0OBBYEFFppeEhKxrEXHJtd7/TO6MnCu1Lr\nMAoGCCqGSM49BAMCA0cAMEQCIFq6/DtYmd9bOuCcY86Jyw0GOnQF0yeST/OyNEB+\n2idUAiA18uZHfKOvEiiYU5pVDfzAK0D7NljhvXxUVBq52a0Dpg==\n-----END CERTIFICATE-----\n",
+  "msg": "Found a static client object",
+  "result": "SUCCESS",
+  "testId": "8AviYds05yNII1E",
+  "src": "OIDCCGetStaticClientConfigurationForRPTests",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991416
+ },
+ {
+  "_id": "8AviYds05yNII1E-d9NiPnDk21FuvbKHBUWKVvpTEr5oGX0W",
+  "msg": "Set client id to include the client id scheme",
+  "result": "SUCCESS",
+  "requirements": [
+   "OID4VP-1FINAL-5.9.3"
+  ],
+  "new_client_id": "x509_san_dns:host.docker.internal",
+  "testId": "8AviYds05yNII1E",
+  "src": "OID4VPSetClientIdToIncludeClientIdScheme",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991418
+ },
+ {
+  "_id": "8AviYds05yNII1E-8gq47nOUHjQZIFmBx3yomnTmQor6WuM2",
+  "trust_anchor_pem": "-----BEGIN CERTIFICATE-----\nMIIB0TCCAXigAwIBAgIBATAKBggqhkjOPQQDAjBPMRwwGgYDVQQKDBNPSUQ0VlAg\nc2VjdXJpdHkgbGFiMS8wLQYDVQQDDCZTWU5USEVUSUMgY29uZm9ybWFuY2UgQ0Eg\nLSBuZXZlciB0cnVzdDAeFw0yNjExMDEwMDAwMDBaFw0zNjExMDEwMDAwMDBaME8x\nHDAaBgNVBAoME09JRDRWUCBzZWN1cml0eSBsYWIxLzAtBgNVBAMMJlNZTlRIRVRJ\nQyBjb25mb3JtYW5jZSBDQSAtIG5ldmVyIHRydXN0MFkwEwYHKoZIzj0CAQYIKoZI\nzj0DAQcDQgAE2ckwe/GLRofWBfSrG13b2kdbyhbnIMSF4+IiqOsYiW0J/7s6gTno\nUzt84Gut71SYwuxR7e2d3Gy+D+SJf8ocs6NFMEMwEgYDVR0TAQH/BAgwBgEB/wIB\nADAOBgNVHQ8BAf8EBAMCAQYwHQYDVR0OBBYEFFppeEhKxrEXHJtd7/TO6MnCu1Lr\nMAoGCCqGSM49BAMCA0cAMEQCIFq6/DtYmd9bOuCcY86Jyw0GOnQF0yeST/OyNEB+\n2idUAiA18uZHfKOvEiiYU5pVDfzAK0D7NljhvXxUVBq52a0Dpg==\n-----END CERTIFICATE-----\n",
+  "msg": "Registered client request object trust anchor certificate",
+  "testId": "8AviYds05yNII1E",
+  "src": "RegisterClientRequestObjectTrustAnchor",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991418
+ },
+ {
+  "_id": "8AviYds05yNII1E-zttxUyzRLJwtXUT6rcHFOr0yk5oL25AR",
+  "testId": "8AviYds05yNII1E",
+  "src": "RegisterRical",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991419,
+  "msg": "No RICAL configured, skipping RICAL-based verifier trust checks"
+ },
+ {
+  "_id": "8AviYds05yNII1E-FDBHZmNU3eNaNWFJhJVL5t99fZzEWxW5",
+  "msg": "Skipped evaluation due to missing required string: rical_url",
+  "result": "INFO",
+  "requirements": [
+   "ISO18013-5-F.3.2.1"
+  ],
+  "expected": "rical_url",
+  "testId": "8AviYds05yNII1E",
+  "src": "CallRicalEndpoint",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991420
+ },
+ {
+  "_id": "8AviYds05yNII1E-t9do6ifSN64wY7NkcmPSgFiLp4CLVGp0",
+  "msg": "Skipped evaluation due to missing required object: rical",
+  "result": "INFO",
+  "mapped": null,
+  "requirements": [
+   "ISO18013-5-F.3.2.1"
+  ],
+  "expected": "rical",
+  "testId": "8AviYds05yNII1E",
+  "src": "ParseRical",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991420
+ },
+ {
+  "_id": "8AviYds05yNII1E-SvbLPLJpRvxtSVxHYxOuO8kGkMDmpVN6",
+  "msg": "Skipped evaluation due to missing required object: rical",
+  "result": "INFO",
+  "mapped": null,
+  "requirements": [],
+  "expected": "rical",
+  "testId": "8AviYds05yNII1E",
+  "src": "DumpRicalCborDiagnostics",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991421
+ },
+ {
+  "_id": "8AviYds05yNII1E-uRG7d3Hrg58RSY9yFDVgb9s5t1Xq9aNu",
+  "msg": "Skipped evaluation due to missing required object: rical",
+  "result": "INFO",
+  "mapped": null,
+  "requirements": [
+   "ISO18013-5-F.3.2"
+  ],
+  "expected": "rical",
+  "testId": "8AviYds05yNII1E",
+  "src": "ValidateRicalSignature",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991423
+ },
+ {
+  "_id": "8AviYds05yNII1E-lcOKvwSOdLDGipOYDeAWVj861oIsHVzm",
+  "msg": "Skipped evaluation due to missing required object: rical",
+  "result": "INFO",
+  "mapped": null,
+  "requirements": [
+   "ISO18013-5-F.3.2.5"
+  ],
+  "expected": "rical",
+  "testId": "8AviYds05yNII1E",
+  "src": "ValidateRicalSignerCertificate",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991425
+ },
+ {
+  "_id": "8AviYds05yNII1E-NfqZ3YiwTeQZma4K3y1J7Bp8ZCytie38",
+  "msg": "Skipped evaluation due to missing required object: rical",
+  "result": "INFO",
+  "mapped": null,
+  "requirements": [
+   "ISO18013-5-F.3.2.1"
+  ],
+  "expected": "rical",
+  "testId": "8AviYds05yNII1E",
+  "src": "ValidateRicalStructure",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991427
+ },
+ {
+  "_id": "8AviYds05yNII1E-ruqfqddxbBDpAzSD7dA8uUNFHS2zKvWJ",
+  "testId": "8AviYds05yNII1E",
+  "src": "oid4vp-1final-verifier-invalid-kb-jwt-nonce",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991432,
+  "msg": "Setup Done"
+ },
+ {
+  "_id": "8AviYds05yNII1E-SxkiSHBPYIfqFnRpB5UV1pYIv3tmu3mV",
+  "msg": "Incoming HTTP request to /test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+  "incoming_headers": {
+   "host": "localhost",
+   "x-forwarded-uri": "/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize?client_id=x509_san_dns%3Ahost.docker.internal&request_uri=https%3A%2F%2Fhost.docker.internal%3A18444%2Flab%2Fv1%2Frequests%2FVHGCmm0FKQnSeyD9qOMQQg",
+   "forwarded": "by=192.168.223.4;for=192.168.223.1;host=localhost;proto=https",
+   "accept-encoding": "identity",
+   "user-agent": "Python-urllib/3.14"
+  },
+  "incoming_path": "/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/authorize",
+  "incoming_body_form_params": null,
+  "incoming_method": "GET",
+  "incoming_tls_version": "TLSv1.3",
+  "incoming_tls_cert": null,
+  "incoming_query_string_params": {
+   "client_id": "x509_san_dns:host.docker.internal",
+   "request_uri": "https://host.docker.internal:18444/lab/v1/requests/VHGCmm0FKQnSeyD9qOMQQg"
+  },
+  "incoming_body": null,
+  "incoming_tls_chain": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "http": "incoming",
+  "incoming_body_json_parse_error": null,
+  "incoming_tls_cipher": "TLS_AES_256_GCM_SHA384",
+  "incoming_body_json": null,
+  "testId": "8AviYds05yNII1E",
+  "src": "oid4vp-1final-verifier-invalid-kb-jwt-nonce",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991481
+ },
+ {
+  "_id": "8AviYds05yNII1E-gm9V8ByKUI5rQUZqA5s3oMNZmaOQi3gw",
+  "msg": "Authorization endpoint",
+  "startBlock": true,
+  "blockId": "9b9b9d",
+  "testId": "8AviYds05yNII1E",
+  "src": "-START-BLOCK-",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991484
+ },
+ {
+  "_id": "8AviYds05yNII1E-GlG26SUH94NVAsE0ja6wK83RTTYhFvgy",
+  "msg": "Fetching request object from request_uri",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "JAR-5.2.3"
+  ],
+  "request_uri": "https://host.docker.internal:18444/lab/v1/requests/VHGCmm0FKQnSeyD9qOMQQg",
+  "testId": "8AviYds05yNII1E",
+  "src": "FetchRequestUriAndExtractRequestObject",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991485
+ },
+ {
+  "_id": "8AviYds05yNII1E-x6sW9JlXYysnuxEbXZcgDKSr46PiTufx",
+  "request_uri": "https://host.docker.internal:18444/lab/v1/requests/VHGCmm0FKQnSeyD9qOMQQg",
+  "request_method": "GET",
+  "request_headers": {
+   "Accept": "text/plain, application/json, application/yaml, application/*+json, */*",
+   "Content-Length": "0"
+  },
+  "request_body": "",
+  "msg": "HTTP request",
+  "http": "request",
+  "blockId": "9b9b9d",
+  "testId": "8AviYds05yNII1E",
+  "src": "FetchRequestUriAndExtractRequestObject",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991488
+ },
+ {
+  "_id": "8AviYds05yNII1E-aifNgPji54QCKjqWfn1re40Fnb6FoAOk",
+  "response_status_code": "200 OK",
+  "response_status_text": "OK",
+  "response_headers": {
+   "content-type": "application/oauth-authz-req+jwt",
+   "content-length": "2464",
+   "date": "Wed, 25 Nov 2026 04:46:31 GMT"
+  },
+  "response_body": "eyJhbGciOiJFUzI1NiIsInR5cCI6Im9hdXRoLWF1dGh6LXJlcStqd3QiLCJ4NWMiOlsiTUlJQ1BUQ0NBZU9nQXdJQkFnSUJBakFLQmdncWhrak9QUVFEQWpCUE1Sd3dHZ1lEVlFRS0RCTlBTVVEwVmxBZ2MyVmpkWEpwZEhrZ2JHRmlNUzh3TFFZRFZRUUREQ1pUV1U1VVNFVlVTVU1nWTI5dVptOXliV0Z1WTJVZ1EwRWdMU0J1WlhabGNpQjBjblZ6ZERBZUZ3MHlOakV4TURFd01EQXdNREJhRncwek1URXhNREV3TURBd01EQmFNRnd4T3pBNUJnTlZCQW9NTWs5SlJEUldVQ0J6WldOMWNtbDBlU0JzWVdJZ1UxbE9WRWhGVkVsRElHTnZibVp2Y20xaGJtTmxJRlpsY21sbWFXVnlNUjB3R3dZRFZRUUREQlJvYjNOMExtUnZZMnRsY2k1cGJuUmxjbTVoYkRCWk1CTUdCeXFHU000OUFnRUdDQ3FHU000OUF3RUhBMElBQkZuSW1HNWNidndyOFdzZVQ4b2RsbU5xamk4MFZGcjRxV0RpSnI2blpMTlM4NkZlNkxNYVV0aUZPbHFLU1FFbmVtWVpEQkE3U2VlNDYrd2pwNE4rZTlHamdhSXdnWjh3REFZRFZSMFRBUUgvQkFJd0FEQU9CZ05WSFE4QkFmOEVCQU1DQjRBd0V3WURWUjBsQkF3d0NnWUlLd1lCQlFVSEF3RXdLZ1lEVlIwUkJDTXdJWUlVYUc5emRDNWtiMk5yWlhJdWFXNTBaWEp1WVd5Q0NXeHZZMkZzYUc5emREQWRCZ05WSFE0RUZnUVVCRnFERTdlN3J0SGR5QnFtUHdrcUFjMTk3bEF3SHdZRFZSMGpCQmd3Rm9BVVdtbDRTRXJHc1JjY20xM3Y5TTdveWNLN1V1c3dDZ1lJS29aSXpqMEVBd0lEU0FBd1JRSWhBT2RTVmhIQVNUVlR1MWxVdE9qVFN2ZWQ0SVpzd2hMYnlXbVIzaS9XS3JSTEFpQVVqQWJZN2I2WkIyQ0pFMi81OWN0MEhzaUpwYlhDMWNVdUhIODViWDFEREE9PSJdfQ.eyJhdWQiOiJodHRwczovL3NlbGYtaXNzdWVkLm1lL3YyIiwiY2xpZW50X2lkIjoieDUwOV9zYW5fZG5zOmhvc3QuZG9ja2VyLmludGVybmFsIiwiY2xpZW50X21ldGFkYXRhIjp7ImVuY3J5cHRlZF9yZXNwb25zZV9lbmNfdmFsdWVzX3N1cHBvcnRlZCI6WyJBMTI4R0NNIiwiQTI1NkdDTSJdLCJqd2tzIjp7ImtleXMiOlt7ImFsZyI6IkVDREgtRVMiLCJjcnYiOiJQLTI1NiIsImtpZCI6Im1UbTJ5SllBbUJ5TlpQM3FmRWtydlEiLCJrdHkiOiJFQyIsInVzZSI6ImVuYyIsIngiOiJIbWI2amJLSzJVQ0txRXNyei1wWU5JQ0d0YlZUaXRxLUtORHZ0dGU1ay1JIiwieSI6ImMxeWdtVW1vaHJVV21ZNlpHREdpZlNIOVMtQ3hPd2poVWNZUGJmdEtnYTAifV19LCJ2cF9mb3JtYXRzX3N1cHBvcnRlZCI6eyJkYytzZC1qd3QiOnsia2Itand0X2FsZ192YWx1ZXMiOlsiRVMyNTYiXSwic2Qtand0X2FsZ192YWx1ZXMiOlsiRVMyNTYiXX19fSwiZGNxbF9xdWVyeSI6eyJjcmVkZW50aWFscyI6W3siY2xhaW1zIjpbeyJwYXRoIjpbImdpdmVuX25hbWUiXX0seyJwYXRoIjpbImZhbWlseV9uYW1lIl19LHsicGF0aCI6WyJiaXJ0aGRhdGUiXX1dLCJmb3JtYXQiOiJkYytzZC1qd3QiLCJpZCI6InBpZCIsIm1ldGEiOnsidmN0X3ZhbHVlcyI6WyJ1cm46ZXVkaTpwaWQ6MSJdfSwicmVxdWlyZV9jcnlwdG9ncmFwaGljX2hvbGRlcl9iaW5kaW5nIjp0cnVlfV19LCJleHAiOjE3OTU1ODIyOTIsImlhdCI6MTc5NTU4MTk5MSwibm9uY2UiOiItY05ZdnMzdzVXNUFLdE1fdDJ1dm1BIiwicmVzcG9uc2VfbW9kZSI6ImRpcmVjdF9wb3N0Lmp3dCIsInJlc3BvbnNlX3R5cGUiOiJ2cF90b2tlbiIsInJlc3BvbnNlX3VyaSI6Imh0dHBzOi8vaG9zdC5kb2NrZXIuaW50ZXJuYWw6MTg0NDQvbGFiL3YxL3Jlc3BvbnNlL085YTMzT3NTMDhfSU5vM2xTbWJmWHciLCJzdGF0ZSI6ImlnRjBpY3VrV3ZrbWVBTjRPcjRud3cifQ.9U8_3zpIbd9BRHVwFq8jwvRxMcvwC9s5SoYL5cy2pX2Q0iMa7Z7mV1q59pKJnmqLsd5xUJjf83wtQEOmpVJZnw",
+  "msg": "HTTP response",
+  "http": "response",
+  "blockId": "9b9b9d",
+  "testId": "8AviYds05yNII1E",
+  "src": "FetchRequestUriAndExtractRequestObject",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991500
+ },
+ {
+  "_id": "8AviYds05yNII1E-R90sARokERB9dt1784YIBPzg4B9BkVMe",
+  "msg": "Downloaded request object",
+  "blockId": "9b9b9d",
+  "request_object": "eyJhbGciOiJFUzI1NiIsInR5cCI6Im9hdXRoLWF1dGh6LXJlcStqd3QiLCJ4NWMiOlsiTUlJQ1BUQ0NBZU9nQXdJQkFnSUJBakFLQmdncWhrak9QUVFEQWpCUE1Sd3dHZ1lEVlFRS0RCTlBTVVEwVmxBZ2MyVmpkWEpwZEhrZ2JHRmlNUzh3TFFZRFZRUUREQ1pUV1U1VVNFVlVTVU1nWTI5dVptOXliV0Z1WTJVZ1EwRWdMU0J1WlhabGNpQjBjblZ6ZERBZUZ3MHlOakV4TURFd01EQXdNREJhRncwek1URXhNREV3TURBd01EQmFNRnd4T3pBNUJnTlZCQW9NTWs5SlJEUldVQ0J6WldOMWNtbDBlU0JzWVdJZ1UxbE9WRWhGVkVsRElHTnZibVp2Y20xaGJtTmxJRlpsY21sbWFXVnlNUjB3R3dZRFZRUUREQlJvYjNOMExtUnZZMnRsY2k1cGJuUmxjbTVoYkRCWk1CTUdCeXFHU000OUFnRUdDQ3FHU000OUF3RUhBMElBQkZuSW1HNWNidndyOFdzZVQ4b2RsbU5xamk4MFZGcjRxV0RpSnI2blpMTlM4NkZlNkxNYVV0aUZPbHFLU1FFbmVtWVpEQkE3U2VlNDYrd2pwNE4rZTlHamdhSXdnWjh3REFZRFZSMFRBUUgvQkFJd0FEQU9CZ05WSFE4QkFmOEVCQU1DQjRBd0V3WURWUjBsQkF3d0NnWUlLd1lCQlFVSEF3RXdLZ1lEVlIwUkJDTXdJWUlVYUc5emRDNWtiMk5yWlhJdWFXNTBaWEp1WVd5Q0NXeHZZMkZzYUc5emREQWRCZ05WSFE0RUZnUVVCRnFERTdlN3J0SGR5QnFtUHdrcUFjMTk3bEF3SHdZRFZSMGpCQmd3Rm9BVVdtbDRTRXJHc1JjY20xM3Y5TTdveWNLN1V1c3dDZ1lJS29aSXpqMEVBd0lEU0FBd1JRSWhBT2RTVmhIQVNUVlR1MWxVdE9qVFN2ZWQ0SVpzd2hMYnlXbVIzaS9XS3JSTEFpQVVqQWJZN2I2WkIyQ0pFMi81OWN0MEhzaUpwYlhDMWNVdUhIODViWDFEREE9PSJdfQ.eyJhdWQiOiJodHRwczovL3NlbGYtaXNzdWVkLm1lL3YyIiwiY2xpZW50X2lkIjoieDUwOV9zYW5fZG5zOmhvc3QuZG9ja2VyLmludGVybmFsIiwiY2xpZW50X21ldGFkYXRhIjp7ImVuY3J5cHRlZF9yZXNwb25zZV9lbmNfdmFsdWVzX3N1cHBvcnRlZCI6WyJBMTI4R0NNIiwiQTI1NkdDTSJdLCJqd2tzIjp7ImtleXMiOlt7ImFsZyI6IkVDREgtRVMiLCJjcnYiOiJQLTI1NiIsImtpZCI6Im1UbTJ5SllBbUJ5TlpQM3FmRWtydlEiLCJrdHkiOiJFQyIsInVzZSI6ImVuYyIsIngiOiJIbWI2amJLSzJVQ0txRXNyei1wWU5JQ0d0YlZUaXRxLUtORHZ0dGU1ay1JIiwieSI6ImMxeWdtVW1vaHJVV21ZNlpHREdpZlNIOVMtQ3hPd2poVWNZUGJmdEtnYTAifV19LCJ2cF9mb3JtYXRzX3N1cHBvcnRlZCI6eyJkYytzZC1qd3QiOnsia2Itand0X2FsZ192YWx1ZXMiOlsiRVMyNTYiXSwic2Qtand0X2FsZ192YWx1ZXMiOlsiRVMyNTYiXX19fSwiZGNxbF9xdWVyeSI6eyJjcmVkZW50aWFscyI6W3siY2xhaW1zIjpbeyJwYXRoIjpbImdpdmVuX25hbWUiXX0seyJwYXRoIjpbImZhbWlseV9uYW1lIl19LHsicGF0aCI6WyJiaXJ0aGRhdGUiXX1dLCJmb3JtYXQiOiJkYytzZC1qd3QiLCJpZCI6InBpZCIsIm1ldGEiOnsidmN0X3ZhbHVlcyI6WyJ1cm46ZXVkaTpwaWQ6MSJdfSwicmVxdWlyZV9jcnlwdG9ncmFwaGljX2hvbGRlcl9iaW5kaW5nIjp0cnVlfV19LCJleHAiOjE3OTU1ODIyOTIsImlhdCI6MTc5NTU4MTk5MSwibm9uY2UiOiItY05ZdnMzdzVXNUFLdE1fdDJ1dm1BIiwicmVzcG9uc2VfbW9kZSI6ImRpcmVjdF9wb3N0Lmp3dCIsInJlc3BvbnNlX3R5cGUiOiJ2cF90b2tlbiIsInJlc3BvbnNlX3VyaSI6Imh0dHBzOi8vaG9zdC5kb2NrZXIuaW50ZXJuYWw6MTg0NDQvbGFiL3YxL3Jlc3BvbnNlL085YTMzT3NTMDhfSU5vM2xTbWJmWHciLCJzdGF0ZSI6ImlnRjBpY3VrV3ZrbWVBTjRPcjRud3cifQ.9U8_3zpIbd9BRHVwFq8jwvRxMcvwC9s5SoYL5cy2pX2Q0iMa7Z7mV1q59pKJnmqLsd5xUJjf83wtQEOmpVJZnw",
+  "requirements": [
+   "JAR-5.2.3"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "FetchRequestUriAndExtractRequestObject",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991501
+ },
+ {
+  "_id": "8AviYds05yNII1E-HyhZd0bQEHtElWolDaYRJiQ1f70o6Sah",
+  "value": "eyJhbGciOiJFUzI1NiIsInR5cCI6Im9hdXRoLWF1dGh6LXJlcStqd3QiLCJ4NWMiOlsiTUlJQ1BUQ0NBZU9nQXdJQkFnSUJBakFLQmdncWhrak9QUVFEQWpCUE1Sd3dHZ1lEVlFRS0RCTlBTVVEwVmxBZ2MyVmpkWEpwZEhrZ2JHRmlNUzh3TFFZRFZRUUREQ1pUV1U1VVNFVlVTVU1nWTI5dVptOXliV0Z1WTJVZ1EwRWdMU0J1WlhabGNpQjBjblZ6ZERBZUZ3MHlOakV4TURFd01EQXdNREJhRncwek1URXhNREV3TURBd01EQmFNRnd4T3pBNUJnTlZCQW9NTWs5SlJEUldVQ0J6WldOMWNtbDBlU0JzWVdJZ1UxbE9WRWhGVkVsRElHTnZibVp2Y20xaGJtTmxJRlpsY21sbWFXVnlNUjB3R3dZRFZRUUREQlJvYjNOMExtUnZZMnRsY2k1cGJuUmxjbTVoYkRCWk1CTUdCeXFHU000OUFnRUdDQ3FHU000OUF3RUhBMElBQkZuSW1HNWNidndyOFdzZVQ4b2RsbU5xamk4MFZGcjRxV0RpSnI2blpMTlM4NkZlNkxNYVV0aUZPbHFLU1FFbmVtWVpEQkE3U2VlNDYrd2pwNE4rZTlHamdhSXdnWjh3REFZRFZSMFRBUUgvQkFJd0FEQU9CZ05WSFE4QkFmOEVCQU1DQjRBd0V3WURWUjBsQkF3d0NnWUlLd1lCQlFVSEF3RXdLZ1lEVlIwUkJDTXdJWUlVYUc5emRDNWtiMk5yWlhJdWFXNTBaWEp1WVd5Q0NXeHZZMkZzYUc5emREQWRCZ05WSFE0RUZnUVVCRnFERTdlN3J0SGR5QnFtUHdrcUFjMTk3bEF3SHdZRFZSMGpCQmd3Rm9BVVdtbDRTRXJHc1JjY20xM3Y5TTdveWNLN1V1c3dDZ1lJS29aSXpqMEVBd0lEU0FBd1JRSWhBT2RTVmhIQVNUVlR1MWxVdE9qVFN2ZWQ0SVpzd2hMYnlXbVIzaS9XS3JSTEFpQVVqQWJZN2I2WkIyQ0pFMi81OWN0MEhzaUpwYlhDMWNVdUhIODViWDFEREE9PSJdfQ.eyJhdWQiOiJodHRwczovL3NlbGYtaXNzdWVkLm1lL3YyIiwiY2xpZW50X2lkIjoieDUwOV9zYW5fZG5zOmhvc3QuZG9ja2VyLmludGVybmFsIiwiY2xpZW50X21ldGFkYXRhIjp7ImVuY3J5cHRlZF9yZXNwb25zZV9lbmNfdmFsdWVzX3N1cHBvcnRlZCI6WyJBMTI4R0NNIiwiQTI1NkdDTSJdLCJqd2tzIjp7ImtleXMiOlt7ImFsZyI6IkVDREgtRVMiLCJjcnYiOiJQLTI1NiIsImtpZCI6Im1UbTJ5SllBbUJ5TlpQM3FmRWtydlEiLCJrdHkiOiJFQyIsInVzZSI6ImVuYyIsIngiOiJIbWI2amJLSzJVQ0txRXNyei1wWU5JQ0d0YlZUaXRxLUtORHZ0dGU1ay1JIiwieSI6ImMxeWdtVW1vaHJVV21ZNlpHREdpZlNIOVMtQ3hPd2poVWNZUGJmdEtnYTAifV19LCJ2cF9mb3JtYXRzX3N1cHBvcnRlZCI6eyJkYytzZC1qd3QiOnsia2Itand0X2FsZ192YWx1ZXMiOlsiRVMyNTYiXSwic2Qtand0X2FsZ192YWx1ZXMiOlsiRVMyNTYiXX19fSwiZGNxbF9xdWVyeSI6eyJjcmVkZW50aWFscyI6W3siY2xhaW1zIjpbeyJwYXRoIjpbImdpdmVuX25hbWUiXX0seyJwYXRoIjpbImZhbWlseV9uYW1lIl19LHsicGF0aCI6WyJiaXJ0aGRhdGUiXX1dLCJmb3JtYXQiOiJkYytzZC1qd3QiLCJpZCI6InBpZCIsIm1ldGEiOnsidmN0X3ZhbHVlcyI6WyJ1cm46ZXVkaTpwaWQ6MSJdfSwicmVxdWlyZV9jcnlwdG9ncmFwaGljX2hvbGRlcl9iaW5kaW5nIjp0cnVlfV19LCJleHAiOjE3OTU1ODIyOTIsImlhdCI6MTc5NTU4MTk5MSwibm9uY2UiOiItY05ZdnMzdzVXNUFLdE1fdDJ1dm1BIiwicmVzcG9uc2VfbW9kZSI6ImRpcmVjdF9wb3N0Lmp3dCIsInJlc3BvbnNlX3R5cGUiOiJ2cF90b2tlbiIsInJlc3BvbnNlX3VyaSI6Imh0dHBzOi8vaG9zdC5kb2NrZXIuaW50ZXJuYWw6MTg0NDQvbGFiL3YxL3Jlc3BvbnNlL085YTMzT3NTMDhfSU5vM2xTbWJmWHciLCJzdGF0ZSI6ImlnRjBpY3VrV3ZrbWVBTjRPcjRud3cifQ.9U8_3zpIbd9BRHVwFq8jwvRxMcvwC9s5SoYL5cy2pX2Q0iMa7Z7mV1q59pKJnmqLsd5xUJjf83wtQEOmpVJZnw",
+  "header": {
+   "x5c": [
+    "MIICPTCCAeOgAwIBAgIBAjAKBggqhkjOPQQDAjBPMRwwGgYDVQQKDBNPSUQ0VlAgc2VjdXJpdHkgbGFiMS8wLQYDVQQDDCZTWU5USEVUSUMgY29uZm9ybWFuY2UgQ0EgLSBuZXZlciB0cnVzdDAeFw0yNjExMDEwMDAwMDBaFw0zMTExMDEwMDAwMDBaMFwxOzA5BgNVBAoMMk9JRDRWUCBzZWN1cml0eSBsYWIgU1lOVEhFVElDIGNvbmZvcm1hbmNlIFZlcmlmaWVyMR0wGwYDVQQDDBRob3N0LmRvY2tlci5pbnRlcm5hbDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABFnImG5cbvwr8WseT8odlmNqji80VFr4qWDiJr6nZLNS86Fe6LMaUtiFOlqKSQEnemYZDBA7See46+wjp4N+e9GjgaIwgZ8wDAYDVR0TAQH/BAIwADAOBgNVHQ8BAf8EBAMCB4AwEwYDVR0lBAwwCgYIKwYBBQUHAwEwKgYDVR0RBCMwIYIUaG9zdC5kb2NrZXIuaW50ZXJuYWyCCWxvY2FsaG9zdDAdBgNVHQ4EFgQUBFqDE7e7rtHdyBqmPwkqAc197lAwHwYDVR0jBBgwFoAUWml4SErGsRccm13v9M7oycK7UuswCgYIKoZIzj0EAwIDSAAwRQIhAOdSVhHASTVTu1lUtOjTSved4IZswhLbyWmR3i/WKrRLAiAUjAbY7b6ZB2CJE2/59ct0HsiJpbXC1cUuHH85bX1DDA=="
+   ],
+   "typ": "oauth-authz-req+jwt",
+   "alg": "ES256"
+  },
+  "claims": {
+   "response_uri": "https://host.docker.internal:18444/lab/v1/response/O9a33OsS08_INo3lSmbfXw",
+   "aud": "https://self-issued.me/v2",
+   "response_type": "vp_token",
+   "dcql_query": {
+    "credentials": [
+     {
+      "claims": [
+       {
+        "path": [
+         "given_name"
+        ]
+       },
+       {
+        "path": [
+         "family_name"
+        ]
+       },
+       {
+        "path": [
+         "birthdate"
+        ]
+       }
+      ],
+      "format": "dc+sd-jwt",
+      "id": "pid",
+      "meta": {
+       "vct_values": [
+        "urn:eudi:pid:1"
+       ]
+      },
+      "require_cryptographic_holder_binding": true
+     }
+    ]
+   },
+   "state": "igF0icukWvkmeAN4Or4nww",
+   "exp": 1795582292,
+   "iat": 1795581991,
+   "nonce": "-cNYvs3w5W5AKtM_t2uvmA",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "client_metadata": {
+    "encrypted_response_enc_values_supported": [
+     "A128GCM",
+     "A256GCM"
+    ],
+    "jwks": {
+     "keys": [
+      {
+       "alg": "ECDH-ES",
+       "crv": "P-256",
+       "kid": "mTm2yJYAmByNZP3qfEkrvQ",
+       "kty": "EC",
+       "use": "enc",
+       "x": "Hmb6jbKK2UCKqEsrz-pYNICGtbVTitq-KNDvtte5k-I",
+       "y": "c1ygmUmohrUWmY6ZGDGifSH9S-CxOwjhUcYPbftKga0"
+      }
+     ]
+    },
+    "vp_formats_supported": {
+     "dc+sd-jwt": {
+      "kb-jwt_alg_values": [
+       "ES256"
+      ],
+      "sd-jwt_alg_values": [
+       "ES256"
+      ]
+     }
+    }
+   },
+   "response_mode": "direct_post.jwt"
+  },
+  "requirements": [
+   "JAR-5.2.3"
+  ],
+  "msg": "Parsed request object",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "testId": "8AviYds05yNII1E",
+  "src": "FetchRequestUriAndExtractRequestObject",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991502
+ },
+ {
+  "_id": "8AviYds05yNII1E-QuNbhrmspGfak6hDVAZKxudItBpIC3WR",
+  "msg": "request_uri is a https url",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "JAR-5.2"
+  ],
+  "request_uri": "https://host.docker.internal:18444/lab/v1/requests/VHGCmm0FKQnSeyD9qOMQQg",
+  "testId": "8AviYds05yNII1E",
+  "src": "EnsureRequestUriIsHttps",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991504
+ },
+ {
+  "_id": "8AviYds05yNII1E-lMaLtJkRWQUB3upn6PCUUSIgcaUD7gnc",
+  "msg": "request_uri does not contain a fragment",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "request_uri": "https://host.docker.internal:18444/lab/v1/requests/VHGCmm0FKQnSeyD9qOMQQg",
+  "testId": "8AviYds05yNII1E",
+  "src": "EnsureRequestUriHasNoFragment",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991504
+ },
+ {
+  "_id": "8AviYds05yNII1E-cNRIMy2IIKNNNKpyFQBJK9EeScMypTkJ",
+  "msg": "Request object typ header is valid",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "typ": "oauth-authz-req+jwt",
+  "requirements": [
+   "OID4VP-1FINAL-5"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "ValidateRequestObjectTypIsOAuthQauthReqJwt",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991505
+ },
+ {
+  "_id": "8AviYds05yNII1E-MRmX9ie46To8V3sH3WkSNRkjzMAGABNz",
+  "msg": "Request object contains a valid exp claim, expiry time",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "RFC7519-4.1.4"
+  ],
+  "exp": "Nov 25, 2026, 4:51:32\u202fAM",
+  "testId": "8AviYds05yNII1E",
+  "src": "OIDCCValidateRequestObjectExp",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991506
+ },
+ {
+  "_id": "8AviYds05yNII1E-tUHWinOXvTlbZWnzk7DPG4Ad7hb04dP1",
+  "msg": "iat claim is valid",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OIDCC-6.1"
+  ],
+  "iat": 1795581991,
+  "testId": "8AviYds05yNII1E",
+  "src": "ValidateRequestObjectIat",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991507
+ },
+ {
+  "_id": "8AviYds05yNII1E-hXWf4eKSrSeNIHRMOFjzoTswuVYcxdea",
+  "msg": "None of the claims expected to have numeric values, have null values",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OIDCC-13.3"
+  ],
+  "numeric_claims": [
+   "max_age"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "EnsureNumericRequestObjectClaimsAreNotNull",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991507
+ },
+ {
+  "_id": "8AviYds05yNII1E-6J6VX5UyIkImGEwoApacVjyBfatPMen5",
+  "msg": "Request object does not contain a max_age claim",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OIDCC-13.3"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "ValidateRequestObjectMaxAge",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991508
+ },
+ {
+  "_id": "8AviYds05yNII1E-XNOdawQ2Mci7qSvBHueDG3Nhyi8Nc0lf",
+  "msg": "Request object does not contain request or request_uri",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OIDCC-6.1"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "EnsureRequestObjectDoesNotContainRequestOrRequestUri",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991508
+ },
+ {
+  "_id": "8AviYds05yNII1E-6oFPcVaB4Z8xaHozl1jFHE2DMyBcZk0J",
+  "msg": "Request object does not contain Client Id in sub",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "JAR-10.8"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "EnsureRequestObjectDoesNotContainSubWithClientId",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991509
+ },
+ {
+  "_id": "8AviYds05yNII1E-F3qNr6vzu0VgrH1UiyuNpmbFXHo6qQmM",
+  "msg": "Request object does not contain an 'iss' claim, which is permitted by the spec",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OID4VP-1FINAL-5"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "ValidateRequestObjectIssIfPresent",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991509
+ },
+ {
+  "_id": "8AviYds05yNII1E-fWSEYgYbT3irN36s5XrQBM9XDiN4zdir",
+  "msg": "Request object aud claim is valid",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "aud": "https://self-issued.me/v2",
+  "requirements": [
+   "OID4VP-1FINAL-5.8"
+  ],
+  "expected_self_issued": "https://self-issued.me/v2",
+  "expected_wallet_issuer": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/",
+  "testId": "8AviYds05yNII1E",
+  "src": "ValidateRequestObjectAudForVP",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991510
+ },
+ {
+  "_id": "8AviYds05yNII1E-i5sQvCRsA9Fkoc5otrZ4vRDHzWiiDtbQ",
+  "msg": "Request object x5c chain validated and signature verified",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OID4VP-1FINAL-5.9.3"
+  ],
+  "chain_length": 1,
+  "leaf_cert_subject": "CN=host.docker.internal,O=OID4VP security lab SYNTHETIC conformance Verifier",
+  "request_object_signing_alg": "ES256",
+  "testId": "8AviYds05yNII1E",
+  "src": "ValidateRequestObjectSignatureAgainstX5cHeader",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991513
+ },
+ {
+  "_id": "8AviYds05yNII1E-vwTTn0fRtfel88S6RbcwYuVvKRH8dmgC",
+  "msg": "Skipped evaluation due to missing required object: rical",
+  "result": "INFO",
+  "mapped": null,
+  "blockId": "9b9b9d",
+  "requirements": [
+   "ISO18013-5-F.3.2.6"
+  ],
+  "expected": "rical",
+  "testId": "8AviYds05yNII1E",
+  "src": "ValidateRequestObjectX5cChainAgainstRical",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991514
+ },
+ {
+  "_id": "8AviYds05yNII1E-KVdre3e1e6uurFoHrUU4xRpHUpJWFVYj",
+  "msg": "Skipped evaluation due to missing required object: rical",
+  "result": "INFO",
+  "mapped": null,
+  "blockId": "9b9b9d",
+  "requirements": [
+   "ISO18013-5-F.3.2.3"
+  ],
+  "expected": "rical",
+  "testId": "8AviYds05yNII1E",
+  "src": "EnsureMatchedRicalEntryHasNoTrustConstraints",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991515
+ },
+ {
+  "_id": "8AviYds05yNII1E-nIBoLpPUZ33duyvubBaO2em2UlVEPq0s",
+  "msg": "client_id http request parameter value matches client_id in request object",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "testId": "8AviYds05yNII1E",
+  "src": "EnsureClientIdInAuthorizationRequestParametersMatchRequestObject",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991516
+ },
+ {
+  "_id": "8AviYds05yNII1E-jYDSuTThdeH8G209arvq0Bt5sW8HnSPM",
+  "msg": "Skipped evaluation due to missing required element: authorization_request_object jwe_header",
+  "result": "INFO",
+  "blockId": "9b9b9d",
+  "path": "jwe_header",
+  "requirements": [
+   "OIDCC-10.2",
+   "OIDCC-10.2.1"
+  ],
+  "mapped": null,
+  "object": "authorization_request_object",
+  "testId": "8AviYds05yNII1E",
+  "src": "ValidateEncryptedRequestObjectHasKid",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991516
+ },
+ {
+  "_id": "8AviYds05yNII1E-TEZZzysSRYPaBGgnYM94sSCzLmvGuYJb",
+  "msg": "All http request parameters and request object claims match",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OIDCC-6.2",
+   "OIDCC-6.1"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "EnsureOptionalAuthorizationRequestParametersMatchRequestObject",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991517
+ },
+ {
+  "_id": "8AviYds05yNII1E-qduFEASFr6yqQGZdMldeEwy4sYBRtmZ8",
+  "msg": "All HTTP authorization request parameters are expected",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "known_params": [
+   "client_id",
+   "request_uri",
+   "request_uri_method"
+  ],
+  "parameters": [
+   "client_id",
+   "request_uri"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "CheckForUnexpectedParametersInVpAuthorizationEndpointHttpRequest",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991517
+ },
+ {
+  "_id": "8AviYds05yNII1E-Leu5lCsxvOPtu8G6TbBxl8kVvj9CCQ3K",
+  "msg": "Merged http request parameters with request object claims",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OIDCC-6.2",
+   "OIDCC-6.1"
+  ],
+  "effective_authorization_endpoint_request": {
+   "client_id": "x509_san_dns:host.docker.internal",
+   "response_uri": "https://host.docker.internal:18444/lab/v1/response/O9a33OsS08_INo3lSmbfXw",
+   "aud": "https://self-issued.me/v2",
+   "response_type": "vp_token",
+   "dcql_query": {
+    "credentials": [
+     {
+      "claims": [
+       {
+        "path": [
+         "given_name"
+        ]
+       },
+       {
+        "path": [
+         "family_name"
+        ]
+       },
+       {
+        "path": [
+         "birthdate"
+        ]
+       }
+      ],
+      "format": "dc+sd-jwt",
+      "id": "pid",
+      "meta": {
+       "vct_values": [
+        "urn:eudi:pid:1"
+       ]
+      },
+      "require_cryptographic_holder_binding": true
+     }
+    ]
+   },
+   "state": "igF0icukWvkmeAN4Or4nww",
+   "exp": 1795582292,
+   "iat": 1795581991,
+   "nonce": "-cNYvs3w5W5AKtM_t2uvmA",
+   "client_metadata": {
+    "encrypted_response_enc_values_supported": [
+     "A128GCM",
+     "A256GCM"
+    ],
+    "jwks": {
+     "keys": [
+      {
+       "alg": "ECDH-ES",
+       "crv": "P-256",
+       "kid": "mTm2yJYAmByNZP3qfEkrvQ",
+       "kty": "EC",
+       "use": "enc",
+       "x": "Hmb6jbKK2UCKqEsrz-pYNICGtbVTitq-KNDvtte5k-I",
+       "y": "c1ygmUmohrUWmY6ZGDGifSH9S-CxOwjhUcYPbftKga0"
+      }
+     ]
+    },
+    "vp_formats_supported": {
+     "dc+sd-jwt": {
+      "kb-jwt_alg_values": [
+       "ES256"
+      ],
+      "sd-jwt_alg_values": [
+       "ES256"
+      ]
+     }
+    }
+   },
+   "response_mode": "direct_post.jwt"
+  },
+  "testId": "8AviYds05yNII1E",
+  "src": "CreateEffectiveAuthorizationRequestParameters",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991518
+ },
+ {
+  "_id": "8AviYds05yNII1E-8XJv07akSCsB9icHLmX3XILARdPyRIix",
+  "msg": "Extracted nonce",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OID4VP-1FINAL-5.2"
+  ],
+  "nonce": "-cNYvs3w5W5AKtM_t2uvmA",
+  "testId": "8AviYds05yNII1E",
+  "src": "ExtractNonceFromAuthorizationRequest",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991519
+ },
+ {
+  "_id": "8AviYds05yNII1E-tWQrCCkndojoqbhFqsjUd6Xtl1xtC375",
+  "msg": "Skipped evaluation due to missing required element: effective_authorization_endpoint_request code_challenge",
+  "result": "INFO",
+  "blockId": "9b9b9d",
+  "path": "code_challenge",
+  "requirements": [
+   "RFC7636-4.3"
+  ],
+  "mapped": null,
+  "object": "effective_authorization_endpoint_request",
+  "testId": "8AviYds05yNII1E",
+  "src": "EnsureAuthorizationRequestContainsPkceCodeChallenge",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991519
+ },
+ {
+  "_id": "8AviYds05yNII1E-MNScMh9OiG6ISVgOA5sa03kc5Pi7iK10",
+  "msg": "Response type is expected value",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "expected": "vp_token",
+  "testId": "8AviYds05yNII1E",
+  "src": "EnsureResponseTypeIsVpToken",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991520
+ },
+ {
+  "_id": "8AviYds05yNII1E-ikdflZd7Kv5Us3xgF65wANThESZ79QT6",
+  "msg": "response_mode is direct_post.jwt",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "testId": "8AviYds05yNII1E",
+  "src": "ValidateResponseMode",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991520
+ },
+ {
+  "_id": "8AviYds05yNII1E-Agr5sT33YLhtBG6vLdZ93RCMqLQJvDGd",
+  "msg": "client_id_scheme parameter is not present, as expected.",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "testId": "8AviYds05yNII1E",
+  "src": "CheckNoClientIdSchemeParameter",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991521
+ },
+ {
+  "_id": "8AviYds05yNII1E-RZgC59CWkWWhciNFo3lPn1tUcUxgPRuO",
+  "msg": "scope parameter is not present, as expected.",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OID4VP-1FINAL-5.1"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "CheckNoScopeParameter",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991521
+ },
+ {
+  "_id": "8AviYds05yNII1E-LoRrSrDTvVAFcRGzECN7dK5A7pvLOdSW",
+  "msg": "request_uri_method parameter is not present.",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OID4VP-1FINAL-5.1"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "CheckRequestUriMethodParameter",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991522
+ },
+ {
+  "_id": "8AviYds05yNII1E-msostRWXhVPAOVtiGeu0aUe0xAq3EV8F",
+  "msg": "Skipped evaluation due to missing required string: authorization_request_object",
+  "result": "INFO",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OID4VP-1FINAL-5.1"
+  ],
+  "expected": "authorization_request_object",
+  "testId": "8AviYds05yNII1E",
+  "src": "WarnIfRequestUriMethodInRequestObject",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991522
+ },
+ {
+  "_id": "8AviYds05yNII1E-HTBm0exR8pdSmiL1Px9Oyj10b4rOpAvQ",
+  "msg": "Skipped evaluation due to missing required string: authorization_request_object",
+  "result": "INFO",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OID4VP-1FINAL-5.10"
+  ],
+  "expected": "authorization_request_object",
+  "testId": "8AviYds05yNII1E",
+  "src": "EnsureNoWalletNonceInRequestObject",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991523
+ },
+ {
+  "_id": "8AviYds05yNII1E-kneTG0RfIpMj3ZxLKOW2sQlmaKc1fRAv",
+  "msg": "All authorization parameters are expected",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "known_params": [
+   "presentation_definition",
+   "dcql_query",
+   "client_id",
+   "client_id_scheme",
+   "response_uri",
+   "client_metadata",
+   "nonce",
+   "state",
+   "response_type",
+   "response_mode",
+   "verifier_info",
+   "scope",
+   "request_uri_method",
+   "wallet_nonce",
+   "aud",
+   "iss",
+   "iat",
+   "nbf",
+   "exp",
+   "jti"
+  ],
+  "parameters": [
+   "client_id",
+   "response_uri",
+   "aud",
+   "response_type",
+   "dcql_query",
+   "state",
+   "exp",
+   "iat",
+   "nonce",
+   "client_metadata",
+   "response_mode"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "CheckForUnexpectedParametersInVpAuthorizationRequest",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991523
+ },
+ {
+  "_id": "8AviYds05yNII1E-2hSd7st6cHsQYboqZrR07INqVJIbmllp",
+  "msg": "Authorization request does not contain transaction_data",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OID4VP-1FINAL-5",
+   "OID4VP-1FINAL-5.1",
+   "OID4VP-1FINAL-8.4"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "CheckNoTransactionDataInVpAuthorizationRequest",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991524
+ },
+ {
+  "_id": "8AviYds05yNII1E-h5n3vCHTYHnUOaXKr7rnXrITkPJYqhV6",
+  "msg": "Skipped evaluation due to missing required element: effective_authorization_endpoint_request verifier_info",
+  "result": "INFO",
+  "blockId": "9b9b9d",
+  "path": "verifier_info",
+  "requirements": [
+   "OID4VP-1FINAL-5.1"
+  ],
+  "mapped": null,
+  "object": "effective_authorization_endpoint_request",
+  "testId": "8AviYds05yNII1E",
+  "src": "ExtractVerifierInfoFromAuthorizationRequest",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991524
+ },
+ {
+  "_id": "8AviYds05yNII1E-ecTQATtAx7kMnR541CuVeMOxxB85xOKV",
+  "msg": "Skipped evaluation due to missing required element: effective_authorization_endpoint_request verifier_info",
+  "result": "INFO",
+  "blockId": "9b9b9d",
+  "path": "verifier_info",
+  "requirements": [
+   "OID4VP-1FINAL-5.1"
+  ],
+  "mapped": null,
+  "object": "effective_authorization_endpoint_request",
+  "testId": "8AviYds05yNII1E",
+  "src": "ValidateVerifierInfo",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991524
+ },
+ {
+  "_id": "8AviYds05yNII1E-9JpCBKYT0Rv5hR1P5GvxZMq6nLo9Nppr",
+  "msg": "Skipped evaluation due to missing required element: effective_authorization_endpoint_request verifier_info",
+  "result": "INFO",
+  "blockId": "9b9b9d",
+  "path": "verifier_info",
+  "requirements": [
+   "OID4VP-1FINAL-5.1"
+  ],
+  "mapped": null,
+  "object": "effective_authorization_endpoint_request",
+  "testId": "8AviYds05yNII1E",
+  "src": "CheckForUnexpectedParametersInVerifierInfo",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991525
+ },
+ {
+  "_id": "8AviYds05yNII1E-dGkOEf0KuQrE8GQjdbBeFW8pT01QgqUM",
+  "msg": "Client ID matched",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OIDCC-3.1.2.1"
+  ],
+  "client_id": "x509_san_dns:host.docker.internal",
+  "testId": "8AviYds05yNII1E",
+  "src": "EnsureMatchingClientId",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991525
+ },
+ {
+  "_id": "8AviYds05yNII1E-lAxYnPf6tTz3pfFaJsAtyZKXtdxc4ehp",
+  "msg": "response_uri is valid https url with no fragment",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "actual": "https://host.docker.internal:18444/lab/v1/response/O9a33OsS08_INo3lSmbfXw",
+  "requirements": [
+   "OID4VP-1FINAL-8.2"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "EnsureValidResponseUriForAuthorizationEndpointRequest",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991526
+ },
+ {
+  "_id": "8AviYds05yNII1E-8fxJPe1QDFPWydC6YYwvjiTDKx5G3KpS",
+  "msg": "Authorization request does not contain 'redirect_uri'",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OID4VP-1FINAL-8.2"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "CheckNoRedirectUriInVpAuthorizationRequest",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991527
+ },
+ {
+  "_id": "8AviYds05yNII1E-4WOdf61VudR3zAV1ypmKofZCImaFFcw6",
+  "msg": "Authorization request does not contain presentation_definition or presentation_definition_uri",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "testId": "8AviYds05yNII1E",
+  "src": "CheckNoPresentationDefinitionInVpAuthorizationRequest",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991527
+ },
+ {
+  "_id": "8AviYds05yNII1E-nNgfn8eqTfuppPzjO6mmNt3G7JpmLJvd",
+  "msg": "All client_metadata parameters are expected",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OID4VP-1FINAL-5.1"
+  ],
+  "parameters": [
+   "encrypted_response_enc_values_supported",
+   "jwks",
+   "vp_formats_supported"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "VP1FinalCheckForUnexpectedParametersInVpClientMetadata",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991528
+ },
+ {
+  "_id": "8AviYds05yNII1E-3rbKresqEFJDmdAxGjX6Z1tgF53nJqQL",
+  "msg": "vp_formats_supported contains valid dc+sd-jwt format",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OID4VP-1FINALA-B.2.2",
+   "OID4VP-1FINALA-B.3.4"
+  ],
+  "dc+sd-jwt": {
+   "kb-jwt_alg_values": [
+    "ES256"
+   ],
+   "sd-jwt_alg_values": [
+    "ES256"
+   ]
+  },
+  "testId": "8AviYds05yNII1E",
+  "src": "VP1FinalValidateVpFormatsSupportedInClientMetadata",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991529
+ },
+ {
+  "_id": "8AviYds05yNII1E-R8JtPIIYxPS0iLR4ZlxnWzsaiVFDMLEW",
+  "msg": "All keys in client_metadata.jwks have unique kid values",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OID4VP-1FINAL-5.1"
+  ],
+  "jwks": {
+   "keys": [
+    {
+     "alg": "ECDH-ES",
+     "crv": "P-256",
+     "kid": "mTm2yJYAmByNZP3qfEkrvQ",
+     "kty": "EC",
+     "use": "enc",
+     "x": "Hmb6jbKK2UCKqEsrz-pYNICGtbVTitq-KNDvtte5k-I",
+     "y": "c1ygmUmohrUWmY6ZGDGifSH9S-CxOwjhUcYPbftKga0"
+    }
+   ]
+  },
+  "testId": "8AviYds05yNII1E",
+  "src": "VP1FinalCheckForKeyIdInClientMetadataJWKs",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991529
+ },
+ {
+  "_id": "8AviYds05yNII1E-aWHW0rMPGLrFPo6Jjd2VLN8UmKY1fRiX",
+  "msg": "client_metadata.jwks contains valid encryption key(s) with alg",
+  "result": "SUCCESS",
+  "blockId": "9b9b9d",
+  "requirements": [
+   "OID4VP-1FINAL-8.3"
+  ],
+  "jwks": {
+   "keys": [
+    {
+     "alg": "ECDH-ES",
+     "crv": "P-256",
+     "kid": "mTm2yJYAmByNZP3qfEkrvQ",
+     "kty": "EC",
+     "use": "enc",
+     "x": "Hmb6jbKK2UCKqEsrz-pYNICGtbVTitq-KNDvtte5k-I",
+     "y": "c1ygmUmohrUWmY6ZGDGifSH9S-CxOwjhUcYPbftKga0"
+    }
+   ]
+  },
+  "testId": "8AviYds05yNII1E",
+  "src": "VP1FinalValidateClientMetadataJwksForEncryptedResponse",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991530
+ },
+ {
+  "_id": "8AviYds05yNII1E-knc7f2X65XrKTFtcjT6a8Eq5FJmoOqmy",
+  "msg": "Validate the JWK set in client_metadata",
+  "startBlock": true,
+  "blockId": "55988b",
+  "testId": "8AviYds05yNII1E",
+  "src": "-START-BLOCK-",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991531
+ },
+ {
+  "_id": "8AviYds05yNII1E-F99xWLSXoUkuGCWEO2QwhoSLllu0W6ml",
+  "msg": "Selected the JWK set in client_metadata for validation",
+  "result": "SUCCESS",
+  "blockId": "55988b",
+  "jwks": {
+   "keys": [
+    {
+     "alg": "ECDH-ES",
+     "crv": "P-256",
+     "kid": "mTm2yJYAmByNZP3qfEkrvQ",
+     "kty": "EC",
+     "use": "enc",
+     "x": "Hmb6jbKK2UCKqEsrz-pYNICGtbVTitq-KNDvtte5k-I",
+     "y": "c1ygmUmohrUWmY6ZGDGifSH9S-CxOwjhUcYPbftKga0"
+    }
+   ]
+  },
+  "testId": "8AviYds05yNII1E",
+  "src": "MapJwksToValidationLocation",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991531
+ },
+ {
+  "_id": "8AviYds05yNII1E-xAaQnCJsjAJCYfFkfRm7ZuB58123wado",
+  "msg": "The JWK set in client_metadata contains only public key material",
+  "result": "SUCCESS",
+  "blockId": "55988b",
+  "jwks_source": "client_metadata",
+  "requirements": [
+   "OID4VP-1FINAL-5.1"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "EnsureJwksHasNoPrivateOrSymmetricKeyMaterial",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991532
+ },
+ {
+  "_id": "8AviYds05yNII1E-6Hu1H8ZcPoMNgIOojGIaiXC9b0zOaSLs",
+  "msg": "The JWK set in client_metadata is structurally valid",
+  "result": "SUCCESS",
+  "blockId": "55988b",
+  "jwks_source": "client_metadata",
+  "requirements": [
+   "OID4VP-1FINAL-5.1"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "ValidateJwksStructure",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991532
+ },
+ {
+  "_id": "8AviYds05yNII1E-L8TEMUCRoh93ZrjesFYy0CDOPf0V1zev",
+  "msg": "All usable keys in the JWK set in client_metadata parse successfully",
+  "result": "SUCCESS",
+  "blockId": "55988b",
+  "jwks_source": "client_metadata",
+  "requirements": [
+   "OID4VP-1FINAL-5.1"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "ParseUsableJwksKeys",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991533
+ },
+ {
+  "_id": "8AviYds05yNII1E-XquCLYOFGbq4xEREphttfThSHLjgyc6p",
+  "msg": "All keys in the JWK set in client_metadata use a supported key type, curve and algorithm",
+  "result": "SUCCESS",
+  "blockId": "55988b",
+  "jwks_source": "client_metadata",
+  "requirements": [
+   "OID4VP-1FINAL-5.1"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "WarnOnUnusableJwksKeys",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991533
+ },
+ {
+  "_id": "8AviYds05yNII1E-JSTUYcoOypQxZndtUKSgjOT8pyRBEFXg",
+  "msg": "Verifier response-encryption key(s) were not seen in a previous Authorization Request",
+  "result": "SUCCESS",
+  "jwk_thumbprints": [
+   "Z2g3bCfgG6ND7Ki_13P1GS8nRX63T-ZGAUXodHI42lM"
+  ],
+  "requirements": [
+   "HAIP-5-6",
+   "OID4VP-1FINAL-5.1"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "VP1FinalCheckEncryptionKeyNotReused",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991534
+ },
+ {
+  "_id": "8AviYds05yNII1E-N1YPyjVoxOZS6NtcegaHyavB7uqijjqR",
+  "msg": "Extracted dcql_query from authorization request",
+  "result": "SUCCESS",
+  "requirements": [
+   "OID4VP-1FINAL-6"
+  ],
+  "dcql": {
+   "credentials": [
+    {
+     "claims": [
+      {
+       "path": [
+        "given_name"
+       ]
+      },
+      {
+       "path": [
+        "family_name"
+       ]
+      },
+      {
+       "path": [
+        "birthdate"
+       ]
+      }
+     ],
+     "format": "dc+sd-jwt",
+     "id": "pid",
+     "meta": {
+      "vct_values": [
+       "urn:eudi:pid:1"
+      ]
+     },
+     "require_cryptographic_holder_binding": true
+    }
+   ]
+  },
+  "testId": "8AviYds05yNII1E",
+  "src": "ExtractDCQLQueryFromAuthorizationRequest",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991535
+ },
+ {
+  "_id": "8AviYds05yNII1E-gVe7P8SIlX7nduLoWa1tMXXPbzxapbLf",
+  "msg": "DCQL query input is valid",
+  "result": "SUCCESS",
+  "input": {
+   "credentials": [
+    {
+     "claims": [
+      {
+       "path": [
+        "given_name"
+       ]
+      },
+      {
+       "path": [
+        "family_name"
+       ]
+      },
+      {
+       "path": [
+        "birthdate"
+       ]
+      }
+     ],
+     "format": "dc+sd-jwt",
+     "id": "pid",
+     "meta": {
+      "vct_values": [
+       "urn:eudi:pid:1"
+      ]
+     },
+     "require_cryptographic_holder_binding": true
+    }
+   ]
+  },
+  "schema_link": "/json-schemas/oid4vp/dcql_request.json",
+  "requirements": [
+   "OID4VP-1FINAL-6"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "ValidateDCQLQuery",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991537
+ },
+ {
+  "_id": "8AviYds05yNII1E-8AadXvgTeGQWZbIBDvANxVlAV264xuAm",
+  "msg": "No unknown properties were found in the DCQL query",
+  "result": "SUCCESS",
+  "input": {
+   "credentials": [
+    {
+     "claims": [
+      {
+       "path": [
+        "given_name"
+       ]
+      },
+      {
+       "path": [
+        "family_name"
+       ]
+      },
+      {
+       "path": [
+        "birthdate"
+       ]
+      }
+     ],
+     "format": "dc+sd-jwt",
+     "id": "pid",
+     "meta": {
+      "vct_values": [
+       "urn:eudi:pid:1"
+      ]
+     },
+     "require_cryptographic_holder_binding": true
+    }
+   ]
+  },
+  "schema_link": "/json-schemas/oid4vp/dcql_request.json",
+  "requirements": [
+   "OID4VP-1FINAL-6"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "CheckForUnexpectedParametersInDcqlQuery",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991542
+ },
+ {
+  "_id": "8AviYds05yNII1E-xnxJ7jtEWKBOaIgPSpAIzAuRxiK1aaOf",
+  "msg": "DCQL query does not request any SD-JWT VC claims that cannot be selectively disclosed",
+  "result": "SUCCESS",
+  "requirements": [
+   "SDJWTVC-3.2.2.2"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "CheckForNonSelectivelyDisclosableClaimsInDcqlQuery",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991543
+ },
+ {
+  "_id": "8AviYds05yNII1E-rLMOwVLgf4BdzsKyi2n2VAndpJFEJQGA",
+  "msg": "The DCQL query does not contain claims entries unreferenced by claim_sets",
+  "result": "SUCCESS",
+  "requirements": [
+   "OID4VP-1FINAL-6.4.1"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "CheckForUnreferencedClaimsInDcqlQuery",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991544
+ },
+ {
+  "_id": "8AviYds05yNII1E-L5gXdxWsS3GfCXoc8RcQkI6IVNI2MokF",
+  "expected_format": "dc+sd-jwt",
+  "credential_count": 1,
+  "msg": "DCQL query credential format matches test configuration",
+  "result": "SUCCESS",
+  "testId": "8AviYds05yNII1E",
+  "src": "CheckDCQLQueryCredentialFormatMatchesTestConfiguration",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991544
+ },
+ {
+  "_id": "8AviYds05yNII1E-EExQRdyzHtFhJ21Nd6UvUyqDPUCGHjwn",
+  "params": {
+   "state": "igF0icukWvkmeAN4Or4nww"
+  },
+  "msg": "Added authorization_endpoint_response_params to environment",
+  "result": "SUCCESS",
+  "testId": "8AviYds05yNII1E",
+  "src": "CreateAuthorizationEndpointResponseParams",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991545
+ },
+ {
+  "_id": "8AviYds05yNII1E-PtpwXxsqWuOzcNFLpQtPMdtobCf2wLr2",
+  "msg": "Allocated a status list index that the served status list marks as valid",
+  "result": "SUCCESS",
+  "requirements": [
+   "OTSL-6.2"
+  ],
+  "revocation_list_reference": {
+   "mechanism": "status_list",
+   "uri": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/statuslists/nUrRcgKFlC794ceFHNT3",
+   "idx": 250
+  },
+  "testId": "8AviYds05yNII1E",
+  "src": "CreateValidStatusListReference",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991546
+ },
+ {
+  "_id": "8AviYds05yNII1E-mc2XF6QCvNyqhMNGIjRWpgIc16fiESZk",
+  "msg": "Replaced nonce with an invalid value",
+  "original_nonce": "-cNYvs3w5W5AKtM_t2uvmA",
+  "invalid_nonce": "-cNYvs3w5W5AKtM_t2uvmAINVALID",
+  "testId": "8AviYds05yNII1E",
+  "src": "InvalidateNonce",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991548
+ },
+ {
+  "_id": "8AviYds05yNII1E-8xKjP31gEwxgus4IWjx2vMixr0PZ1dsL",
+  "msg": "Filtered SD-JWT disclosures to DCQL requested claims",
+  "filtered_disclosures": 3,
+  "requested_claims": [
+   "birthdate",
+   "given_name",
+   "family_name"
+  ],
+  "total_disclosures": 10,
+  "testId": "8AviYds05yNII1E",
+  "src": "CreateSdJwtKbCredential",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991550
+ },
+ {
+  "_id": "8AviYds05yNII1E-wrDJv9dJWKHAJXH1Aa8RTeG2Eo4l0jcT",
+  "msg": "Created an SD-JWT+KB",
+  "sdjwt": "eyJ4NWMiOlsiTUlJQnZEQ0NBV09nQXdJQkFnSVVWZURwcEg2RkhGcFhUQUFrVjBCZzVMT21qVUF3Q2dZSUtvWkl6ajBFQXdJd05ERXlNREFHQTFVRUF3d3BVMWxPVkVoRlZFbERJRTlKUkRSV1VDQnNZV0lnYVhOemRXVnlJQzBnYm1WMlpYSWdkSEoxYzNRd0hoY05Nall4TVRJMU1EUTBOakk0V2hjTk1qWXhNVEkzTURRME5qSTRXakEwTVRJd01BWURWUVFERENsVFdVNVVTRVZVU1VNZ1QwbEVORlpRSUd4aFlpQnBjM04xWlhJZ0xTQnVaWFpsY2lCMGNuVnpkREJaTUJNR0J5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEEwSUFCQmRETnZDRXJjZ3NuMHVGdjY2dHlNYmJpaG9IZyt2SUlvOTE5TlkwNGM1aXhMRW5jTTBFcE9hMUNKVC9nTVpUY2hhb2U4NXZvdE9HZEFFZzVIcnJDS0dqVXpCUk1CMEdBMVVkRGdRV0JCVGJtekVXcDFLbTIvcDkzb1hGcWJnTDdSczRwVEFmQmdOVkhTTUVHREFXZ0JUYm16RVdwMUttMi9wOTNvWEZxYmdMN1JzNHBUQVBCZ05WSFJNQkFmOEVCVEFEQVFIL01Bb0dDQ3FHU000OUJBTUNBMGNBTUVRQ0lBaHdHRC9tb0VrUis5SnVneTA1d2VvZzhLaS9KQXNjL0VTVzJ0d2QyU2NzQWlCUTFFZzVvSS9nZ0NNZXJPN0ExdUhFeHdRM01rTENRa3N4YW84N1VYd1hoQT09Il0sInR5cCI6ImRjK3NkLWp3dCIsImFsZyI6IkVTMjU2In0.eyJfc2QiOlsiNDJTTG5nOEpRc3JpUmk2ZnQxZDV4emx4Q291NGtsakYyaE92ZkwzSGVWVSIsIjRzcTF4TnFGdk5nRUV1SExNd3VBTDdIVThuVzZ4UXoyWVRkM0dXZmozYWsiLCI2TUtSTGFMZ3ZWT3RsQUFpZjg1TU90TWlQNXJlNC1oWG9LeHVBODE3UzBnIiwiOWxaTWIySVdWemlJbW9Jb09kbWdibVFzakpLTm12U0lHM0JyUjRPTS1qQSIsIkI4WEFVRTMzc1I2dnltcFdUQThwY1FxNy1XUk02cUsxTFJkUFJhQm9jM1EiLCJEZm5wc25zOVFLTnRkT2VzQWUxMEdiZ1RIRG1mVXFWYW1WaWlkdWNEVzM4IiwiTUJVSmdaR3NmdXhhQnZ4ZE5pTDJYUkdTdDRBN09BeFZqYTg2SmJOWmFPRSIsIlpkYXAtNWptNWxDVTRFMUhVMEZmQVNvaHdPX0pOalBPZFFwV1pWR3UwalEiLCJfTEVKSDdlUDZOMmk1elRoRFUxTGhaeEZhOHN3RlBhMVZYWlphcmFWcTk4IiwiZFpfQ01KQ3J3UFVpMUpQZ1pyenFRYmpYVVFhZkdzdTZWaEpOYktkOV83USIsImp6Y1JXc0pMUGRFODhxNzhnRFE2SWZ3anRjak5mdlhSMjJaMHpxalNMbjAiXSwidmN0IjoidXJuOmV1ZGk6cGlkOjEiLCJpc3MiOiJodHRwczovL2xvY2FsaG9zdDo4NDQzL3Rlc3QvYS9vaWQ0dnAtbGFiLWMzLTliY2VmOGYyNmEyZDBjNGIiLCJjbmYiOnsiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiV1RlcXBxTUFaSzBhTjl1OW5TZW85LWtNSFVQeFNlbV9PNVdmV2wwci1IRSIsInkiOiJ5WC1ENEdvU2dOOUstU2w1UjFTNWVsVV9mSlNaYWdhcXByQ1p0NHBDWElnIn19LCJleHAiOjE3OTY3OTE1OTEsImlhdCI6MTc5NTU4MTk5MSwic3RhdHVzIjp7InN0YXR1c19saXN0Ijp7ImlkeCI6MjUwLCJ1cmkiOiJodHRwczovL2xvY2FsaG9zdDo4NDQzL3Rlc3QvYS9vaWQ0dnAtbGFiLWMzLTliY2VmOGYyNmEyZDBjNGIvc3RhdHVzbGlzdHMvblVyUmNnS0ZsQzc5NGNlRkhOVDMifX19._62Qc-7Wmu-cwL_9osyJVZFKt55rHO3RQv5mK0YKpmHbhSJ6dj4wzi0XJrKpHBnDCo6YzN1uYxrL1OFoqhCv4A~WyJ1Nml2Xzg4aEdmZ2hLNllvMDRfMnlnIiwiZ2l2ZW5fbmFtZSIsIkplYW4iXQ~WyJxT1U4cWNwQTNjVV9ZQVduNEIwRWNRIiwiZmFtaWx5X25hbWUiLCJEdXBvbnQiXQ~WyJkVEdMeUljNnlDVldsb19OVlZwTGRRIiwiYmlydGhkYXRlIiwiMTk4MC0wNS0yMyJd~eyJ0eXAiOiJrYitqd3QiLCJhbGciOiJFUzI1NiJ9.eyJzZF9oYXNoIjoieEFlejZQOUtSZTJVaC1ETmN0dXNfVF9IRDNBR2N1R3BFOGVlMGZSNnA3OCIsImF1ZCI6Ing1MDlfc2FuX2Ruczpob3N0LmRvY2tlci5pbnRlcm5hbCIsImlhdCI6MTc5NTU4MTk5MSwibm9uY2UiOiItY05ZdnMzdzVXNUFLdE1fdDJ1dm1BSU5WQUxJRCJ9.ynfTPhJ3hUnOdy-RnzN5kJWYrXcn3gCZbvLy-y3MFYA6JvPR2G2REbMm1_R9FdBE5WfeH3MAcbl4YNtNpfFi2g",
+  "testId": "8AviYds05yNII1E",
+  "src": "CreateSdJwtKbCredential",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991552
+ },
+ {
+  "_id": "8AviYds05yNII1E-Veuj8Pw2FxYfi2wTftLyDpTrLMOXRnmI",
+  "msg": "Generated the Status List Token in JWT format",
+  "result": "SUCCESS",
+  "sub": "https://localhost:8443/test/a/oid4vp-lab-c3-9bcef8f26a2d0c4b/statuslists/nUrRcgKFlC794ceFHNT3",
+  "requirements": [
+   "OTSL-5.1"
+  ],
+  "status_list_token": "eyJ4NWMiOlsiTUlJQnZEQ0NBV09nQXdJQkFnSVVWZURwcEg2RkhGcFhUQUFrVjBCZzVMT21qVUF3Q2dZSUtvWkl6ajBFQXdJd05ERXlNREFHQTFVRUF3d3BVMWxPVkVoRlZFbERJRTlKUkRSV1VDQnNZV0lnYVhOemRXVnlJQzBnYm1WMlpYSWdkSEoxYzNRd0hoY05Nall4TVRJMU1EUTBOakk0V2hjTk1qWXhNVEkzTURRME5qSTRXakEwTVRJd01BWURWUVFERENsVFdVNVVTRVZVU1VNZ1QwbEVORlpRSUd4aFlpQnBjM04xWlhJZ0xTQnVaWFpsY2lCMGNuVnpkREJaTUJNR0J5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEEwSUFCQmRETnZDRXJjZ3NuMHVGdjY2dHlNYmJpaG9IZyt2SUlvOTE5TlkwNGM1aXhMRW5jTTBFcE9hMUNKVC9nTVpUY2hhb2U4NXZvdE9HZEFFZzVIcnJDS0dqVXpCUk1CMEdBMVVkRGdRV0JCVGJtekVXcDFLbTIvcDkzb1hGcWJnTDdSczRwVEFmQmdOVkhTTUVHREFXZ0JUYm16RVdwMUttMi9wOTNvWEZxYmdMN1JzNHBUQVBCZ05WSFJNQkFmOEVCVEFEQVFIL01Bb0dDQ3FHU000OUJBTUNBMGNBTUVRQ0lBaHdHRC9tb0VrUis5SnVneTA1d2VvZzhLaS9KQXNjL0VTVzJ0d2QyU2NzQWlCUTFFZzVvSS9nZ0NNZXJPN0ExdUhFeHdRM01rTENRa3N4YW84N1VYd1hoQT09Il0sInR5cCI6InN0YXR1c2xpc3Qrand0IiwiYWxnIjoiRVMyNTYiLCJqd2siOnsia3R5IjoiRUMiLCJjcnYiOiJQLTI1NiIsIng1YyI6WyJNSUlCdkRDQ0FXT2dBd0lCQWdJVVZlRHBwSDZGSEZwWFRBQWtWMEJnNUxPbWpVQXdDZ1lJS29aSXpqMEVBd0l3TkRFeU1EQUdBMVVFQXd3cFUxbE9WRWhGVkVsRElFOUpSRFJXVUNCc1lXSWdhWE56ZFdWeUlDMGdibVYyWlhJZ2RISjFjM1F3SGhjTk1qWXhNVEkxTURRME5qSTRXaGNOTWpZeE1USTNNRFEwTmpJNFdqQTBNVEl3TUFZRFZRUUREQ2xUV1U1VVNFVlVTVU1nVDBsRU5GWlFJR3hoWWlCcGMzTjFaWElnTFNCdVpYWmxjaUIwY25WemREQlpNQk1HQnlxR1NNNDlBZ0VHQ0NxR1NNNDlBd0VIQTBJQUJCZEROdkNFcmNnc24wdUZ2NjZ0eU1iYmlob0hnK3ZJSW85MTlOWTA0YzVpeExFbmNNMEVwT2ExQ0pUL2dNWlRjaGFvZTg1dm90T0dkQUVnNUhyckNLR2pVekJSTUIwR0ExVWREZ1FXQkJUYm16RVdwMUttMi9wOTNvWEZxYmdMN1JzNHBUQWZCZ05WSFNNRUdEQVdnQlRibXpFV3AxS20yL3A5M29YRnFiZ0w3UnM0cFRBUEJnTlZIUk1CQWY4RUJUQURBUUgvTUFvR0NDcUdTTTQ5QkFNQ0EwY0FNRVFDSUFod0dEL21vRWtSKzlKdWd5MDV3ZW9nOEtpL0pBc2MvRVNXMnR3ZDJTY3NBaUJRMUVnNW9JL2dnQ01lck83QTF1SEV4d1EzTWtMQ1Frc3hhbzg3VVh3WGhBPT0iXSwieCI6IkYwTTI4SVN0eUN5ZlM0V19ycTNJeHR1S0dnZUQ2OGdpajNYMDFqVGh6bUkiLCJ5IjoieExFbmNNMEVwT2ExQ0pUX2dNWlRjaGFvZTg1dm90T0dkQUVnNUhyckNLRSIsImFsZyI6IkVTMjU2In19.eyJzdWIiOiJodHRwczovL2xvY2FsaG9zdDo4NDQzL3Rlc3QvYS9vaWQ0dnAtbGFiLWMzLTliY2VmOGYyNmEyZDBjNGIvc3RhdHVzbGlzdHMvblVyUmNnS0ZsQzc5NGNlRkhOVDMiLCJleHAiOjE3OTU2NjgzOTEsImlhdCI6MTc5NTU4MTk5MSwidHRsIjozMDAsInN0YXR1c19saXN0Ijp7ImJpdHMiOjEsImxzdCI6ImVOcGJ0UW9fQUFCZXp4VkIifX0.RoPKsww6peRV5ZmOtFMRFXuu6rA23LwHwnI8YWn3EF5LHTmaKUKSeTHJImbx_px3ch8OEPMXNfnUDaIHZLBuqQ",
+  "exp": 1795668391,
+  "algorithm": "ES256",
+  "testId": "8AviYds05yNII1E",
+  "src": "VP1FinalGenerateJwtStatusListToken",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991555
+ },
+ {
+  "_id": "8AviYds05yNII1E-1qCCMFVSjoKvqzDgvEYRnDe5rIY06Xvt",
+  "msg": "Added credential in DCQL 'vp_token' authorization endpoint response parameter",
+  "result": "SUCCESS",
+  "requirements": [
+   "OID4VP-1FINAL-8.1"
+  ],
+  "authorization_endpoint_response_params": {
+   "state": "igF0icukWvkmeAN4Or4nww",
+   "vp_token": {
+    "pid": [
+     "eyJ4NWMiOlsiTUlJQnZEQ0NBV09nQXdJQkFnSVVWZURwcEg2RkhGcFhUQUFrVjBCZzVMT21qVUF3Q2dZSUtvWkl6ajBFQXdJd05ERXlNREFHQTFVRUF3d3BVMWxPVkVoRlZFbERJRTlKUkRSV1VDQnNZV0lnYVhOemRXVnlJQzBnYm1WMlpYSWdkSEoxYzNRd0hoY05Nall4TVRJMU1EUTBOakk0V2hjTk1qWXhNVEkzTURRME5qSTRXakEwTVRJd01BWURWUVFERENsVFdVNVVTRVZVU1VNZ1QwbEVORlpRSUd4aFlpQnBjM04xWlhJZ0xTQnVaWFpsY2lCMGNuVnpkREJaTUJNR0J5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEEwSUFCQmRETnZDRXJjZ3NuMHVGdjY2dHlNYmJpaG9IZyt2SUlvOTE5TlkwNGM1aXhMRW5jTTBFcE9hMUNKVC9nTVpUY2hhb2U4NXZvdE9HZEFFZzVIcnJDS0dqVXpCUk1CMEdBMVVkRGdRV0JCVGJtekVXcDFLbTIvcDkzb1hGcWJnTDdSczRwVEFmQmdOVkhTTUVHREFXZ0JUYm16RVdwMUttMi9wOTNvWEZxYmdMN1JzNHBUQVBCZ05WSFJNQkFmOEVCVEFEQVFIL01Bb0dDQ3FHU000OUJBTUNBMGNBTUVRQ0lBaHdHRC9tb0VrUis5SnVneTA1d2VvZzhLaS9KQXNjL0VTVzJ0d2QyU2NzQWlCUTFFZzVvSS9nZ0NNZXJPN0ExdUhFeHdRM01rTENRa3N4YW84N1VYd1hoQT09Il0sInR5cCI6ImRjK3NkLWp3dCIsImFsZyI6IkVTMjU2In0.eyJfc2QiOlsiNDJTTG5nOEpRc3JpUmk2ZnQxZDV4emx4Q291NGtsakYyaE92ZkwzSGVWVSIsIjRzcTF4TnFGdk5nRUV1SExNd3VBTDdIVThuVzZ4UXoyWVRkM0dXZmozYWsiLCI2TUtSTGFMZ3ZWT3RsQUFpZjg1TU90TWlQNXJlNC1oWG9LeHVBODE3UzBnIiwiOWxaTWIySVdWemlJbW9Jb09kbWdibVFzakpLTm12U0lHM0JyUjRPTS1qQSIsIkI4WEFVRTMzc1I2dnltcFdUQThwY1FxNy1XUk02cUsxTFJkUFJhQm9jM1EiLCJEZm5wc25zOVFLTnRkT2VzQWUxMEdiZ1RIRG1mVXFWYW1WaWlkdWNEVzM4IiwiTUJVSmdaR3NmdXhhQnZ4ZE5pTDJYUkdTdDRBN09BeFZqYTg2SmJOWmFPRSIsIlpkYXAtNWptNWxDVTRFMUhVMEZmQVNvaHdPX0pOalBPZFFwV1pWR3UwalEiLCJfTEVKSDdlUDZOMmk1elRoRFUxTGhaeEZhOHN3RlBhMVZYWlphcmFWcTk4IiwiZFpfQ01KQ3J3UFVpMUpQZ1pyenFRYmpYVVFhZkdzdTZWaEpOYktkOV83USIsImp6Y1JXc0pMUGRFODhxNzhnRFE2SWZ3anRjak5mdlhSMjJaMHpxalNMbjAiXSwidmN0IjoidXJuOmV1ZGk6cGlkOjEiLCJpc3MiOiJodHRwczovL2xvY2FsaG9zdDo4NDQzL3Rlc3QvYS9vaWQ0dnAtbGFiLWMzLTliY2VmOGYyNmEyZDBjNGIiLCJjbmYiOnsiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiV1RlcXBxTUFaSzBhTjl1OW5TZW85LWtNSFVQeFNlbV9PNVdmV2wwci1IRSIsInkiOiJ5WC1ENEdvU2dOOUstU2w1UjFTNWVsVV9mSlNaYWdhcXByQ1p0NHBDWElnIn19LCJleHAiOjE3OTY3OTE1OTEsImlhdCI6MTc5NTU4MTk5MSwic3RhdHVzIjp7InN0YXR1c19saXN0Ijp7ImlkeCI6MjUwLCJ1cmkiOiJodHRwczovL2xvY2FsaG9zdDo4NDQzL3Rlc3QvYS9vaWQ0dnAtbGFiLWMzLTliY2VmOGYyNmEyZDBjNGIvc3RhdHVzbGlzdHMvblVyUmNnS0ZsQzc5NGNlRkhOVDMifX19._62Qc-7Wmu-cwL_9osyJVZFKt55rHO3RQv5mK0YKpmHbhSJ6dj4wzi0XJrKpHBnDCo6YzN1uYxrL1OFoqhCv4A~WyJ1Nml2Xzg4aEdmZ2hLNllvMDRfMnlnIiwiZ2l2ZW5fbmFtZSIsIkplYW4iXQ~WyJxT1U4cWNwQTNjVV9ZQVduNEIwRWNRIiwiZmFtaWx5X25hbWUiLCJEdXBvbnQiXQ~WyJkVEdMeUljNnlDVldsb19OVlZwTGRRIiwiYmlydGhkYXRlIiwiMTk4MC0wNS0yMyJd~eyJ0eXAiOiJrYitqd3QiLCJhbGciOiJFUzI1NiJ9.eyJzZF9oYXNoIjoieEFlejZQOUtSZTJVaC1ETmN0dXNfVF9IRDNBR2N1R3BFOGVlMGZSNnA3OCIsImF1ZCI6Ing1MDlfc2FuX2Ruczpob3N0LmRvY2tlci5pbnRlcm5hbCIsImlhdCI6MTc5NTU4MTk5MSwibm9uY2UiOiItY05ZdnMzdzVXNUFLdE1fdDJ1dm1BSU5WQUxJRCJ9.ynfTPhJ3hUnOdy-RnzN5kJWYrXcn3gCZbvLy-y3MFYA6JvPR2G2REbMm1_R9FdBE5WfeH3MAcbl4YNtNpfFi2g"
+    ]
+   }
+  },
+  "testId": "8AviYds05yNII1E",
+  "src": "AddVP1FinalDCQLVPTokenToAuthorizationEndpointResponseParams",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991556
+ },
+ {
+  "_id": "8AviYds05yNII1E-E8D8xYWidKqn0e5hJUGyCne05wsqBax0",
+  "msg": "Encrypted the response",
+  "authorization_encrypted_response_alg": "ECDH-ES",
+  "authorization_encrypted_response_enc": "A128GCM",
+  "response": "eyJlcGsiOnsia3R5IjoiRUMiLCJjcnYiOiJQLTI1NiIsIngiOiIxMG1yclhCbkthdGZtY0c3aUo5a1I3ZVQwVkZPUHRpQjlSTVlzNW9EUnVrIiwieSI6ImN6bnd3Tk5CMW0wbklfb2cxR0pYZHE1eVpPNi1jNC03cWJjd045SlhSbW8ifSwiYXB2IjoiYjBsdU9YQnpjMUYyTjNGNlZFNUdUUSIsImtpZCI6Im1UbTJ5SllBbUJ5TlpQM3FmRWtydlEiLCJhcHUiOiJaM05CYUZoUlZ6TllWamxhTVRaVVFnIiwiY3R5IjoianNvbiIsImVuYyI6IkExMjhHQ00iLCJhbGciOiJFQ0RILUVTIn0..JEeEgYk072A9igHk.SNSrc-1l05UycwuF-fCuck28kuzqmx7CHryv-rL2p_jBaLrwIPJPdIiSIQBLZkq7dC8ovEISY-Iz2bW4jHz23Q7Md2RxVU1dVZX3eqIYQ59lNsL2IFMnnkZT701SEhC5mTjZiwLqYk1pn_VMTdpOXD5GgybPJdojrZSEhUnek-4zFnCldKMk6w0kkF4YAXtJObGxnjq0sPye4ozV9Nvk7hECxawBhaglJ1IcH8InPr_IY2gjYmKT2Kkp-9l0_wyt3QdR-utFM4KY5mNokk2nRO9m7dK2oKe8Acj-5wOKT3ho-x2VY_Y6Odh0afTJVRNUjnRBDtfW7jmIjtCDqODiw4KdMY9tty-PgxZZz4kb3_SccMxv98cGLeYvUIF12_u7631O7kc1yC1YCMhdALlZ957QdISD16Wzfb7CFr8UctCIjIv7z1msk0bpWR5rcOnBceID25FNcsmG_nwb9n7b8U9zLmS_1NYjOvrfn10qHjT13zL-L0vzAC0d4LKluC8V8f43qYiB7AXQaaKxCJCdozPCSUjgcpb75uiU6Noe8aEaIynEBGX6mUEVlcAxtm9Mw5p_GT3xPZU6ZcmtDPHQWvuo8Za19aec1e5TqLCqVKzslC2tIG3MqvmXe8SFkQWD36ntnDP9FwPtmRNu7sPEvKvXdzCVh7T1sshaa-6k4Cjir34UkOOjAQlO-nnSPKPWco87UUCOBPb9ahndMcPCGkmWHiLfS8IE2roHSIJLnLg8-7xNYYmoLwLzZIz-gSvy4JfOi4OD3sqgzidxdCeiuTHaAsL_1TnPDKHwlSj3YQ5KRoEO-c-kb_mpyMRn-M-jlFfV1NJPReqigIo-ny8_m_yWpEuiFXo7C3aYJTclJZabIGBl8LLKFsZhERR-XY9d-tJgMwQ66C5T9tSnZGtY_vHw39GIKnD-E_cuvdjUsdXyMwb6zJxJZs-1zQjPuN7ysVe4JIQ1sL6TnH0oKDXdOkRBxHBNqfmHgWnnWUl0ACg-XnqlCNPWPsphBo6i6VATPbcJ6Hhxy5-70uqK_vdLuOHnKv8ghThEbtMIErxrqAprBxlQybrOfgrhN0zSaunMwIaRDaIBEBTBHyAg15sLDmwfUcKo1DP4YiazzWOmY44OQuqVoLaYhCpDQJRi5csZz4y6F1wb52H-Ez8VU6wwkW9Ggi8Tg40xXyRq-f9EKSN9O0VULOpqWIXkzjn2M7aj6rzXmgNRQms2G8SyRuJv2qylEPXNzEVipu37WCzsyQepNi2t8Nh9Ie5sW4-pyr3_-1S_Czuvj622HAjKWYZVG2TvsZvjvVn-31kkjNwlm1vQ9DGe67bX6hGQu9gxHzZd3S37WCaMXVN1pYNWggG9ptWx0USPexFqGC_sV3ii1F4of94gMmk6l9r5aexJrXQiTeozNahtF5x6LZOJFEW-Ry8zl6f72jlAJKb3EwY5gT45BfrIZBbcRbvuEVYfuR6u1-A_Laaa9vFxqHean5iuOydQidD2js4JSEMOCkhU_FdAnFX3L-dmiv2Lc-TTXku8tt1wLEEmzNkqcipmqCIf7BVsPt0YEBeAyf1K13VlXfE84wCAw8L-N40C_Wx6i0RqL7DFF0rscyhdDDxSO-WMiYB8ECwwrlgbxvIR8tbkZ_w7PyULnAsuLQMPx2z7cGkeuleyynkknWzaqElRWaOXE3nmHHHV7XTnwaFRgivQ-F2S7qSioH3dQdlyYwJsHR7b1sr-wYDmFs8nLoovR5-BKhQLfJU5HmUTXhwkYyW3gU8c8NknXjtJXuf5Hl96gDOCellk3ds7hldni0N4kTuo85GFWs3BNNdxlIsm3RUoOd3wVgQFt_yuAL0rtTct_2LRHK3F2rV6JNJ9VioxgcPlVC5iY2UQc0oszNGdWLX0SzF3QYkYMtLMAciKUJt9GuVQzcXNsBl5woKa4xZcbfRLIb83swOcz7W1de6hJY7a_T2FD3ghhhzIBNG9YMLQTpaPSZpmiIOPX-m0s5qMODWAKPbhH06Jt5Lt_sjx4yuTDcbr9MpZfjZ20WwiHeBNp7jFGxZMfe8_i7ZN0yij0UfNyYXlAhIlpxPC1oWNgxr62NI0F6OxjqmHoL8_ze54ttKT6DyEovbDNCFhOgnNTZ4DRDE4FDfqohlml44h9sdVM7DYZR4DwNKnCnU66gN984Rpx_K8GFcLYKUGRPR7x9nfm6CX4qahHLYdw6ydE1XAk9E1iOHZcutpKYPUchNZ-Mu3h1w7SVO5dpyUY7AjEem8nEkXEQjZYm3-skU3SPT_0E1XwH_qRihuxPcBuHjKDU7P_iiEGFiJaVdUh-mNipKakn0jRIPQyz3OqBn0FygsJ6Zb5Kk5hB_m5hrmdVssoGw-qJurKZqYXXBLgERpt5B5wJWHEkQx7DjlGRmcGWZbYfwWaN40BxafUd3MjFRfYNxHyek4YrN-T6TjStWWlwrdEfVUcfH3LyumiCkhLzqmUEtBvKZ3CMEMAsUKQkAsSl8-0no-QvReii6T6l1kx1nDESsqUe8KmgjRsr_8xOyFxq2oE4do7kRFgVx2IMNo_XkZVEgF3kBAh9YpPleDJc4JCJ_vwOtmPK-moKwHGTBlSe2z3-ER9jJR6lkYQCJPnHzg3Ud6qFoNLGbmc1C1vZdHnIvsjSh7B1f-57DNDpMtY9TLH0CV6WCPQa5sR-r0HOzJUH1eti1KYT3x-0-XmJtFDuP9IfouiNon_oV2yG-p6tYwvZsp3PpOleuQxdkGDU4nQagpEVnxykuUvoV0G5gLJaMVQgMm51jBsjHd0HXUhsEPt5cPgxxquKLs1au6PUhSwCN44qyz0Q85VnOkss7VSU2RymBOmPitSBHmHeM38ha5Z2tAamM-WBCxAkggXZE50YtCQmLSMtEOGRq8ow33HfzK_GLbueEYbd3fi5gWnHU_WKqOyBxuhwnz2xLbxs-M4yIuBoO5GrO3Ge1yayT5YgWK1DSr2nwYWWFnVskneeQL_7PsVtMEZ5xIBnvMi62RDUZkrbzeL4i2mYnn-ZdzxD-eEjzkRVwcbKrrhmAyM-xFSlbSnFtNO4PDeWSP5YRWxMZq-npnW_MYK_AOChPNZPJvijAt_M6jQ5LpI52YWJJEjstJjxMzG0F16t2M3KssOv9g19YOCYY7_udFVU4JD4s3LmkWeQ2Eba7ePdTKlOekbo5_04JjUEvlafZfSCXowRDljjlj7CrzkI3LSqJi72fA4vheAdKW0SJ-3NYuBZ_nM1OXoHTfRFUzGera-B-0-gV14TwztqGPj5ulcZRdEMgDusczraCOwkA-0l4TMzJhOLdpPzGdsjcA8hUywwR_NfmmQaaoSj7H62vxso5vuWO9XCC1h3mMyTwT1lpFS5BVROcjsbGNixVhrcUNhv_WVFRVKmpJySUMfbrRK-HKZZdKsRRqYReiLL5qdN03Z1EEAf71xDtcV7mAEiyfkZO5KKW8LcYKthGcBx6XtL38MRgP7GcYS8K15F3THQXI7J89MBakMgHqi0jafRF58Kbl4baCg7x1pJVpZpOH0lxsw8a5g3GydkVmr1CC6BYSY2isY-HWZuV6JNSiGLWdcwbK8jqMTIJGS3Hysz289weGPb2g8DKng9ujMdFbK6gYaDUH_g3r291YfxTyzhqXkeDy0mV6LTLHgvBCBTJx29BAHmgBsIx8gMdO6Sw51gV0ywqT.24SDNrnQNBjrqNQft6vUxA",
+  "apv": "oIn9pssQv7qzTNFM",
+  "apu": "gsAhXQW3XV9Z16TB",
+  "apv_b64": {
+   "value": "b0luOXBzc1F2N3F6VE5GTQ"
+  },
+  "apu_b64": {
+   "value": "Z3NBaFhRVzNYVjlaMTZUQg"
+  },
+  "testId": "8AviYds05yNII1E",
+  "src": "VP1FinalEncryptVPResponse",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991558
+ },
+ {
+  "_id": "8AviYds05yNII1E-eY0ndqMEpXVGeDrGhURvqEbRVa7Rjbdt",
+  "request_uri": "https://host.docker.internal:18444/lab/v1/response/O9a33OsS08_INo3lSmbfXw",
+  "request_method": "POST",
+  "request_headers": {
+   "Accept": "application/json",
+   "Content-Type": "application/x-www-form-urlencoded",
+   "Content-Length": "4106"
+  },
+  "request_body": "response=eyJlcGsiOnsia3R5IjoiRUMiLCJjcnYiOiJQLTI1NiIsIngiOiIxMG1yclhCbkthdGZtY0c3aUo5a1I3ZVQwVkZPUHRpQjlSTVlzNW9EUnVrIiwieSI6ImN6bnd3Tk5CMW0wbklfb2cxR0pYZHE1eVpPNi1jNC03cWJjd045SlhSbW8ifSwiYXB2IjoiYjBsdU9YQnpjMUYyTjNGNlZFNUdUUSIsImtpZCI6Im1UbTJ5SllBbUJ5TlpQM3FmRWtydlEiLCJhcHUiOiJaM05CYUZoUlZ6TllWamxhTVRaVVFnIiwiY3R5IjoianNvbiIsImVuYyI6IkExMjhHQ00iLCJhbGciOiJFQ0RILUVTIn0..JEeEgYk072A9igHk.SNSrc-1l05UycwuF-fCuck28kuzqmx7CHryv-rL2p_jBaLrwIPJPdIiSIQBLZkq7dC8ovEISY-Iz2bW4jHz23Q7Md2RxVU1dVZX3eqIYQ59lNsL2IFMnnkZT701SEhC5mTjZiwLqYk1pn_VMTdpOXD5GgybPJdojrZSEhUnek-4zFnCldKMk6w0kkF4YAXtJObGxnjq0sPye4ozV9Nvk7hECxawBhaglJ1IcH8InPr_IY2gjYmKT2Kkp-9l0_wyt3QdR-utFM4KY5mNokk2nRO9m7dK2oKe8Acj-5wOKT3ho-x2VY_Y6Odh0afTJVRNUjnRBDtfW7jmIjtCDqODiw4KdMY9tty-PgxZZz4kb3_SccMxv98cGLeYvUIF12_u7631O7kc1yC1YCMhdALlZ957QdISD16Wzfb7CFr8UctCIjIv7z1msk0bpWR5rcOnBceID25FNcsmG_nwb9n7b8U9zLmS_1NYjOvrfn10qHjT13zL-L0vzAC0d4LKluC8V8f43qYiB7AXQaaKxCJCdozPCSUjgcpb75uiU6Noe8aEaIynEBGX6mUEVlcAxtm9Mw5p_GT3xPZU6ZcmtDPHQWvuo8Za19aec1e5TqLCqVKzslC2tIG3MqvmXe8SFkQWD36ntnDP9FwPtmRNu7sPEvKvXdzCVh7T1sshaa-6k4Cjir34UkOOjAQlO-nnSPKPWco87UUCOBPb9ahndMcPCGkmWHiLfS8IE2roHSIJLnLg8-7xNYYmoLwLzZIz-gSvy4JfOi4OD3sqgzidxdCeiuTHaAsL_1TnPDKHwlSj3YQ5KRoEO-c-kb_mpyMRn-M-jlFfV1NJPReqigIo-ny8_m_yWpEuiFXo7C3aYJTclJZabIGBl8LLKFsZhERR-XY9d-tJgMwQ66C5T9tSnZGtY_vHw39GIKnD-E_cuvdjUsdXyMwb6zJxJZs-1zQjPuN7ysVe4JIQ1sL6TnH0oKDXdOkRBxHBNqfmHgWnnWUl0ACg-XnqlCNPWPsphBo6i6VATPbcJ6Hhxy5-70uqK_vdLuOHnKv8ghThEbtMIErxrqAprBxlQybrOfgrhN0zSaunMwIaRDaIBEBTBHyAg15sLDmwfUcKo1DP4YiazzWOmY44OQuqVoLaYhCpDQJRi5csZz4y6F1wb52H-Ez8VU6wwkW9Ggi8Tg40xXyRq-f9EKSN9O0VULOpqWIXkzjn2M7aj6rzXmgNRQms2G8SyRuJv2qylEPXNzEVipu37WCzsyQepNi2t8Nh9Ie5sW4-pyr3_-1S_Czuvj622HAjKWYZVG2TvsZvjvVn-31kkjNwlm1vQ9DGe67bX6hGQu9gxHzZd3S37WCaMXVN1pYNWggG9ptWx0USPexFqGC_sV3ii1F4of94gMmk6l9r5aexJrXQiTeozNahtF5x6LZOJFEW-Ry8zl6f72jlAJKb3EwY5gT45BfrIZBbcRbvuEVYfuR6u1-A_Laaa9vFxqHean5iuOydQidD2js4JSEMOCkhU_FdAnFX3L-dmiv2Lc-TTXku8tt1wLEEmzNkqcipmqCIf7BVsPt0YEBeAyf1K13VlXfE84wCAw8L-N40C_Wx6i0RqL7DFF0rscyhdDDxSO-WMiYB8ECwwrlgbxvIR8tbkZ_w7PyULnAsuLQMPx2z7cGkeuleyynkknWzaqElRWaOXE3nmHHHV7XTnwaFRgivQ-F2S7qSioH3dQdlyYwJsHR7b1sr-wYDmFs8nLoovR5-BKhQLfJU5HmUTXhwkYyW3gU8c8NknXjtJXuf5Hl96gDOCellk3ds7hldni0N4kTuo85GFWs3BNNdxlIsm3RUoOd3wVgQFt_yuAL0rtTct_2LRHK3F2rV6JNJ9VioxgcPlVC5iY2UQc0oszNGdWLX0SzF3QYkYMtLMAciKUJt9GuVQzcXNsBl5woKa4xZcbfRLIb83swOcz7W1de6hJY7a_T2FD3ghhhzIBNG9YMLQTpaPSZpmiIOPX-m0s5qMODWAKPbhH06Jt5Lt_sjx4yuTDcbr9MpZfjZ20WwiHeBNp7jFGxZMfe8_i7ZN0yij0UfNyYXlAhIlpxPC1oWNgxr62NI0F6OxjqmHoL8_ze54ttKT6DyEovbDNCFhOgnNTZ4DRDE4FDfqohlml44h9sdVM7DYZR4DwNKnCnU66gN984Rpx_K8GFcLYKUGRPR7x9nfm6CX4qahHLYdw6ydE1XAk9E1iOHZcutpKYPUchNZ-Mu3h1w7SVO5dpyUY7AjEem8nEkXEQjZYm3-skU3SPT_0E1XwH_qRihuxPcBuHjKDU7P_iiEGFiJaVdUh-mNipKakn0jRIPQyz3OqBn0FygsJ6Zb5Kk5hB_m5hrmdVssoGw-qJurKZqYXXBLgERpt5B5wJWHEkQx7DjlGRmcGWZbYfwWaN40BxafUd3MjFRfYNxHyek4YrN-T6TjStWWlwrdEfVUcfH3LyumiCkhLzqmUEtBvKZ3CMEMAsUKQkAsSl8-0no-QvReii6T6l1kx1nDESsqUe8KmgjRsr_8xOyFxq2oE4do7kRFgVx2IMNo_XkZVEgF3kBAh9YpPleDJc4JCJ_vwOtmPK-moKwHGTBlSe2z3-ER9jJR6lkYQCJPnHzg3Ud6qFoNLGbmc1C1vZdHnIvsjSh7B1f-57DNDpMtY9TLH0CV6WCPQa5sR-r0HOzJUH1eti1KYT3x-0-XmJtFDuP9IfouiNon_oV2yG-p6tYwvZsp3PpOleuQxdkGDU4nQagpEVnxykuUvoV0G5gLJaMVQgMm51jBsjHd0HXUhsEPt5cPgxxquKLs1au6PUhSwCN44qyz0Q85VnOkss7VSU2RymBOmPitSBHmHeM38ha5Z2tAamM-WBCxAkggXZE50YtCQmLSMtEOGRq8ow33HfzK_GLbueEYbd3fi5gWnHU_WKqOyBxuhwnz2xLbxs-M4yIuBoO5GrO3Ge1yayT5YgWK1DSr2nwYWWFnVskneeQL_7PsVtMEZ5xIBnvMi62RDUZkrbzeL4i2mYnn-ZdzxD-eEjzkRVwcbKrrhmAyM-xFSlbSnFtNO4PDeWSP5YRWxMZq-npnW_MYK_AOChPNZPJvijAt_M6jQ5LpI52YWJJEjstJjxMzG0F16t2M3KssOv9g19YOCYY7_udFVU4JD4s3LmkWeQ2Eba7ePdTKlOekbo5_04JjUEvlafZfSCXowRDljjlj7CrzkI3LSqJi72fA4vheAdKW0SJ-3NYuBZ_nM1OXoHTfRFUzGera-B-0-gV14TwztqGPj5ulcZRdEMgDusczraCOwkA-0l4TMzJhOLdpPzGdsjcA8hUywwR_NfmmQaaoSj7H62vxso5vuWO9XCC1h3mMyTwT1lpFS5BVROcjsbGNixVhrcUNhv_WVFRVKmpJySUMfbrRK-HKZZdKsRRqYReiLL5qdN03Z1EEAf71xDtcV7mAEiyfkZO5KKW8LcYKthGcBx6XtL38MRgP7GcYS8K15F3THQXI7J89MBakMgHqi0jafRF58Kbl4baCg7x1pJVpZpOH0lxsw8a5g3GydkVmr1CC6BYSY2isY-HWZuV6JNSiGLWdcwbK8jqMTIJGS3Hysz289weGPb2g8DKng9ujMdFbK6gYaDUH_g3r291YfxTyzhqXkeDy0mV6LTLHgvBCBTJx29BAHmgBsIx8gMdO6Sw51gV0ywqT.24SDNrnQNBjrqNQft6vUxA",
+  "msg": "HTTP request",
+  "http": "request",
+  "testId": "8AviYds05yNII1E",
+  "src": "CallDirectPostEndpoint",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991562
+ },
+ {
+  "_id": "8AviYds05yNII1E-27IKkpl7zxa4SbAiR3gFg4eNTwQ3PbEw",
+  "response_status_code": "400 BAD_REQUEST",
+  "response_status_text": "Bad Request",
+  "response_headers": {
+   "content-type": "application/json",
+   "content-length": "27",
+   "date": "Wed, 25 Nov 2026 04:46:31 GMT"
+  },
+  "response_body": "{\"error\":\"invalid_request\"}",
+  "msg": "HTTP response",
+  "http": "response",
+  "testId": "8AviYds05yNII1E",
+  "src": "CallDirectPostEndpoint",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991585
+ },
+ {
+  "_id": "8AviYds05yNII1E-w0XP782tdvlp8cSlQ8o1he675o91BoNB",
+  "status": 400,
+  "endpoint_name": "https://host.docker.internal:18444/lab/v1/response/O9a33OsS08_INo3lSmbfXw",
+  "headers": {
+   "content-type": "application/json",
+   "content-length": "27",
+   "date": "Wed, 25 Nov 2026 04:46:31 GMT"
+  },
+  "body": "{\"error\":\"invalid_request\"}",
+  "body_json": {
+   "error": "invalid_request"
+  },
+  "msg": "Parsed response uri endpoint response",
+  "result": "SUCCESS",
+  "testId": "8AviYds05yNII1E",
+  "src": "CallDirectPostEndpoint",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991586
+ },
+ {
+  "_id": "8AviYds05yNII1E-fHG6NVc97YBLyNtTLfhHVdm5Y1Ix1PNg",
+  "msg": "https://host.docker.internal:18444/lab/v1/response/O9a33OsS08_INo3lSmbfXw endpoint http status code was 400",
+  "result": "SUCCESS",
+  "requirements": [
+   "OID4VP-1FINAL-8.2"
+  ],
+  "testId": "8AviYds05yNII1E",
+  "src": "EnsureHttpStatusCodeIs4xx",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991587
+ },
+ {
+  "_id": "8AviYds05yNII1E-zvMuNiSJCrpq6eIFqnen6ETs3CbolRUp",
+  "msg": "Response to HTTP request to test instance 8AviYds05yNII1E",
+  "http": "outgoing",
+  "outgoing": "ModelAndView [view=\"resultCaptured\"; model={returnUrl=/log-detail.html?log=8AviYds05yNII1E}]",
+  "outgoing_path": "authorize",
+  "testId": "8AviYds05yNII1E",
+  "src": "oid4vp-1final-verifier-invalid-kb-jwt-nonce",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991588
+ },
+ {
+  "_id": "8AviYds05yNII1E-FqpckH5FsjUCGpgUYgluS7D8iocuoIgB",
+  "msg": "Test has run to completion",
+  "result": "FINISHED",
+  "testmodule_result": "PASSED",
+  "testId": "8AviYds05yNII1E",
+  "src": "oid4vp-1final-verifier-invalid-kb-jwt-nonce",
+  "testOwner": {
+   "sub": "developer",
+   "iss": "https://developer.com"
+  },
+  "time": 1795581991591
+ }
+]
