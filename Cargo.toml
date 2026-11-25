@@ -2,10 +2,12 @@
 resolver = "3"
 # MVP scope (06 · Design Review §6) was four packages; session-redis (G5, IMP-014) is split out
 # now that G0/G1 have passed, scenario-runner and evidence-report (G6, IMP-015/016) after the
-# MVP. spruce-adapter follows later.
+# MVP. jose-ecdh-es (OpenID4VP 1.0-style ECDH-ES codec, research only; never a fallback for
+# jose-hpke) is a plain library like jose-hpke. spruce-adapter follows later.
 members = [
     "crates/protocol-model",
     "crates/jose-hpke",
+    "crates/jose-ecdh-es",
     "crates/session-core",
     "crates/session-redis",
     "crates/lab-server",
@@ -19,6 +21,7 @@ members = [
 default-members = [
     "crates/protocol-model",
     "crates/jose-hpke",
+    "crates/jose-ecdh-es",
     "crates/session-core",
     "crates/session-redis",
     "crates/lab-server",
@@ -75,7 +78,9 @@ hyper-util = { version = "0.1.21", default-features = false, features = ["server
 # signature crates. SpruceID's `P256Signer` is not used in the Verifier build: it would pull
 # openid4vp (and with it reqwest, ssi and the advisory baseline) into the shipped binary, and its
 # p256 0.13 line signs over crypto-bigint 0.5 (RUSTSEC-2026-0387). Tests pin byte equality.
-p256 = { version = "0.14.0", default-features = false, features = ["ecdsa"] }
+# `ecdh` (jose-ecdh-es key agreement) is the feature hpke already enables on the same p256, so
+# it adds no crate.
+p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "ecdh"] }
 
 # lab-server did:key derivation of the Request Object signing key (base58btc, did:key v0.7).
 # Already in the tree through ssi; `alloc` only (no `check`, so no extra sha2).
@@ -113,6 +118,10 @@ redis = { version = "1.8.3", default-features = false, features = ["script", "to
 # jose-hpke (S1). HPKE-0 = DHKEM(P-256, HKDF-SHA256) + HKDF-SHA256 + AES-128-GCM. Defaults pull
 # X25519/ML-KEM/ChaCha, which HPKE-0 does not need. Uses p256 0.14 (openid4vp: 0.13).
 hpke = { version = "0.15.1", default-features = false, features = ["alloc", "nistp", "aes", "hkdfsha2"] }
+# jose-ecdh-es: AES-GCM content encryption (RFC 7518 §5.3). The same aes-gcm 0.11.1 hpke already
+# pulls in (one version, no new crate). `zeroize` wipes the expanded AES key schedule and GHASH
+# key on drop; it only switches on features of crates already in the tree. Apache-2.0 OR MIT.
+aes-gcm = { version = "0.11.1", default-features = false, features = ["aes", "zeroize"] }
 # jose-hpke: Deserialize/Visitor (duplicate-member check). session-redis: the Serialize /
 # DeserializeOwned bound on stored results. No derive needed.
 serde = "1.0.229"
