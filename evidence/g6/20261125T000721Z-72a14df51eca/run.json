@@ -1,0 +1,24 @@
+{
+  "budget": 128,
+  "burst": 64,
+  "burst_rounds": 10,
+  "iterations": 100,
+  "over_budget": 8,
+  "profile": "release",
+  "redis": true,
+  "run_id": "20261125T000721Z-72a14df51eca",
+  "seed": 1,
+  "sizes": [
+    1,
+    2,
+    8,
+    32,
+    64,
+    128
+  ],
+  "store_iterations": 1000,
+  "store_warmup": 10,
+  "transport": "HTTP/1.1 over 127.0.0.1, server and wallet simulator in one process",
+  "warmup": 10,
+  "worker_threads": 18
+}
