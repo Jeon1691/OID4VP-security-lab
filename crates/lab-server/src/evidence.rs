@@ -83,6 +83,9 @@ pub enum Rejection {
     ReplayGuardFull,
     /// The server is shutting down past its drain deadline; nothing is committed any more.
     ShuttingDown,
+    /// The OS random number generator failed while drawing the Response Code of a response
+    /// `redirect_uri`; nothing is committed (fail closed).
+    ResponseCodeUnavailable,
     /// The atomic claim failed (session-core [`ClaimError`]).
     Claim(ClaimError),
 }

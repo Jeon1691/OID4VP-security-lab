@@ -99,6 +99,49 @@ pub const DEFAULT_CLIENT_ID: &str =
 /// (OpenID4VP 1.0 / 1.1 §13.1.2); the OIDF suite instead gives a per-test HTTPS endpoint.
 pub const DEFAULT_AUTHORIZATION_ENDPOINT: &str = "openid4vp://";
 
+/// The one scheme of a URL the lab hands to a Wallet, other than the custom scheme default.
+const HTTPS_SCHEME: &str = "https://";
+/// Highest TCP port number (RFC 9293 §3.1: 16-bit port field).
+const MAX_PORT: u32 = 65_535;
+
+/// Whether `url` is an absolute `https://` URL with a host: `https://<host>[:<port>][/...]`,
+/// where `<host>` is a DNS name or IPv4 literal (dot-separated labels of ASCII letters, digits
+/// and inner `-`), `<port>` is 1-65535, there is no user info (`@`) and no fragment (`#`), and
+/// everything is visible ASCII. A strict hand check (RFC 3986 §3 subset): the default build
+/// has no URL parser, and the lab only ever appends query parameters to these URLs.
+pub(crate) fn is_https_url(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix(HTTPS_SCHEME) else {
+        return false;
+    };
+    if !url.bytes().all(|b| b.is_ascii_graphic()) || url.contains('#') {
+        return false;
+    }
+    let authority = rest.split(['/', '?']).next().unwrap_or_default();
+    if authority.contains('@') {
+        return false;
+    }
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, port)) => (host, Some(port)),
+        None => (authority, None),
+    };
+    let port_ok = port.is_none_or(|port| {
+        !port.is_empty()
+            && port.bytes().all(|b| b.is_ascii_digit())
+            && port
+                .parse::<u32>()
+                .is_ok_and(|p| (1..=MAX_PORT).contains(&p))
+    });
+    let label_ok = |label: &str| {
+        !label.is_empty()
+            && label
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+    };
+    !host.is_empty() && host.split('.').all(label_ok) && port_ok
+}
+
 /// Longest configured authorization endpoint (lab policy; real endpoints are short URLs).
 const MAX_AUTHORIZATION_ENDPOINT_LEN: usize = 2048;
 
@@ -298,9 +341,10 @@ pub enum StartError {
     #[cfg(feature = "conformance")]
     #[error("conformance maximum runtime exceeds the lab limit")]
     MaxRuntimeTooLong,
-    /// [`LabConfig::authorization_endpoint`] empty, over the lab length limit, not visible
-    /// ASCII, or with a fragment.
-    #[error("authorization endpoint must be visible ASCII without a fragment")]
+    /// [`LabConfig::authorization_endpoint`] neither [`DEFAULT_AUTHORIZATION_ENDPOINT`] nor
+    /// an absolute `https://` URL with a host (no user info, no fragment), or over the lab
+    /// length limit.
+    #[error("authorization endpoint must be openid4vp:// or an absolute https URL with a host")]
     AuthorizationEndpoint,
     /// [`Mode::Conformance`] without [`LabConfig::conformance`], or that configuration in any
     /// other mode.
@@ -346,10 +390,8 @@ pub(crate) fn check(config: &LabConfig) -> Result<KeyHint, StartError> {
         return Err(StartError::EcdhEsRouteNeedsResearchMode);
     }
     let endpoint = &config.authorization_endpoint;
-    if endpoint.is_empty()
-        || endpoint.len() > MAX_AUTHORIZATION_ENDPOINT_LEN
-        || !endpoint.bytes().all(|b| b.is_ascii_graphic())
-        || endpoint.contains('#')
+    if endpoint.len() > MAX_AUTHORIZATION_ENDPOINT_LEN
+        || (endpoint != DEFAULT_AUTHORIZATION_ENDPOINT && !is_https_url(endpoint))
     {
         return Err(StartError::AuthorizationEndpoint);
     }

@@ -40,8 +40,9 @@ use lab_server::wallet_sim::{
 };
 use lab_server::{
     ConformanceConfig, CredentialRequest, GENERIC_REJECTION_BODY, LabConfig, LabServer,
-    MAX_CONFORMANCE_MAX_RUNTIME, MAX_SESSION_TTL, Mode, PublicOrigin, Rejection, RequestSigningKey,
-    RouteKind, StartError, TrustedIssuerKey, ValidationError, X509Credentials, X509Error,
+    MAX_CONFORMANCE_MAX_RUNTIME, MAX_SESSION_TTL, Mode, PublicOrigin, RESPONSE_CODE_BYTES,
+    Rejection, RequestSigningKey, RouteKind, StartError, TrustedIssuerKey, ValidationError,
+    X509Credentials, X509Error,
 };
 use serde_json::{Map, Value, json};
 
@@ -80,6 +81,22 @@ const REDIRECT_URI: &str = "https://host.docker.internal/lab/conformance/done";
 const SHORT_RUNTIME: Duration = Duration::from_secs(1);
 /// Runtime of the keep-alive test: long enough for one request to complete before it ends.
 const KEEP_ALIVE_RUNTIME: Duration = Duration::from_secs(2);
+/// URLs refused as response `redirect_uri` and authorization endpoint: wrong or missing
+/// scheme, no host, empty or bad labels, bad ports, user info, fragment, whitespace.
+const MALFORMED_HTTPS_URLS: [&str; 12] = [
+    "http://host.docker.internal/done",
+    "https://",
+    "https:///done",
+    "https://?x=1",
+    "https://host..internal/done",
+    "https://-host.internal/done",
+    "https://host.docker.internal:/done",
+    "https://host.docker.internal:0/done",
+    "https://host.docker.internal:65536/done",
+    "https://user@host.docker.internal/done",
+    "https://host.docker.internal/done#fragment",
+    "https://host docker/done",
+];
 /// One second above the conformance runtime ceiling.
 const ONE_SECOND: Duration = Duration::from_secs(1);
 const RUNTIME_SLACK: Duration = Duration::from_secs(10);
@@ -327,12 +344,32 @@ async fn conformance_round_trip_with_x509_hash_a256gcm_and_redirect_uri() {
         )
         .await;
     assert_eq!(status, OK);
-    assert_eq!(
-        serde_json::from_slice::<Value>(&body).expect("JSON"),
-        json!({ "redirect_uri": REDIRECT_URI })
-    );
+    let code = response_code(&body);
     assert_eq!(lab.rejection(), None);
     assert_eq!(lab.state(&session).await, "consumed");
+    // The code is stored with the consumed session and shown with its result.
+    let result: Value = serde_json::from_slice(
+        &lab.wallet
+            .get(&session.result_uri)
+            .await
+            .expect("result")
+            .body,
+    )
+    .expect("result JSON");
+    assert_eq!(result["response_code"], json!(code));
+
+    // OpenID4VP 1.0 §8.2: "a fresh, cryptographically random value" per response.
+    let other = lab.session().await;
+    let (status, body) = lab
+        .respond(&other, ContentEncryption::A128Gcm, &SealOptions::default())
+        .await;
+    assert_eq!(status, OK);
+    assert_eq!(lab.rejection(), None);
+    assert_ne!(
+        response_code(&body),
+        code,
+        "a second response gets another code"
+    );
     // The same JWE again: the session is consumed.
     let (status, body) = lab
         .respond(
@@ -345,6 +382,23 @@ async fn conformance_round_trip_with_x509_hash_a256gcm_and_redirect_uri() {
         (status, body.as_slice()),
         (BAD_REQUEST, GENERIC_REJECTION_BODY.as_bytes())
     );
+}
+
+/// The `response_code` of a `{"redirect_uri": "<REDIRECT_URI>?response_code=<code>"}` answer:
+/// 128 random bits as unpadded base64url.
+fn response_code(body: &[u8]) -> String {
+    let answer: Value = serde_json::from_slice(body).expect("JSON");
+    let members: Vec<&String> = answer.as_object().expect("object").keys().collect();
+    assert_eq!(members, ["redirect_uri"]);
+    let uri = answer["redirect_uri"].as_str().expect("redirect_uri");
+    let code = uri
+        .strip_prefix(&format!("{REDIRECT_URI}?response_code="))
+        .expect("the configured redirect_uri with a response_code");
+    assert_eq!(
+        URL_SAFE_NO_PAD.decode(code).expect("base64url").len(),
+        RESPONSE_CODE_BYTES
+    );
+    code.to_owned()
 }
 
 /// HAIP 1.0 §5: every session advertises its own ECDH-ES key and `kid`.
@@ -704,18 +758,39 @@ async fn conformance_mode_refuses_to_start_unless_everything_fits() {
         Some(StartError::EcdhEsRouteNeedsResearchMode)
     ));
 
-    let mut http_redirect = config(Prefix::SanDns);
-    if let Some(conformance) = &mut http_redirect.conformance {
-        conformance.response_redirect_uri = Some("http://host.docker.internal/done".to_owned());
+    // Response redirect_uri and authorization endpoint: absolute https URLs with a host only.
+    for bad in MALFORMED_HTTPS_URLS {
+        let mut redirect = config(Prefix::SanDns);
+        if let Some(conformance) = &mut redirect.conformance {
+            conformance.response_redirect_uri = Some(bad.to_owned());
+        }
+        assert!(x509(X509Error::RedirectUri)(start(redirect).await), "{bad}");
+        let mut endpoint = config(Prefix::SanDns);
+        endpoint.authorization_endpoint = bad.to_owned();
+        assert!(
+            matches!(
+                start(endpoint).await,
+                Some(StartError::AuthorizationEndpoint)
+            ),
+            "{bad}"
+        );
     }
-    assert!(x509(X509Error::RedirectUri)(start(http_redirect).await));
-
-    let mut fragment = config(Prefix::SanDns);
-    fragment.authorization_endpoint = format!("{SUITE_AUTHORIZATION_ENDPOINT}#fragment");
-    assert!(matches!(
-        start(fragment).await,
-        Some(StartError::AuthorizationEndpoint)
-    ));
+    for good in [
+        SUITE_AUTHORIZATION_ENDPOINT,
+        "https://host.docker.internal",
+        "https://192.0.2.1:8443/cb?x=1",
+    ] {
+        let mut accepted = config(Prefix::SanDns);
+        accepted.authorization_endpoint = good.to_owned();
+        if let Some(conformance) = &mut accepted.conformance {
+            conformance.response_redirect_uri = Some(good.to_owned());
+        }
+        LabServer::start(accepted)
+            .await
+            .unwrap_or_else(|e| panic!("{good}: {e}"))
+            .shutdown()
+            .await;
+    }
 
     let chain_with_anchor = [LEAF_PEM, CA_PEM].concat();
     assert_eq!(
