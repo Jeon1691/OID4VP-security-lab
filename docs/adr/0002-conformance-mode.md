@@ -1,6 +1,8 @@
 # ADR 0002: A time-boxed OIDF conformance mode
 
-- **Status:** Accepted, 2026-11-25, by the project owner.
+- **Status:** Accepted, 2026-11-25, by the project owner. The owner accepted this C2 decision
+  in session together with the approval to run the suite (2026-11-25), before the code was
+  written.
 - **Scope:** `crates/lab-server` (feature `conformance`, `Mode::Conformance`, the binary's
   `--mode conformance`), `scripts/conformance_fixtures.py`, `scripts/ci_local.sh`.
 - **Amends:** the loopback-only network policy (ADR-005 as referenced in the design docs;
@@ -57,9 +59,13 @@ run:
    refuses the flag before reading any file (gate: `binary_refuses_conformance_without_feature`).
    It refuses to start without its complete configuration (TLS chain and key, trust anchor,
    public origin, an x509 client id), and Hardened / Research servers refuse that configuration.
-2. **Time-boxed.** The server stops accepting by itself after `--max-runtime-secs` (default
-   two hours, `DEFAULT_CONFORMANCE_MAX_RUNTIME`; zero is refused). It is started for one plan
-   run and stopped afterwards.
+2. **Time-boxed.** The time box is mandatory: the server stops accepting by itself after
+   `--max-runtime-secs` (default two hours, `DEFAULT_CONFORMANCE_MAX_RUNTIME`; zero and anything
+   above eight hours, `MAX_CONFORMANCE_MAX_RUNTIME`, are refused at start, and the deadline is
+   computed without overflow). It counts awake time: it is measured with `Instant`, which on
+   macOS does not advance while the machine sleeps, so a server on a sleeping Mac stays up
+   longer in wall-clock time. It is started for one plan run and stopped afterwards. Session
+   lifetimes are bounded too (`MAX_SESSION_TTL`, one hour; zero refused).
 3. **Loopback bind, HTTPS by the lab itself.** The bind address stays loopback (non-loopback
    binds are refused exactly as in every other mode). The lab terminates TLS itself with
    rustls (ring provider only, TLS 1.3, HTTP/1.1 via ALPN); no separate TLS front or proxy. Every
@@ -78,7 +84,8 @@ run:
    trust anchor now (`serverAuth`), is not self-signed and is not the anchor (HAIP 1.0 §5), the
    Request Object key is the leaf's key, the leaf is valid for the public host, and
    `x509_san_dns:<dns>` names the public host (so the `response_uri` FQDN matches the client
-   id) or `x509_hash:<hash>` is the base64url SHA-256 of the leaf DER. The Request Object header
+   id) and equals a dNSName SAN entry of the leaf exactly (a wildcard entry that TLS would accept
+   does not count), or `x509_hash:<hash>` is the base64url SHA-256 of the leaf DER. The Request Object header
    is `alg` ES256, `typ` `oauth-authz-req+jwt`, `x5c` = the chain without the anchor; no `kid`.
 6. **ECDH-ES on the unique route, a key per session.** Conformance sessions are unique-uri
    sessions with a fresh ECDH-ES P-256 key and `kid` each (HAIP 1.0 §5 "ephemeral encryption
