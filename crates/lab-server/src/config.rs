@@ -360,6 +360,12 @@ pub enum StartError {
     #[cfg(feature = "conformance")]
     #[error("TLS configuration: {0}")]
     Tls(rustls::Error),
+    /// A status policy with a [`LabConfig::request_timeout`] not above
+    /// `STATUS_LIST_FETCH_TIMEOUT`: the request would time out (408, no evidence) before the
+    /// status check could record its own failure.
+    #[cfg(feature = "conformance")]
+    #[error("request timeout must exceed the status list fetch timeout")]
+    StatusFetchTimeout,
 }
 
 /// Checks `config` before anything is bound; returns how the Request Object header names its
@@ -398,6 +404,11 @@ pub(crate) fn check(config: &LabConfig) -> Result<KeyHint, StartError> {
     #[cfg(feature = "conformance")]
     match (config.mode, &config.conformance) {
         (Mode::Conformance, Some(conformance)) => {
+            if conformance.status_list.is_some()
+                && config.request_timeout <= crate::status_list::STATUS_LIST_FETCH_TIMEOUT
+            {
+                return Err(StartError::StatusFetchTimeout);
+            }
             return crate::conformance::check(config, conformance).map(KeyHint::X5c);
         }
         (Mode::Conformance, None) | (_, Some(_)) => return Err(StartError::ConformanceConfig),

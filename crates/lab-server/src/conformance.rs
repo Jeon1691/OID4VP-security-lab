@@ -85,6 +85,7 @@ use crate::evidence::{EvidenceRecord, Rejection};
 use crate::jose::ALG_ES256;
 use crate::sd_jwt::SD_JWT_VC_TYP;
 use crate::server::{self, AppState, MILLIS_PER_SECOND};
+use crate::status_list::StatusListPolicy;
 
 /// Client Identifier Prefix: a DNS name in the leaf certificate's SAN (OpenID4VP 1.0 §5.9.3).
 pub const X509_SAN_DNS_PREFIX: &str = "x509_san_dns:";
@@ -293,11 +294,16 @@ pub struct ConformanceConfig {
     /// with a fresh `response_code` (`server::RESPONSE_CODE_BYTES`). `None` (default) answers
     /// `200 {}` like every other mode.
     pub response_redirect_uri: Option<String>,
+    /// The issuer's Token Status List policy (`crate::status_list`;
+    /// docs/adr/0003-status-list-checking.md): which list URIs to fetch, how their tokens are
+    /// trusted, and the Status Provider's pinned TLS certificate. `None` (default): every
+    /// credential that references a status list is refused (`StatusError::NoPolicy`).
+    pub status_list: Option<StatusListPolicy>,
 }
 
 impl ConformanceConfig {
-    /// `credentials` served under `public_origin`, with [`DEFAULT_CONFORMANCE_MAX_RUNTIME`] and
-    /// no response `redirect_uri`.
+    /// `credentials` served under `public_origin`, with [`DEFAULT_CONFORMANCE_MAX_RUNTIME`], no
+    /// response `redirect_uri` and no status policy.
     #[must_use]
     pub const fn new(credentials: X509Credentials, public_origin: PublicOrigin) -> Self {
         Self {
@@ -305,6 +311,7 @@ impl ConformanceConfig {
             public_origin,
             max_runtime: DEFAULT_CONFORMANCE_MAX_RUNTIME,
             response_redirect_uri: None,
+            status_list: None,
         }
     }
 }

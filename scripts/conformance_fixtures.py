@@ -30,6 +30,14 @@ Output (docs/adr/0002-conformance-mode.md):
                                 terms, but no dNSName entry equals it (x509_san_dns must refuse).
   * conformance_foreign_ca.pem  negative-test trust anchor: another self-signed CA that issued
                                 nothing here (the leaf must not chain to it).
+  * status_ca.pem               trust anchor of Status List Tokens (P-256, self-signed, CA:TRUE
+                                pathlen 0): a CA of its own, separate from the Verifier's, as
+                                draft-ietf-oauth-status-list-14 §11.3 has a Certificate Authority
+                                vouch for the Status Issuer. Never sent in `x5c`.
+  * status_signer.pem           Status List Token signing certificate issued by that CA: P-256,
+                                CA:FALSE, digitalSignature, no extended key usage (§10 leaves
+                                id-kp-oauthStatusSigning TBD; the lab refuses any EKU) and no SAN.
+  * status_signer.jwk           its private key as an EC P-256 JWK (tests sign lists with it).
   * conformance_fixtures.json   derived values: x509_san_dns / x509_hash client ids, SANs,
                                 validity, SHA-256 of every file.
 
@@ -57,6 +65,8 @@ DEFAULT_DNS = ["host.docker.internal", "localhost"]
 CA_KEY_LABEL = b"OID4VP-security-lab SYNTHETIC conformance CA key v1"
 LEAF_KEY_LABEL = b"OID4VP-security-lab SYNTHETIC conformance leaf key v1"
 FOREIGN_CA_KEY_LABEL = b"OID4VP-security-lab SYNTHETIC conformance foreign CA key v1"
+STATUS_CA_KEY_LABEL = b"OID4VP-security-lab SYNTHETIC status list CA key v1"
+STATUS_SIGNER_KEY_LABEL = b"OID4VP-security-lab SYNTHETIC status list signer key v1"
 # Oldest OpenSSL with both deterministic ECDSA (3.2.0) and -not_before / -not_after (3.4.0).
 MIN_OPENSSL = (3, 4, 0)
 # Order of the P-256 base point (SEC 2 v2 §2.4.2).
@@ -72,11 +82,15 @@ SPKI_POINT_BYTES = 1 + 2 * P256_SCALAR_BYTES
 # lab checks the chain against the current time at start.
 CA_SUBJECT = "/O=OID4VP security lab/CN=SYNTHETIC conformance CA - never trust"
 FOREIGN_CA_SUBJECT = "/O=OID4VP security lab/CN=SYNTHETIC foreign CA - negative tests only"
+STATUS_CA_SUBJECT = "/O=OID4VP security lab/CN=SYNTHETIC status list CA - never trust"
+STATUS_SIGNER_SUBJECT = "/O=OID4VP security lab SYNTHETIC Status Issuer/CN=SYNTHETIC status list signer"
 LEAF_ORG = "/O=OID4VP security lab SYNTHETIC conformance Verifier"
 CA_SERIAL = "1"
 LEAF_SERIAL = "2"
 WILDCARD_LEAF_SERIAL = "3"
 FOREIGN_CA_SERIAL = "4"
+STATUS_CA_SERIAL = "5"
+STATUS_SIGNER_SERIAL = "6"
 CA_NOT_BEFORE = "20261101000000Z"
 CA_NOT_AFTER = "20361101000000Z"
 LEAF_NOT_BEFORE = "20261101000000Z"
@@ -91,6 +105,9 @@ OUTPUT_FILES = [
     "conformance_leaf.jwk",
     "conformance_wildcard_leaf.pem",
     "conformance_foreign_ca.pem",
+    "status_ca.pem",
+    "status_signer.pem",
+    "status_signer.jwk",
 ]
 MANIFEST = "conformance_fixtures.json"
 
@@ -149,6 +166,11 @@ extendedKeyUsage = serverAuth
 subjectAltName = {san}
 subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid
+[v3_status_signer]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid
 [v3_wildcard_leaf]
 basicConstraints = critical,CA:FALSE
 keyUsage = critical,digitalSignature
@@ -157,6 +179,17 @@ subjectAltName = DNS:{wildcard}
 subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid
 """
+
+
+def private_jwk(point: bytes, label: bytes) -> dict:
+    """The EC P-256 private JWK of the key derived from `label` (public point `point`)."""
+    return {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": b64url(point[1:1 + P256_SCALAR_BYTES]),
+        "y": b64url(point[1 + P256_SCALAR_BYTES:]),
+        "d": b64url(scalar(label)),
+    }
 
 
 def der_of_pem(path: Path) -> bytes:
@@ -201,14 +234,21 @@ def generate(out: Path, dns: list[str]) -> None:
         write_key(scalar(FOREIGN_CA_KEY_LABEL), foreign_key)
         self_signed_ca(cnf, foreign_key, FOREIGN_CA_SUBJECT, FOREIGN_CA_SERIAL,
                        out / "conformance_foreign_ca.pem")
-    jwk = {
-        "kty": "EC",
-        "crv": "P-256",
-        "x": b64url(point[1:1 + P256_SCALAR_BYTES]),
-        "y": b64url(point[1 + P256_SCALAR_BYTES:]),
-        "d": b64url(scalar(LEAF_KEY_LABEL)),
-    }
-    (out / "conformance_leaf.jwk").write_text(json.dumps(jwk, indent=2) + "\n")
+        status_ca_key = tmp / "status_ca.key.pem"
+        write_key(scalar(STATUS_CA_KEY_LABEL), status_ca_key)
+        status_ca = out / "status_ca.pem"
+        self_signed_ca(cnf, status_ca_key, STATUS_CA_SUBJECT, STATUS_CA_SERIAL, status_ca)
+        signer_key = tmp / "status_signer.key.pem"
+        signer_point = write_key(scalar(STATUS_SIGNER_KEY_LABEL), signer_key)
+        signer_csr = tmp / "status_signer.csr"
+        openssl("req", "-new", "-config", str(cnf), "-key", str(signer_key), "-subj",
+                STATUS_SIGNER_SUBJECT, "-out", str(signer_csr))
+        issue_leaf(cnf, signer_csr, status_ca, status_ca_key, STATUS_SIGNER_SERIAL,
+                   "v3_status_signer", out / "status_signer.pem")
+    (out / "conformance_leaf.jwk").write_text(
+        json.dumps(private_jwk(point, LEAF_KEY_LABEL), indent=2) + "\n")
+    (out / "status_signer.jwk").write_text(
+        json.dumps(private_jwk(signer_point, STATUS_SIGNER_KEY_LABEL), indent=2) + "\n")
     leaf_der = der_of_pem(out / "conformance_leaf.pem")
     manifest = {
         "synthetic": "Lab-only test material. The private keys follow from public labels in "

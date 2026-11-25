@@ -102,6 +102,12 @@
 //!    `state` differs simply does not validate; with bounded trial, more than one that
 //!    validates is an integrity failure (reject, claim nothing, record it). Only the first
 //!    validated result is kept.
+//!    Then the Token Status List check of that credential (module `status_list`,
+//!    docs/adr/0003-status-list-checking.md): no `status` claim, nothing to do; a
+//!    `status.status_list` reference is checked by the conformance server's status policy
+//!    (fetch, token verification, `idx`; only `0x00` VALID passes), and refused
+//!    (`StatusError::NoPolicy`) where there is none, which includes every build without
+//!    `conformance`. A refusal is `Rejection::Status` with its own `StatusError`.
 //! 9. Verifier-wide replay guard: a response whose `SHA-256(compact JWE)` already validated
 //!    for a *different* session is refused (`Rejection::CrossSessionReplay`), and so is one
 //!    whose verified holder proof (`SHA-256` of the KB-JWT signing input, signature excluded
@@ -199,7 +205,8 @@
 //!   another Verifier (`aud`), and a Disclosure added, removed or changed after signing fails
 //!   the digest or `sd_hash` check. HPKE decryption authenticates nothing about the holder.
 //! * Not covered (synthetic scope): issuer trust is one configured key (no x5c / Type
-//!   Metadata / trust lists), no status or revocation check, no Wallet attestation, and the
+//!   Metadata / trust lists), status lists only in conformance mode with a configured policy
+//!   (elsewhere a referenced status is refused, never ignored), no Wallet attestation, and the
 //!   KB-JWT freshness window ([`KB_JWT_MAX_AGE_SECS`]) is judged on the Verifier's clock.
 //!   Within that window, nonce uniqueness per session (and the replay guard) is what stops a
 //!   replay to the *same* session; a reused research nonce shares the KB-JWT between sessions
@@ -245,7 +252,9 @@
 //! `verifier_without_sealing` checks it, and that the `ecdh-es-research` build reaches
 //! `jose-ecdh-es` without `test-support`. `conformance` enables `Mode::Conformance` and with it
 //! `jose-ecdh-es` (opening only), rustls / tokio-rustls / rustls-webpki with the ring provider,
-//! and with `wallet-sim` the simulator's HTTPS client and x509 Request Object checks; the gate
+//! Token Status List checking (hyper's HTTP/1.1 client, `miniz_oxide`), and with `wallet-sim`
+//! the simulator's HTTPS client, x509 Request Object checks and `status_sim` (a synthetic
+//! Status Issuer and HTTPS Status Provider for tests); the gate
 //! step `conformance_without_sealing` checks that build, and `verifier_without_sealing` that the
 //! default build has none of it. The binary has no flag for the ECDH-ES route; it is
 //! exercised by tests (`tests/ecdh_es_research_route.rs`). Release artifacts must come from a plain
@@ -263,6 +272,9 @@ mod jar;
 mod jose;
 mod sd_jwt;
 mod server;
+mod status_list;
+#[cfg(all(feature = "wallet-sim", feature = "conformance"))]
+pub mod status_sim;
 mod validate;
 #[cfg(feature = "wallet-sim")]
 pub mod wallet_sim;
@@ -297,6 +309,13 @@ pub use sd_jwt::{
 #[cfg(feature = "lab-instrumentation")]
 pub use server::DecryptionPause;
 pub use server::{GENERIC_REJECTION_BODY, LabServer, MAX_REMEMBERED_DIGESTS, RESPONSE_CODE_BYTES};
+pub use status_list::{FetchFailure, MAX_STATUS_URI_LEN, StatusError, StatusResult};
+#[cfg(feature = "conformance")]
+pub use status_list::{
+    MAX_STATUS_LIST_BYTES, MAX_STATUS_LIST_TOKEN_BYTES, STATUS_LIST_FETCH_TIMEOUT,
+    STATUS_LIST_JWT_MEDIA_TYPE, STATUS_LIST_JWT_TYP, STATUS_LIST_MAX_FUTURE_SKEW_SECS,
+    StatusListConfigError, StatusListPolicy, StatusListTrust,
+};
 pub use validate::{
     CredentialRequest, CredentialRequestError, MAX_CLAIM_NAME_LEN, MAX_CLIENT_ID_LEN,
     MAX_CREDENTIAL_QUERY_ID_LEN, MAX_RESEARCH_NONCE_LEN, MAX_RESEARCH_STATE_LEN, MAX_VCT_LEN,

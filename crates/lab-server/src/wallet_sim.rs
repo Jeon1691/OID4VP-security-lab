@@ -330,6 +330,9 @@ pub struct SyntheticIssuer {
     key: SigningKey,
     /// `vct` of the credentials it issues.
     vct: String,
+    /// `status.status_list` (`uri`, `idx`) of the credentials it issues, if any
+    /// (draft-ietf-oauth-status-list-14 §6.2).
+    status_list: Option<(String, u64)>,
 }
 
 impl fmt::Debug for SyntheticIssuer {
@@ -350,6 +353,7 @@ impl SyntheticIssuer {
         Ok(Self {
             key: key.into_signing_key(),
             vct: SYNTHETIC_CREDENTIAL_VCT.to_owned(),
+            status_list: None,
         })
     }
 
@@ -362,6 +366,15 @@ impl SyntheticIssuer {
         self
     }
 
+    /// The same issuer, putting an issuer-signed (never disclosable) `status` claim
+    /// `{"status_list": {"idx": idx, "uri": uri}}` into every credential it issues
+    /// (draft-ietf-oauth-status-list-14 §6.2; SD-JWT VC §2.2.2.3).
+    #[must_use]
+    pub fn with_status_list(mut self, uri: impl Into<String>, idx: u64) -> Self {
+        self.status_list = Some((uri.into(), idx));
+        self
+    }
+
     /// An issuer with a fresh random key (one no Verifier trusts).
     ///
     /// # Errors
@@ -370,6 +383,7 @@ impl SyntheticIssuer {
         Ok(Self {
             key: random_signing_key()?,
             vct: SYNTHETIC_CREDENTIAL_VCT.to_owned(),
+            status_list: None,
         })
     }
 
@@ -399,7 +413,7 @@ impl SyntheticIssuer {
         digests.push(jose::sha256_b64(&random_bytes(DECOY_BYTES)?).into());
         // RFC 9901 §4.2.4.1: hide the original claim order.
         digests.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
-        let payload = json!({
+        let mut payload = json!({
             "iss": SYNTHETIC_ISSUER_ID,
             "iat": now,
             "exp": now + CREDENTIAL_LIFETIME_SECS,
@@ -408,6 +422,9 @@ impl SyntheticIssuer {
             "_sd_alg": "sha-256",
             "_sd": digests,
         });
+        if let Some((uri, idx)) = &self.status_list {
+            payload["status"] = json!({ "status_list": { "idx": idx, "uri": uri } });
+        }
         Ok(Credential {
             issuer_jwt: sign_jws(&self.key, SD_JWT_VC_TYP, &payload),
             vct: self.vct.clone(),
@@ -1151,7 +1168,7 @@ fn request_object(object: &Value) -> Result<RequestObject, WalletError> {
 }
 
 /// Seconds since the Unix epoch.
-fn now_secs() -> Result<u64, WalletError> {
+pub(crate) fn now_secs() -> Result<u64, WalletError> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -1166,7 +1183,7 @@ fn random_bytes(n: usize) -> Result<Vec<u8>, WalletError> {
 
 /// A fresh P-256 key from the OS CSPRNG (a random 32-byte string is a valid scalar except with
 /// negligible probability; such a draw is retried).
-fn random_signing_key() -> Result<SigningKey, WalletError> {
+pub(crate) fn random_signing_key() -> Result<SigningKey, WalletError> {
     loop {
         let scalar = zeroize::Zeroizing::new(random_bytes(P256_SCALAR_BYTES)?);
         if let Ok(key) = SigningKey::from_slice(&scalar) {
@@ -1237,7 +1254,7 @@ fn tamper_ciphertext(jwe: &str) -> String {
 
 /// `jws` with the first character of its signature replaced, as [`tamper_ciphertext`] does:
 /// canonical base64url of 64 bytes whose `R` differs, so only the signature check catches it.
-fn corrupt_signature(jws: &str) -> String {
+pub(crate) fn corrupt_signature(jws: &str) -> String {
     tamper_segment(jws, JWS_SIGNATURE_SEGMENT)
 }
 

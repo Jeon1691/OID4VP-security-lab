@@ -2737,6 +2737,7 @@ dependencies = [
  "jose-hpke",
  "josekit",
  "lab-server",
+ "miniz_oxide",
  "openid4vp",
  "p256 0.13.2",
  "p256 0.14.0",

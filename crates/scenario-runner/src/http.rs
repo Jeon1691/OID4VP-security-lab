@@ -1194,6 +1194,7 @@ mod tests {
             },
             crypto_result: CryptoResult::NotAttempted,
             validation_result: ValidationResult::NotRun,
+            status_result: lab_server::StatusResult::NotRun,
             commit_result: CommitResult::NotRun,
             rejection: None,
             committed_session: None,
