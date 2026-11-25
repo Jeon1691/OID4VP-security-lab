@@ -171,6 +171,8 @@ REQUIRED_TESTS=(
   bounded_trial_jwe_that_opens_for_b_but_carries_a_state_is_refused_for_b
   reused_nonce_with_fresh_state_selects_one_session_and_refuses_a_replay
   research_state_knob_is_research_only_bounded_and_charset_checked
+  unrecognized_payload_members_are_ignored
+  state_mismatching_candidate_tried_first_does_not_stop_the_validating_one
   # lab-server holder binding (Evidence level 3): SD-JWT VC + KB-JWT (OpenID4VP 1.1 B.3;
   # RFC 9901 §7.1/§7.3; draft-ietf-oauth-sd-jwt-vc-27), over HTTP and against RFC 9901 vectors.
   request_object_dcql_query_requests_the_sd_jwt_vc_and_its_claims

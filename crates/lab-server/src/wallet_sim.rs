@@ -244,6 +244,9 @@ pub struct SealOptions {
     pub vp_token: Option<Value>,
     /// Payload `state`.
     pub state: StateChoice,
+    /// Additional top-level payload members (unrecognized parameters, OpenID4VP 1.1 §8.1).
+    /// Written first, so `vp_token` and `state` always come from the other knobs.
+    pub extra_members: Map<String, Value>,
     /// Protected header `kid`.
     pub kid: KidChoice,
     /// Flip one ciphertext character (still canonical base64url).
@@ -796,7 +799,7 @@ impl WalletSim {
                 Value::Object(answers)
             }
         };
-        let mut payload = Map::new();
+        let mut payload = opts.extra_members.clone();
         payload.insert(VP_TOKEN.to_owned(), vp_token);
         let state = match &opts.state {
             StateChoice::Request => request.state.clone().map(Value::String),
