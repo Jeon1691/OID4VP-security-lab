@@ -40,7 +40,7 @@ use lab_server::{
     SYNTHETIC_CREDENTIAL_QUERY_ID, SharedRouteStrategy, TrustedIssuerKey, ValidationError,
     ValidationResult,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 use session_core::CandidateBudget;
 
 /// HTTP statuses the tests pin (RFC 9110 §15).
@@ -63,6 +63,9 @@ const STATE_CHAR: &str = "s";
 /// Session-creation endpoint (lab infrastructure) and the media type of its body.
 const SESSIONS_PATH: &str = "/lab/v1/sessions";
 const JSON: &str = "application/json";
+/// A top-level payload member no specification defines, and its value.
+const UNRECOGNIZED_MEMBER: &str = "lab_unrecognized_member";
+const UNRECOGNIZED_VALUE: &str = "ignored";
 
 /// Synthetic SpruceID fixture key that signs every request object (its did:key is the default
 /// `client_id`), and the synthetic SD-JWT VC issuer (private for the wallet, public for the
@@ -434,23 +437,30 @@ async fn reused_nonce_with_fresh_state_selects_one_session_and_refuses_a_replay(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn research_state_knob_is_research_only_bounded_and_charset_checked() {
     // Each refusal must be the one its input calls for, not just any 400.
-    async fn refused(lab: &Lab, route: &str, state: &str, want: &str) {
-        let body = json!({ "route": route, "state": state }).to_string();
+    async fn refused(lab: &Lab, route: &str, member: &str, value: Value, want: &str) {
+        let body = json!({ "route": route, member: value }).to_string();
         let reply = lab
             .wallet
             .post_raw(
                 &format!("{}{SESSIONS_PATH}", lab.server.base_url()),
                 JSON,
-                body.into_bytes(),
+                body.clone().into_bytes(),
             )
             .await
             .expect("sessions endpoint answers");
-        assert_eq!(reply.status, BAD_REQUEST, "{state:?}");
-        let answer: serde_json::Value = serde_json::from_slice(&reply.body).expect("JSON body");
-        assert_eq!(answer["error_description"], want, "{state:?}");
+        assert_eq!(reply.status, BAD_REQUEST, "{body}");
+        let answer: Value = serde_json::from_slice(&reply.body).expect("JSON body");
+        assert_eq!(answer["error_description"], want, "{body}");
     }
     let hardened = Lab::start(Mode::Hardened).await;
-    refused(&hardened, "unique", STATE_CHAR, "unsupported member").await;
+    refused(
+        &hardened,
+        "unique",
+        "state",
+        json!(STATE_CHAR),
+        "unsupported member",
+    )
+    .await;
     hardened.server.shutdown().await;
 
     let lab = Lab::start(shared_key(PAIR)).await;
@@ -465,8 +475,93 @@ async fn research_state_knob_is_research_only_bounded_and_charset_checked() {
     lab.honest_commits(&session).await;
 
     let too_long = STATE_CHAR.repeat(MAX_RESEARCH_STATE_LEN + 1);
-    refused(&lab, "shared", &too_long, "state too long").await;
-    refused(&lab, "shared", NOT_URL_SAFE_STATE, "invalid state").await;
-    refused(&lab, "shared", "", "invalid state").await;
+    refused(&lab, "shared", "state", json!(too_long), "state too long").await;
+    for bad in [json!(NOT_URL_SAFE_STATE), json!(""), json!(NUMERIC_STATE)] {
+        refused(&lab, "shared", "state", bad, "invalid state").await;
+    }
+    // The research nonce knob answers a non-string the same way.
+    refused(
+        &lab,
+        "shared",
+        "nonce",
+        json!(NUMERIC_STATE),
+        "invalid nonce",
+    )
+    .await;
+    lab.server.shutdown().await;
+}
+
+/// §8.1: "The Client MUST ignore any unrecognized parameters." An otherwise honest payload with
+/// an extra top-level member commits on the unique and the shared route; the extra member is
+/// neither required nor refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn unrecognized_payload_members_are_ignored() {
+    for (mode, route) in [
+        (Mode::Hardened, RouteKind::Unique),
+        (shared_key(PAIR), RouteKind::Shared),
+    ] {
+        let lab = Lab::start(mode).await;
+        let sessions = lab.sessions(route, PAIR).await;
+        let request = lab.request(&sessions[0]).await;
+        let mut extra_members = serde_json::Map::new();
+        extra_members.insert(UNRECOGNIZED_MEMBER.to_owned(), json!(UNRECOGNIZED_VALUE));
+        let opts = SealOptions {
+            extra_members,
+            ..SealOptions::default()
+        };
+        let (status, _) = lab.post(&request, &opts).await;
+        assert_eq!(status, OK, "{route:?}");
+        let record = lab.record();
+        assert_eq!(record.commit_result, CommitResult::Committed, "{route:?}");
+        assert_eq!(
+            record.committed_session.as_ref().map(|id| id.as_str()),
+            Some(sessions[0].session_id.as_str())
+        );
+        lab.server.shutdown().await;
+    }
+}
+
+/// Bounded trial with a reused nonce: both candidates open. The first-inserted session A is
+/// tried first, opens and fails its `state` check; B, the second, validates. B's honest
+/// response commits B with `validated: 1`, so a mismatching candidate before the validating
+/// one neither blocks nor taints the result.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn state_mismatching_candidate_tried_first_does_not_stop_the_validating_one() {
+    let lab = Lab::start(shared_key(PAIR)).await;
+    let mut sessions = Vec::with_capacity(PAIR);
+    for _ in 0..PAIR {
+        sessions.push(
+            lab.wallet
+                .create_session(
+                    &lab.server.base_url(),
+                    RouteKind::Shared,
+                    Some(REUSED_NONCE),
+                )
+                .await
+                .expect("research mode accepts a fixed nonce"),
+        );
+    }
+    let (a, b) = (&sessions[0], &sessions[1]);
+    let request_b = lab.request(b).await;
+    let (status, _) = lab.post(&request_b, &SealOptions::default()).await;
+    assert_eq!(status, OK);
+    let record = lab.record();
+    assert_eq!(record.candidate_count, PAIR);
+    assert_eq!(record.hpke_attempts, PAIR);
+    assert_eq!(
+        record.crypto_result,
+        CryptoResult::Opened { opened: PAIR },
+        "A, tried first, opens too"
+    );
+    assert_eq!(
+        record.validation_result,
+        ValidationResult::Passed { validated: 1 }
+    );
+    assert_eq!(record.commit_result, CommitResult::Committed);
+    assert_eq!(
+        record.committed_session.as_ref().map(|id| id.as_str()),
+        Some(b.session_id.as_str())
+    );
+    assert_eq!(lab.state(a).await, "pending");
     lab.server.shutdown().await;
 }

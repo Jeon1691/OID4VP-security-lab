@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use common::{
-    TTL, TestKey, TestResult, binding, digest, fresh_namespace, kid, new_session, redis_registry,
-    redis_url, route, sid,
+    TTL, TestKey, TestResult, binding, dc_api_binding, digest, fresh_namespace, kid, new_session,
+    redis_registry, redis_url, route, sid,
 };
 use redis::AsyncCommands;
 use session_core::{
@@ -485,6 +485,29 @@ async fn undecodable_record_fails_closed() {
     );
     let state: String = conn.hget(record_key(&ns, 0), "state").await.expect("HGET");
     assert_eq!(state, "reserved", "nothing was written");
+
+    // A record without `b4` (as written before the binding carried `state`) fails closed in
+    // both modes: `b4` is read for every record, and a `dc_api.jwt` record must have it empty.
+    let dc_api = NewSession {
+        binding: dc_api_binding(2),
+        ..new_session(2, &route(), None)
+    };
+    for (i, session) in [(1, new_session(1, &route(), None)), (2, dc_api)] {
+        let r = session.route_token.clone();
+        reg.insert(session).await.expect("insert");
+        let () = conn.hdel(record_key(&ns, i), "b4").await.expect("HDEL");
+        assert_eq!(
+            reg.resolve(&unique_uri(&r), ResolutionStrategy::UniqueUri)
+                .await,
+            Err(ResolveError::Unavailable(StoreUnavailable)),
+            "session {i}"
+        );
+        assert_eq!(
+            reg.snapshot(&sid(i)).await.map(|s| s.is_some()),
+            Err(StoreUnavailable),
+            "session {i}"
+        );
+    }
 }
 
 #[tokio::test]
