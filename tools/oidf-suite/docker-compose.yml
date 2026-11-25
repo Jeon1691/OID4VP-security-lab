@@ -4,6 +4,8 @@
 # (commit 246b2c14b8562012b02d0ac462d667fe49e1a937, gitlab.com/openid/conformance-suite).
 # Changes from upstream, each deliberate:
 #   - every image pinned by its multi-arch index digest (resolved 2026-11-25), no ${IMAGE_TAG}
+#   - mongo 6.0.28 instead of upstream's 6.0.13 (CVE-2025-14847, see the mongodb service)
+#   - the server runs with no-new-privileges and no Linux capabilities
 #   - nginx publishes 8443 on 127.0.0.1 only; the mTLS listener (8444) is not published
 #   - BASE_URL is https://localhost:8443, so no hosts-file entry is needed
 #   - mongo keeps its data on tmpfs: `docker compose down` leaves no volume behind
@@ -16,7 +18,10 @@ name: oidf-suite
 
 services:
   mongodb:
-    image: mongo:6.0.13@sha256:b415b12f638e2685d06c58ab7fb5943577c50fadec6d9340ef67d21aeac72070
+    # Upstream's default is 6.0.13, which is affected by CVE-2025-14847 ("MongoBleed", fixed in
+    # 6.0.27). 6.0.28 is the newest 6.0 patch on 2026-11-25 and keeps the suite's
+    # featureCompatibilityVersion 6.0 (application.properties).
+    image: mongo:6.0.28@sha256:8b6d8f5bbedb25cb73517b65cf99f13aeb75ad5b157a56c479287a840bbad3ac
     tmpfs:
       - /data/db
       - /data/configdb
@@ -40,6 +45,11 @@ services:
 
   server:
     image: registry.gitlab.com/openid/conformance-suite:release-v5.3.5@sha256:576ad9d6ea4230a6d58623a03c17c74e2ae1438cceec252f8721daa53a705961
+    # The JVM needs no capabilities: it listens on 8080 and only makes outbound connections.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       BASE_URL: https://localhost:8443
       # Unused by the VP verifier plans; nginx's 8444 listener is not published.
