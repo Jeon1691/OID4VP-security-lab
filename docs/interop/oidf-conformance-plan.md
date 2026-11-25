@@ -152,6 +152,16 @@ Runbook, pins and findings: `tools/oidf-suite/README.md`. In short:
 
 None of these is in scope for G7. Each needs its own decision record.
 
+*Status 2026-11-25:* items 1-6 are implemented by conformance mode
+(`docs/adr/0002-conformance-mode.md`, feature `conformance`, `--mode conformance`): option B
+with OrbStack (`host.docker.internal` reaches host loopback; established by the suite set-up,
+PR #17), the lab serving HTTPS itself on its loopback bind; `x509_san_dns` / `x509_hash` with a
+synthetic CA and an `x5c` header; ECDH-ES on the unique route with a key per session; a
+configurable DCQL query and issuer key (`--vct`, `--claims`, `--issuer-key`); the
+`authorization_request` URL in the session creation response (`--authorization-endpoint`); and
+a configurable response `redirect_uri` (`--response-redirect-uri`, needed for HAIP). Item 7
+stays unsupported.
+
 1. **Network exposure (ADR required).** Lab policy is loopback only in every mode (ADR-005,
    `README.md` "Policy"). The suite needs HTTPS `request_uri` / `response_uri` endpoints that
    the suite's JVM can reach.
@@ -251,8 +261,8 @@ None of these is in scope for G7. Each needs its own decision record.
 | Stage | Content | Network | Gate |
 | --- | --- | --- | --- |
 | C0 (this document) | Desk research, mapping of suite modules to lab tests | Read public pages only | none |
-| C1 | Offline gap tests inside the lab: `MinimalCnfJwk`-style `cnf`, a corrupted (not foreign) issuer signature, a corrupted KB-JWT signature. Configurable DCQL query and issuer key. | Loopback | Default gate stages |
-| C2 | ADR: conformance mode (TLS loopback front, x509 client id with a synthetic CA, ECDH-ES as a separate mode, kill switch) | none | ADR approved before any code |
+| C1 | Offline gap tests inside the lab: `MinimalCnfJwk`-style `cnf`, a corrupted (not foreign) issuer signature, a corrupted KB-JWT signature. Configurable DCQL query and issuer key. **Done:** `credential_with_minimal_cnf_jwk_is_accepted`, `issuer_jwt_with_corrupted_signature_is_rejected`, `kb_jwt_with_corrupted_signature_is_rejected`, `configured_credential_query_is_requested_and_enforced`. | Loopback | Default gate stages |
+| C2 | ADR: conformance mode (TLS loopback front, x509 client id with a synthetic CA, ECDH-ES as a separate mode, kill switch). **Done:** ADR 0002 (accepted 2026-11-25), implemented and tested over HTTPS on loopback (`tests/conformance_mode_e2e.rs`). | none | ADR approved before any code |
 | C3 | Self-hosted suite (`tools/oidf-suite/`, Option B on OrbStack), plain `oid4vp-1final-verifier-test-plan`, `sd_jwt_vc` + `direct_post.jwt` + `x509_san_dns` + `request_uri_signed`, against the ECDH-ES conformance mode. Synthetic credentials only. Results go into `evidence/` with commit SHAs. | Loopback + TLS (per ADR) | Explicit approval |
 | C4 | HAIP plan (`x509_hash`, A128GCM + A256GCM, trust anchor PEM) | Same | Explicit approval |
 | C5 | HPKE / OpenID4VP 1.1: wait for suite support. Track the suite repo for `HPKE` / `session_info` (read-only). Until then, HPKE-0 conformance rests on jose-hpke draft-22 vectors, the lab's own suite, and INTEROP-02. | none | — |
