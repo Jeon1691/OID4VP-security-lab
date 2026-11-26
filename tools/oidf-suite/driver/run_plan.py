@@ -202,30 +202,39 @@ EXPECTED = {
 # and the session state on the lab's result endpoint. Positive modules with a status reference
 # must fetch the list and find it VALID; the module without status must not fetch; the revoked
 # credential must be fetched and refused as revoked with nothing committed; every other negative
-# module is refused while validating, before any status work.
-STATUS_VALID = {"status": "Valid", "commit": "Committed", "rejection": "None", "fetched": True,
+# module is refused while validating, for the reason the module tests, before any status work.
+# `fetches` is the exact number of list fetches the suite must have logged.
+STATUS_VALID = {"status": "Valid", "commit": "Committed", "rejection": "None", "fetches": 1,
                 "state": "consumed"}
-VALIDATION_REFUSED = {"status": "NotRun", "commit": "NotRun", "fetched": False, "state": "pending"}
+
+
+def validation_refused(error: str) -> dict:
+    """A negative module the lab must refuse while validating, with this ValidationError."""
+    return {"status": "NotRun", "commit": "NotRun", "rejection": f"Some(Validation({error}))",
+            "fetches": 0, "state": "pending"}
+
+
 LAB_EXPECTED = {
     "happy-flow": STATUS_VALID,
     "minimal-cnf-jwk": STATUS_VALID,
     "request-uri-fetched-twice": STATUS_VALID,
     "present-credential-without-status": {"status": "NotReferenced", "commit": "Committed",
-                                          "rejection": "None", "fetched": False, "state": "consumed"},
+                                          "rejection": "None", "fetches": 0, "state": "consumed"},
     "present-revoked-credential": {"status": "Failed(Revoked)", "commit": "NotRun",
-                                   "rejection": "Some(Status(Revoked))", "fetched": True,
+                                   "rejection": "Some(Status(Revoked))", "fetches": 1,
                                    "state": "pending"},
-    "invalid-kb-jwt-signature": VALIDATION_REFUSED,
-    "invalid-credential-signature": VALIDATION_REFUSED,
-    "invalid-sd-hash": VALIDATION_REFUSED,
-    "invalid-kb-jwt-nonce": VALIDATION_REFUSED,
-    "invalid-kb-jwt-aud": VALIDATION_REFUSED,
-    "kb-jwt-iat-in-past": VALIDATION_REFUSED,
-    "kb-jwt-iat-in-future": VALIDATION_REFUSED,
-    "wrong-vct": VALIDATION_REFUSED,
+    "invalid-kb-jwt-signature": validation_refused("KbSignature"),
+    "invalid-credential-signature": validation_refused("IssuerSignature"),
+    "invalid-sd-hash": validation_refused("KbSdHashMismatch"),
+    "invalid-kb-jwt-nonce": validation_refused("KbNonceMismatch"),
+    "invalid-kb-jwt-aud": validation_refused("KbAudienceMismatch"),
+    "kb-jwt-iat-in-past": validation_refused("KbIatOutOfWindow"),
+    "kb-jwt-iat-in-future": validation_refused("KbIatOutOfWindow"),
+    "wrong-vct": validation_refused("VctMismatch"),
 }
-# Findings that must not appear: the lab fetching nothing, or fetching the list badly.
-FORBIDDEN_FINDINGS = ("EnsureVerifierFetchedRevocationList",)
+# Any WARNING or FAILURE finding fails the lab-side check (the suite's request checks on the
+# status list fetch included: method, query, body, Accept). Only the REVIEW marker of positive
+# modules is a non-SUCCESS result that belongs to a clean run, and it is not a finding.
 HAPPY_FLOW_C4_TEST = "conformance_round_trip_with_x509_hash_a256gcm_and_redirect_uri"
 MODULE_PREFIX = "oid4vp-1final-verifier-"
 EXPECTED_NOTES = {
@@ -511,7 +520,7 @@ def start_lab(plan: dict, port: int, alias: str, log_path: Path, suite_tls: Path
     proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             env={"PATH": os.environ.get("PATH", "")})
     ready = threading.Event()
-    lines = {"evidence": [], "status_policy": None}
+    lines = {"evidence": [], "status_policy": None, "consumed": 0}
 
     def pump():
         for line in proc.stdout:
@@ -683,25 +692,26 @@ def lab_check(short: str, record: dict, log: list) -> dict:
     """The module's lab-side outcome against LAB_EXPECTED (see there)."""
     expected = LAB_EXPECTED.get(short)
     fetches = sum(1 for e in log if e.get("msg") == SUITE_FETCHED_LIST_MSG)
-    forbidden = sorted({e.get("src") for e in log
-                        if e.get("src") in FORBIDDEN_FINDINGS and e.get("result") in ("FAILURE", "WARNING")})
+    flagged = sorted({e.get("src") for e in log if e.get("result") in ("FAILURE", "WARNING")})
     evidence = record.get("lab_evidence", [])
     observed = {"evidence": evidence, "suite_logged_list_fetches": fetches,
-                "state": (record.get("lab_result") or {}).get("state"), "forbidden_findings": forbidden}
+                "state": (record.get("lab_result") or {}).get("state"), "findings": flagged}
     if expected is None:
-        return {"expected": None, "observed": observed, "ok": not evidence and not fetches}
+        return {"expected": None, "observed": observed,
+                "ok": not evidence and not fetches and not flagged}
     ok = (len(evidence) == 1
           and all(evidence[0].get(k) == v for k, v in expected.items() if k in ("status", "commit", "rejection"))
-          and (fetches > 0) == expected["fetched"]
+          and fetches == expected["fetches"]
           and observed["state"] == expected["state"]
-          and not forbidden)
+          and not flagged)
     return {"expected": expected, "observed": observed, "ok": ok}
 
 
 def run_module(module: str, plan_id: str, lab: LabClient, out: Path, issuer_jwk: dict,
                lab_lines: dict) -> dict:
     short = module.removeprefix(MODULE_PREFIX)
-    evidence_mark = len(lab_lines["evidence"])
+    # Each module's lines start where the previous module's ended, so no line is left out.
+    evidence_mark = lab_lines["consumed"]
     test_id = suite_api("POST", "/api/runner?" + urllib.parse.urlencode({"test": module, "plan": plan_id}))["id"]
     state = wait_state(test_id, "WAITING,FINISHED,INTERRUPTED")
     runner = suite_api("GET", f"/api/runner/{test_id}")
@@ -763,7 +773,9 @@ def run_module(module: str, plan_id: str, lab: LabClient, out: Path, issuer_jwk:
     log = suite_api("GET", f"/api/log/{test_id}")
     write_json(out / "logs" / f"{short}.json", log, issuer_jwk)
     settle_evidence(lab_lines)
-    record["lab_evidence"] = lab_evidence(lab_lines["evidence"][evidence_mark:])
+    evidence_end = len(lab_lines["evidence"])
+    lab_lines["consumed"] = evidence_end
+    record["lab_evidence"] = lab_evidence(lab_lines["evidence"][evidence_mark:evidence_end])
     check = lab_check(short, record, log)
     expected, test_file, test_name = EXPECTED.get(short, (None, None, None))
     record.update(final_state=state, status=info.get("status"), result=info.get("result"),
@@ -805,7 +817,7 @@ def cmd_run(args):
     results = {"plan": plan["plan_name"], "variant": variant, "alias": alias, "modules": []}
     export_sha = None
     proc = None
-    lab_lines = {"evidence": [], "status_policy": None}
+    lab_lines = {"evidence": [], "status_policy": None, "consumed": 0}
     try:
         proc, lab_cmd, lab_lines = start_lab(plan, args.lab_port, alias, out / "lab-console.log", suite_tls)
         deadline = time.monotonic() + DRIVER_DEADLINE_SECS
