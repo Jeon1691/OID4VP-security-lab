@@ -122,8 +122,10 @@ reference is checked, in conformance mode with a status policy only (`--status-l
 `--status-list-tls-cert`, and `--status-list-key` or `--status-list-trust-anchor`): one `GET`
 of an allowed `https` loopback URI (TLS certificate pinned, no redirects, bounded, 5 s),
 the Status List Token verified (`typ` `statuslist+jwt`, ES256 by the pinned key or an `x5c`
-leaf of the status CA with no EKU, `sub` = `uri`, `iat` / `exp` / `nbf`), `lst` inflated with a
-bound, and only `0x00` accepted. Revoked, suspended, and every case where the status cannot be
+leaf of the status CA with no EKU, `sub` = `uri`, `iat` / `exp` / `nbf` on the clock after the
+fetch, no `aud`), `lst` inflated as exactly one ZLIB stream with a bound, and only `0x00`
+accepted. The public `verify_sd_jwt_vc` refuses any credential with a `status` claim
+(`StatusUnchecked`), since it cannot check it. Revoked, suspended, and every case where the status cannot be
 established (fetch, TLS, signature, chain, expiry, subject, index range) are refused with
 distinct evidence. Without a policy (every build without `conformance`), a credential that
 references a status list is refused; one without a `status` claim is unaffected.

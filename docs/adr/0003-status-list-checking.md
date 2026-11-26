@@ -75,7 +75,9 @@ The owner's criteria for the change:
    percent-encoding or dot segment. Every address its host resolves to must be loopback (the
    lab's loopback-only network policy, also against a misconfigured prefix).
 5. **Fetch.** One `GET` with `Accept: application/statuslist+jwt` and no body (TSL §8.1), a
-   5 s deadline for the whole fetch (half the request timeout), exactly `200`, `Content-Type`
+   5 s deadline for the whole fetch (a fixed half of the *default* request timeout; a server
+   with a status policy refuses to start unless its configured request timeout is at least
+   that plus a 2 s margin for the work before the fetch), exactly `200`, `Content-Type`
    `application/statuslist+jwt` (§8.2), no `Content-Encoding`, body at most 64 KiB. No
    redirects (stricter than §8.2's "SHOULD follow"; §11.4) and no caching (every check
    fetches; `ttl` is checked for shape only).
@@ -90,9 +92,10 @@ The owner's criteria for the change:
      are ignored, so the suite's self-signed `x5c` and self-asserted `jwk` give no trust.
      The suite runs use this, with the issuer's public key passed explicitly
      (`--status-list-key`).
-   - `X509`: the `x5c` chain (1-4 certificates, leaf first, without the anchor) must chain to a
-     configured status trust anchor now; the leaf must not be self-signed and must carry no
-     extended key usage. TSL §10 defines `id-kp-oauthStatusSigning` but its OID is still TBD
+   - `X509`: the `x5c` chain (1-4 certificates, leaf first, without the anchor, every entry a
+     DER certificate) must chain to a configured status trust anchor now; the leaf must not be
+     self-signed, and no certificate on the path (leaf or intermediate) may carry an extended
+     key usage. TSL §10 defines `id-kp-oauthStatusSigning` but its OID is still TBD
      (through -19), so no certificate can carry it; requiring no EKU at all keeps a TLS server
      certificate (`serverAuth`) of the same PKI from signing lists. The leaf's P-256 key must
      verify the ES256 signature. Tested with a separate synthetic status CA and a signer it
@@ -100,12 +103,15 @@ The owner's criteria for the change:
      its `x5c` is the driver's self-signed certificate.
 8. **Token checks** (TSL §5.1, §8.3): compact JWS, no `crit`, `typ` `statuslist+jwt`, `alg`
    ES256; signature; `sub` = `uri` exactly; `iat` required, `exp` / `nbf` / `ttl` optional,
-   integers (`ttl` positive); not expired; `iat` / `nbf` at most 60 s ahead; `bits` in
-   {1, 2, 4, 8}; `lst` canonical base64url of ZLIB, inflated to at most 1 MiB; `idx` in range.
+   integers (`ttl` positive); no `aud` (RFC 7519 §4.1.3: the lab has no audience identifier, so
+   any `aud` names someone else); not expired and `iat` / `nbf` at most 60 s ahead, on the
+   clock read after the fetch (the signer certificate's validity too); `bits` in
+   {1, 2, 4, 8}; `lst` canonical base64url of exactly one ZLIB stream, no trailing bytes,
+   inflated to at most 1 MiB; `idx` in range.
    Value `0x00` is accepted; `0x01` is `Revoked`, `0x02` `Suspended`, any other `NotValid(v)`.
 9. **Evidence.** `EvidenceRecord::status_result` (`NotRun` / `NotReferenced` / `Valid` /
    `Failed(StatusError)`) and `Rejection::Status`. Only `Revoked`, `Suspended` and `NotValid`
-   are statements about the credential; every other variant says its status could not be
+   (step 12) are statements about the credential; every other variant says its status could not be
    established. A conformance server prints its policy at start and one evidence line per
    response POST (outcomes only), which the plan driver checks per module.
 
@@ -117,7 +123,12 @@ The owner's criteria for the change:
   result.
 - A credential with a `status` claim no longer passes in hardened or research mode (it did
   before, unchecked). The lab's own synthetic issuer issues none unless a test asks for one.
-- `verify_sd_jwt_vc` (public) now also refuses a malformed `status` claim.
+- `verify_sd_jwt_vc` (public) refuses every credential with a `status` claim: malformed as
+  `StatusClaimMalformed`, well-formed as `StatusUnchecked`, since it cannot check the status
+  and an `Ok` would read as acceptance. The pipeline uses the internal variant that hands the
+  reference on to the status check.
+- The status check runs before the replay guard: a replayed presentation causes a fetch, and is
+  recorded as a status failure if the list fails it.
 - Each status-checked response costs one TLS connection and one fetch; nothing is cached.
 
 ### Risks
@@ -128,6 +139,18 @@ The owner's criteria for the change:
 - `PinnedKey` trusts whatever that key signs for any `uri` under the prefix. The suite's key is
   the synthetic issuer fixture, whose private half is in the repository.
 - A Status Provider that answers slowly holds the response POST for up to 5 s.
+- **Signer certificates (X509 mode):** webpki does not evaluate the end-entity KeyUsage
+  extension (`digitalSignature`), and the lab checks no certificate revocation (no CRL or OCSP)
+  for the status signer. A certificate of the status CA limited to `keyAgreement`, or a revoked
+  one still inside its validity, would be accepted as a signer. Lab scope: one synthetic status
+  CA issues one signer.
+- **DNS:** the host of an allowed `uri` is resolved with Tokio's resolver on the blocking pool;
+  a lookup that stalls is not cancelled by the fetch deadline (the check is, and is recorded as
+  `Timeout`). The host is fixed by the configured prefix (`localhost` in the suite runs).
+- **Selectively disclosable `status`:** SD-JWT VC §2.2.2.3 forbids it, and the lab refuses a
+  disclosed one or one carrying digests; but an issuer that hides `status` behind a digest
+  anyway lets the holder leave it undisclosed, and the Verifier sees a credential without a
+  status (`NotReferenced`, accepted). An undisclosed digest is indistinguishable from a decoy.
 
 ## Alternatives considered
 
