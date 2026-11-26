@@ -426,9 +426,9 @@ All of this runs over HTTP from the driver; no browser is involved (section 2).
 
 ## 7. Results: the lab against both plans
 
-### 7.1 With Token Status List checking (run `evidence/oidf/20261125T113627Z-e91431d/`)
+### 7.1 With Token Status List checking (run `evidence/oidf/20261126T022001Z-8e487fa/`)
 
-Its `summary.md` is the source of truth. Lab commit `e91431d` (clean tree, built by the driver),
+Its `summary.md` is the source of truth. Lab commit `8e487fa` (clean tree, built by the driver),
 both plans driven by `driver/run_plan.py` only, suite stack freshly started and taken down
 after the run. The lab ran as in §7.2 plus a status policy (ADR 0003): only
 `https://localhost:8443/test/a/<alias>/statuslists/` URIs of that run, the list signing key
@@ -448,10 +448,13 @@ suite (its `x5c` is the driver's self-signed certificate); the lab tests cover i
 | the eight negative modules | PASSED | same | refused while validating (`KbSignature`, `IssuerSignature`, ...); status not reached, nothing fetched |
 | request-uri-method-post | SKIPPED | SKIPPED | no response |
 
-- 28 of 28 modules ended as expected, with the lab-side checks: the driver requires the suite
+- 28 of 28 modules ended as expected, with the lab-side checks (same result as the first
+  status run `20261125T113627Z-e91431d`, at `e91431d`, before the review fixes): the driver requires the suite
   result, the lab's own evidence line (status outcome, commit, rejection), the suite's
   "The verifier fetched the status list ..." log entry and the session state on the lab's
-  result endpoint to agree (`LAB_EXPECTED`). No WARNING or FAILURE appeared in any module.
+  result endpoint to agree (`LAB_EXPECTED`), exactly one list fetch where one is expected,
+  each negative module refused with its own `ValidationError`, and no WARNING or FAILURE in any
+  module (none appeared).
 - The flip of one credential from accepted to refused when only the list entry changes from
   `0x00` to `0x01` cannot be driven through the suite (it mints a new credential per module);
   the lab test `same_credential_flips_from_accepted_to_revoked_when_only_the_list_changes`

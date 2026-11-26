@@ -1,0 +1,919 @@
+{
+ "plan": "oid4vp-1final-verifier-test-plan",
+ "variant": {
+  "vp_profile": "plain_vp",
+  "credential_format": "sd_jwt_vc",
+  "client_id_prefix": "x509_san_dns",
+  "request_method": "request_uri_signed",
+  "response_mode": "direct_post.jwt"
+ },
+ "alias": "oid4vp-lab-c3-def5a66b5b20be19",
+ "modules": [
+  {
+   "module": "oid4vp-1final-verifier-happy-flow",
+   "test_id": "tSLwGeV2A1qhNMj",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-def5a66b5b20be19/authorize",
+   "session_id": "NctmHoNOOaA3VtaPZCG60A",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 1.52,
+   "lab_result": {
+    "credential": {
+     "claims": {
+      "birthdate": "1980-05-23",
+      "family_name": "Dupont",
+      "given_name": "Jean"
+     },
+     "disclosed_claim_names": [
+      "/birthdate",
+      "/family_name",
+      "/given_name"
+     ],
+     "holder_key_thumbprint": "FEPbv9HzrBtrE0mMcxkkpKMNWcJoInZRVvTPdt36zh4",
+     "vct": "urn:eudi:pid:1"
+    },
+    "state": "consumed"
+   },
+   "screenshot": "screenshots/happy-flow.png",
+   "lab_evidence": [
+    {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "lab_check": {
+    "expected": {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None",
+     "fetches": 1,
+     "state": "consumed"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "Valid",
+       "commit": "Committed",
+       "rejection": "None"
+      }
+     ],
+     "suite_logged_list_fetches": 1,
+     "state": "consumed",
+     "findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "PvwS4uZsUpywQF8-gJLsvw"
+   },
+   "log": "logs/happy-flow.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/conformance_mode_e2e.rs",
+    "test": "conformance_round_trip_over_https_commits_with_x509_san_dns"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-minimal-cnf-jwk",
+   "test_id": "l0g7yUTMcasIev9",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-def5a66b5b20be19/authorize",
+   "session_id": "yOQ3oEJ9yLyZlGsrAjAe6w",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.3,
+   "lab_result": {
+    "credential": {
+     "claims": {
+      "birthdate": "1980-05-23",
+      "family_name": "Dupont",
+      "given_name": "Jean"
+     },
+     "disclosed_claim_names": [
+      "/birthdate",
+      "/family_name",
+      "/given_name"
+     ],
+     "holder_key_thumbprint": "FEPbv9HzrBtrE0mMcxkkpKMNWcJoInZRVvTPdt36zh4",
+     "vct": "urn:eudi:pid:1"
+    },
+    "state": "consumed"
+   },
+   "screenshot": "screenshots/minimal-cnf-jwk.png",
+   "lab_evidence": [
+    {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "lab_check": {
+    "expected": {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None",
+     "fetches": 1,
+     "state": "consumed"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "Valid",
+       "commit": "Committed",
+       "rejection": "None"
+      }
+     ],
+     "suite_logged_list_fetches": 1,
+     "state": "consumed",
+     "findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "GdBtN0yWXRFh7ZdpJSYRDg"
+   },
+   "log": "logs/minimal-cnf-jwk.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "credential_with_minimal_cnf_jwk_is_accepted"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-request-uri-method-post",
+   "test_id": "ebdU8FOyTUjsG9T",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-def5a66b5b20be19/authorize",
+   "session_id": "WfnIkGzsMMWbYFXkIBHaTQ",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 302,
+   "authorize_redirect_not_followed": true,
+   "authorize_seconds": 0.04,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "SKIPPED",
+   "expected": "SKIPPED",
+   "lab_check": {
+    "expected": null,
+    "observed": {
+     "evidence": [],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": null,
+   "log": "logs/request-uri-method-post.json",
+   "lab_test": null
+  },
+  {
+   "module": "oid4vp-1final-verifier-request-uri-fetched-twice",
+   "test_id": "Euezq9hrAGCtCCS",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-def5a66b5b20be19/authorize",
+   "session_id": "yh1Dr4WE7Y0lN-Qp1lWTIQ",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.2,
+   "lab_result": {
+    "credential": {
+     "claims": {
+      "birthdate": "1980-05-23",
+      "family_name": "Dupont",
+      "given_name": "Jean"
+     },
+     "disclosed_claim_names": [
+      "/birthdate",
+      "/family_name",
+      "/given_name"
+     ],
+     "holder_key_thumbprint": "FEPbv9HzrBtrE0mMcxkkpKMNWcJoInZRVvTPdt36zh4",
+     "vct": "urn:eudi:pid:1"
+    },
+    "state": "consumed"
+   },
+   "screenshot": "screenshots/request-uri-fetched-twice.png",
+   "lab_evidence": [
+    {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "lab_check": {
+    "expected": {
+     "status": "Valid",
+     "commit": "Committed",
+     "rejection": "None",
+     "fetches": 1,
+     "state": "consumed"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "Valid",
+       "commit": "Committed",
+       "rejection": "None"
+      }
+     ],
+     "suite_logged_list_fetches": 1,
+     "state": "consumed",
+     "findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "B0SsTzCkbUDFioa4dgcZmQ"
+   },
+   "log": "logs/request-uri-fetched-twice.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/signed_request_object_e2e.rs",
+    "test": "served_request_object_is_signed_once_and_never_changes"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-signature",
+   "test_id": "b3zM87UkDnu4nYf",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-def5a66b5b20be19/authorize",
+   "session_id": "jcOyjhEYA1b_bJgy57ljaQ",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.11,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbSignature))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbSignature))",
+     "fetches": 0,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbSignature))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "MKoq01Ns_fCy2pwxHLrINA"
+   },
+   "log": "logs/invalid-kb-jwt-signature.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_corrupted_signature_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-credential-signature",
+   "test_id": "0P3qMA6zxXpRSDw",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-def5a66b5b20be19/authorize",
+   "session_id": "7nQUoU8xqT6hpezc_VDmag",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.08,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(IssuerSignature))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(IssuerSignature))",
+     "fetches": 0,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(IssuerSignature))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "Tk8EHz2KBoSpBrYOaU-JKQ"
+   },
+   "log": "logs/invalid-credential-signature.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "issuer_jwt_with_corrupted_signature_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-sd-hash",
+   "test_id": "OujotIaJXowWPWX",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-def5a66b5b20be19/authorize",
+   "session_id": "cD-7oPq43WG9ajeqTezUAQ",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.14,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbSdHashMismatch))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbSdHashMismatch))",
+     "fetches": 0,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbSdHashMismatch))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "7VMbAoHlZ5KQ391VzWdT1g"
+   },
+   "log": "logs/invalid-sd-hash.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_sd_hash_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-nonce",
+   "test_id": "PkdAVKCbGrfPyEQ",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-def5a66b5b20be19/authorize",
+   "session_id": "IzwslLGQvNSWkBucVhPHQQ",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.15,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbNonceMismatch))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbNonceMismatch))",
+     "fetches": 0,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbNonceMismatch))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "n36ZeGaVhdw-WJNdH1zMyA"
+   },
+   "log": "logs/invalid-kb-jwt-nonce.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_nonce_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-invalid-kb-jwt-aud",
+   "test_id": "CxWqqc6f477ZyVz",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-def5a66b5b20be19/authorize",
+   "session_id": "PDKTLFNNriRcxy0N1WT-Jg",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.09,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbAudienceMismatch))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbAudienceMismatch))",
+     "fetches": 0,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbAudienceMismatch))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "nuk41mTkR0U3kAuatNr-cA"
+   },
+   "log": "logs/invalid-kb-jwt-aud.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_wrong_aud_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-kb-jwt-iat-in-past",
+   "test_id": "uPFflklYUrKHUcs",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-def5a66b5b20be19/authorize",
+   "session_id": "01a9nIcf9lb0lgG0Ouz0Fg",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.09,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbIatOutOfWindow))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbIatOutOfWindow))",
+     "fetches": 0,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbIatOutOfWindow))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "nMGNh5uqWFlxLjZ2L72S5g"
+   },
+   "log": "logs/kb-jwt-iat-in-past.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_stale_iat_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-kb-jwt-iat-in-future",
+   "test_id": "CeBpc0410UBDxXT",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-def5a66b5b20be19/authorize",
+   "session_id": "7StBR9EOcSWIPXsAAOS2dw",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.09,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbIatOutOfWindow))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(KbIatOutOfWindow))",
+     "fetches": 0,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(KbIatOutOfWindow))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "qVNIGO5d2RMYD43zCHgDmw"
+   },
+   "log": "logs/kb-jwt-iat-in-future.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "kb_jwt_with_future_iat_is_rejected"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-present-revoked-credential",
+   "test_id": "wOdx62ZLThCK5Lu",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-def5a66b5b20be19/authorize",
+   "session_id": "jgHKrJutG5p2_vt0hz32CQ",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.15,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "Failed(Revoked)",
+     "commit": "NotRun",
+     "rejection": "Some(Status(Revoked))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "Failed(Revoked)",
+     "commit": "NotRun",
+     "rejection": "Some(Status(Revoked))",
+     "fetches": 1,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "Failed(Revoked)",
+       "commit": "NotRun",
+       "rejection": "Some(Status(Revoked))"
+      }
+     ],
+     "suite_logged_list_fetches": 1,
+     "state": "pending",
+     "findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "3Y30xWC3DBObjFkJKzGjEA"
+   },
+   "log": "logs/present-revoked-credential.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/status_list_e2e.rs",
+    "test": "same_credential_flips_from_accepted_to_revoked_when_only_the_list_changes"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-present-credential-without-status",
+   "test_id": "pP3cHG8LuFd8BaJ",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-def5a66b5b20be19/authorize",
+   "session_id": "whusDG933vH7PjU-guf43g",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.14,
+   "lab_result": {
+    "credential": {
+     "claims": {
+      "birthdate": "1980-05-23",
+      "family_name": "Dupont",
+      "given_name": "Jean"
+     },
+     "disclosed_claim_names": [
+      "/birthdate",
+      "/family_name",
+      "/given_name"
+     ],
+     "holder_key_thumbprint": "FEPbv9HzrBtrE0mMcxkkpKMNWcJoInZRVvTPdt36zh4",
+     "vct": "urn:eudi:pid:1"
+    },
+    "state": "consumed"
+   },
+   "screenshot": "screenshots/present-credential-without-status.png",
+   "lab_evidence": [
+    {
+     "status": "NotReferenced",
+     "commit": "Committed",
+     "rejection": "None"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "REVIEW",
+   "expected": "REVIEW",
+   "lab_check": {
+    "expected": {
+     "status": "NotReferenced",
+     "commit": "Committed",
+     "rejection": "None",
+     "fetches": 0,
+     "state": "consumed"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotReferenced",
+       "commit": "Committed",
+       "rejection": "None"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "consumed",
+     "findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "ZkSffUHx5PSqc1C7yBrIIA"
+   },
+   "log": "logs/present-credential-without-status.json",
+   "lab_test": {
+    "file": "crates/lab-server/tests/holder_binding_e2e.rs",
+    "test": "honest_sd_jwt_kb_presentation_commits_only_the_requested_claims"
+   }
+  },
+  {
+   "module": "oid4vp-1final-verifier-wrong-vct",
+   "test_id": "ypcr3iXzBQIOGm1",
+   "authorization_endpoint": "https://localhost:8443/test/a/oid4vp-lab-c3-def5a66b5b20be19/authorize",
+   "session_id": "wtTm2yRsxQ5mhrPAR4ZWnQ",
+   "client_id": "x509_san_dns:host.docker.internal",
+   "lab_tls": {
+    "version": "TLSv1.3",
+    "cipher": "TLS_AES_256_GCM_SHA384",
+    "alpn": null
+   },
+   "authorize_status": 200,
+   "authorize_seconds": 0.13,
+   "lab_result": {
+    "state": "pending"
+   },
+   "lab_evidence": [
+    {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(VctMismatch))"
+    }
+   ],
+   "final_state": "FINISHED",
+   "status": "FINISHED",
+   "result": "PASSED",
+   "expected": "PASSED",
+   "lab_check": {
+    "expected": {
+     "status": "NotRun",
+     "commit": "NotRun",
+     "rejection": "Some(Validation(VctMismatch))",
+     "fetches": 0,
+     "state": "pending"
+    },
+    "observed": {
+     "evidence": [
+      {
+       "status": "NotRun",
+       "commit": "NotRun",
+       "rejection": "Some(Validation(VctMismatch))"
+      }
+     ],
+     "suite_logged_list_fetches": 0,
+     "state": "pending",
+     "findings": []
+    },
+    "ok": true
+   },
+   "as_expected": true,
+   "findings": [],
+   "response_jwe": {
+    "alg": "ECDH-ES",
+    "enc": "A128GCM",
+    "kid": "p07Q1PKfEnnA4XdmMb4Ycg"
+   },
+   "log": "logs/wrong-vct.json",
+   "lab_test": {
+    "file": "crates/lab-server/src/sd_jwt.rs",
+    "test": "sd_jwt_vc_profile_enforces_vct_and_exactly_the_requested_claims"
+   }
+  }
+ ],
+ "plan_id": "4I2HOFZsOXO9V",
+ "lab_status_policy": "uri prefix https://localhost:8443/test/a/oid4vp-lab-c3-def5a66b5b20be19/statuslists/, trust pinned key (thumbprint 4Vfes1N2h2msnV9WmtWt1VE03QEQSNksLUEK43jSABY), TLS certificate pinned (sha-256 S5Eqk6kZS2dypRaJN6xY-g3r4idJCcxjjjd9E7nWJCk)"
+}
