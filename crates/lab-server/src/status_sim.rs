@@ -24,7 +24,7 @@ use rustls::pki_types::pem::PemObject as _;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use serde_json::{Map, Value, json};
 use tokio::net::TcpListener;
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 use tokio_rustls::TlsAcceptor;
 
 use crate::jar::RequestSigningKey;
@@ -148,6 +148,12 @@ impl StatusListSigner {
         format!("{input}.{}", BASE64URL.encode(signature.to_bytes()))
     }
 
+    /// The signer's public key as an EC P-256 JWK (for a header `jwk` the Verifier must ignore).
+    #[must_use]
+    pub fn public_jwk(&self) -> Value {
+        Value::Object(crate::jose::p256_jwk_value(self.key.verifying_key()))
+    }
+
     /// [`StatusListSigner::sign`] with the default header.
     #[must_use]
     pub fn token(&self, claims: &Value) -> String {
@@ -164,6 +170,9 @@ pub struct StatusReply {
     pub headers: Vec<(String, String)>,
     /// Body.
     pub body: Vec<u8>,
+    /// Send the status line and headers, then never the body (a Status Provider that stalls
+    /// mid-response); `body` is ignored.
+    pub stall_body: bool,
 }
 
 impl StatusReply {
@@ -177,6 +186,7 @@ impl StatusReply {
                 STATUS_LIST_JWT_MEDIA_TYPE.into(),
             )],
             body: token.as_bytes().to_vec(),
+            stall_body: false,
         }
     }
 }
@@ -242,14 +252,19 @@ impl StatusProvider {
                 status: StatusCode::NOT_FOUND.as_u16(),
                 headers: Vec::new(),
                 body: Vec::new(),
+                stall_body: false,
             })),
             requests: Arc::new(Mutex::new(Vec::new())),
         };
         let app = Router::new().fallback(answer).with_state(state.clone());
         let task = tokio::spawn(async move {
+            // Connection tasks live in this set: aborting the accept task (on drop) drops it,
+            // which aborts every connection, stalled handshakes included.
+            let mut connections = JoinSet::new();
             while let Ok((stream, _)) = listener.accept().await {
+                while connections.try_join_next().is_some() {}
                 let (acceptor, service) = (acceptor.clone(), TowerToHyperService::new(app.clone()));
-                tokio::spawn(async move {
+                connections.spawn(async move {
                     if let Ok(stream) = acceptor.accept(stream).await {
                         let _ = http1::Builder::new()
                             .serve_connection(TokioIo::new(stream), service)
@@ -329,7 +344,12 @@ async fn answer(State(state): State<ProviderState>, request: Request) -> Respons
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone();
-    let mut response = Response::new(Body::from(reply.body));
+    let body = if reply.stall_body {
+        Body::new(StalledBody)
+    } else {
+        Body::from(reply.body)
+    };
+    let mut response = Response::new(body);
     *response.status_mut() = StatusCode::from_u16(reply.status).unwrap_or(StatusCode::OK);
     for (name, value) in reply.headers {
         if let (Ok(name), Ok(value)) = (
@@ -340,4 +360,19 @@ async fn answer(State(state): State<ProviderState>, request: Request) -> Respons
         }
     }
     response
+}
+
+/// A response body that never yields a frame.
+struct StalledBody;
+
+impl hyper::body::Body for StalledBody {
+    type Data = axum::body::Bytes;
+    type Error = std::convert::Infallible;
+
+    fn poll_frame(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>> {
+        std::task::Poll::Pending
+    }
 }

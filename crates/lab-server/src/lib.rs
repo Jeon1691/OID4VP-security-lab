@@ -312,9 +312,9 @@ pub use server::{GENERIC_REJECTION_BODY, LabServer, MAX_REMEMBERED_DIGESTS, RESP
 pub use status_list::{FetchFailure, MAX_STATUS_URI_LEN, StatusError, StatusResult};
 #[cfg(feature = "conformance")]
 pub use status_list::{
-    MAX_STATUS_LIST_BYTES, MAX_STATUS_LIST_TOKEN_BYTES, STATUS_LIST_FETCH_TIMEOUT,
-    STATUS_LIST_JWT_MEDIA_TYPE, STATUS_LIST_JWT_TYP, STATUS_LIST_MAX_FUTURE_SKEW_SECS,
-    StatusListConfigError, StatusListPolicy, StatusListTrust,
+    MAX_STATUS_LIST_BYTES, MAX_STATUS_LIST_TOKEN_BYTES, STATUS_CHECK_TIMEOUT_MARGIN,
+    STATUS_LIST_FETCH_TIMEOUT, STATUS_LIST_JWT_MEDIA_TYPE, STATUS_LIST_JWT_TYP,
+    STATUS_LIST_MAX_FUTURE_SKEW_SECS, StatusListConfigError, StatusListPolicy, StatusListTrust,
 };
 pub use validate::{
     CredentialRequest, CredentialRequestError, MAX_CLAIM_NAME_LEN, MAX_CLIENT_ID_LEN,

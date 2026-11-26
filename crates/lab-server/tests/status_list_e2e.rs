@@ -26,6 +26,8 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use jose_ecdh_es::ContentEncryption;
 use lab_server::status_sim::{
     StatusListSigner, StatusProvider, StatusReply, encode_lst, status_list_claims,
@@ -34,9 +36,9 @@ use lab_server::wallet_sim::{CreatedSession, SealOptions, SyntheticIssuer, Walle
 use lab_server::{
     CommitResult, ConformanceConfig, CredentialRequest, EvidenceRecord, FetchFailure,
     GENERIC_REJECTION_BODY, LabConfig, LabServer, MAX_STATUS_LIST_TOKEN_BYTES, Mode, PublicOrigin,
-    Rejection, RequestSigningKey, RouteKind, STATUS_LIST_FETCH_TIMEOUT, STATUS_LIST_JWT_MEDIA_TYPE,
-    StatusError, StatusListPolicy, StatusListTrust, StatusResult, TrustedIssuerKey,
-    ValidationError, X509Credentials,
+    Rejection, RequestSigningKey, RouteKind, STATUS_CHECK_TIMEOUT_MARGIN,
+    STATUS_LIST_FETCH_TIMEOUT, STATUS_LIST_JWT_MEDIA_TYPE, StatusError, StatusListPolicy,
+    StatusListTrust, StatusResult, TrustedIssuerKey, ValidationError, X509Credentials,
 };
 use serde_json::{Map, json};
 use tokio::net::TcpListener;
@@ -57,6 +59,8 @@ const FOREIGN_CA_PEM: &[u8] = include_bytes!("fixtures/conformance_foreign_ca.pe
 const STATUS_CA_PEM: &[u8] = include_bytes!("fixtures/status_ca.pem");
 const STATUS_SIGNER_PEM: &[u8] = include_bytes!("fixtures/status_signer.pem");
 const STATUS_SIGNER_JWK: &str = include_str!("fixtures/status_signer.jwk");
+/// The same CA and key, but with an extended key usage (`serverAuth`).
+const STATUS_SIGNER_EKU_PEM: &[u8] = include_bytes!("fixtures/status_signer_eku.pem");
 /// The lab SD-JWT VC issuer; the OIDF suite signs its status lists with this same key.
 const ISSUER_JWK: &str = include_str!("fixtures/lab_issuer.jwk");
 const ISSUER_PUBLIC_JWK: &str = include_str!("fixtures/lab_issuer.pub.jwk");
@@ -88,6 +92,25 @@ const FAR_SECS: u64 = 3600;
 const TEST_NET_HOST: &str = "192.0.2.1";
 /// Slack over the fetch deadline for the stalled-provider test.
 const TIMEOUT_SLACK: Duration = Duration::from_secs(3);
+
+/// `lst` of two concatenated ZLIB streams: `first`, then `second` (both 1-bit lists).
+fn two_streams(first: &[u8], second: &[u8]) -> String {
+    let decode = |lst: String| URL_SAFE_NO_PAD.decode(lst).expect("base64url");
+    let mut bytes = decode(encode_lst(first, ONE_BIT));
+    bytes.extend(decode(encode_lst(second, ONE_BIT)));
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// The standard base64 DER of the first certificate in `pem` (an `x5c` entry).
+fn pem_b64(pem: &[u8]) -> String {
+    std::str::from_utf8(pem)
+        .expect("PEM is ASCII")
+        .lines()
+        .skip_while(|line| !line.starts_with("-----BEGIN"))
+        .skip(1)
+        .take_while(|line| !line.starts_with("-----END"))
+        .collect()
+}
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -411,13 +434,26 @@ async fn token_and_list_failures_are_refused_and_recorded_apart_from_revocation(
             signer.sign(&header(json!({ "crit": ["x"] })), &with(json!({}))),
             StatusError::TokenMalformed,
         ),
-        // Another key, announcing itself in `jwk`: the pinned key alone is trusted.
+        // Another key, announcing its complete public JWK in `jwk`: the pinned key alone is
+        // trusted.
         (
             other_key.sign(
-                &header(json!({ "jwk": { "kty": "EC", "crv": "P-256" } })),
+                &header(json!({ "jwk": other_key.public_jwk() })),
                 &with(json!({})),
             ),
             StatusError::TokenSignature,
+        ),
+        // RFC 7519 §4.1.3: an `aud` that does not name the lab (it has no identifier).
+        (
+            signer.token(&with(json!({ "aud": "https://another-verifier.lab.invalid" }))),
+            StatusError::TokenAudience,
+        ),
+        // A VALID stream followed by a second one that marks the index INVALID.
+        (
+            signer.token(&with(json!({
+                "status_list": { "bits": 1, "lst": two_streams(&list_with(VALID), &list_with(INVALID)) }
+            }))),
+            StatusError::ListMalformed,
         ),
         ("not-a-jws".to_owned(), StatusError::TokenMalformed),
     ];
@@ -462,6 +498,7 @@ async fn fetch_failures_are_refused_and_recorded_apart_from_revocation() {
             .map(|(n, v)| ((*n).to_owned(), (*v).to_owned()))
             .collect(),
         body: body.to_vec(),
+        stall_body: false,
     };
     let jwt_type = ("content-type", STATUS_LIST_JWT_MEDIA_TYPE);
     let cases = [
@@ -500,6 +537,21 @@ async fn fetch_failures_are_refused_and_recorded_apart_from_revocation() {
         provider.set_reply(reply);
         lab.assert_status_refused(StatusError::Fetch(want)).await;
     }
+
+    // Headers, then a body that never comes: the fetch deadline fires mid-response, and the
+    // HTTP connection task is dropped with the check.
+    provider.set_reply(StatusReply {
+        stall_body: true,
+        ..reply(OK, &[jwt_type, ("content-length", "4096")], b"")
+    });
+    let started = Instant::now();
+    lab.assert_status_refused(StatusError::Fetch(FetchFailure::Timeout))
+        .await;
+    let waited = started.elapsed();
+    assert!(
+        waited >= STATUS_LIST_FETCH_TIMEOUT && waited < STATUS_LIST_FETCH_TIMEOUT + TIMEOUT_SLACK,
+        "{waited:?}"
+    );
 
     // The Status Provider presents another certificate than the pinned one.
     let wrong_pin =
@@ -615,6 +667,12 @@ async fn x509_trust_accepts_only_a_signer_certified_by_the_status_ca() {
 
     let signer_chain = [STATUS_SIGNER_PEM, STATUS_CA_PEM].concat();
     let cases = [
+        // Issued by the status CA, but with an extended key usage (serverAuth).
+        (
+            STATUS_SIGNER_JWK,
+            Some(STATUS_SIGNER_EKU_PEM.to_vec()),
+            StatusError::UntrustedSigner,
+        ),
         // The OIDF suite's shape: a self-signed certificate in `x5c`.
         (
             STATUS_SIGNER_JWK,
@@ -649,6 +707,15 @@ async fn x509_trust_accepts_only_a_signer_certified_by_the_status_ca() {
         provider.set_reply(StatusReply::token(&signer.token(&valid)));
         lab.assert_status_refused(want).await;
     }
+
+    // A certified leaf followed by an entry that is base64 but no certificate: every `x5c`
+    // entry must parse, used on the path or not.
+    let signer = StatusListSigner::from_jwk(STATUS_SIGNER_JWK).expect("status signer");
+    let x5c = json!([pem_b64(STATUS_SIGNER_PEM), "bm90LWEtY2VydGlmaWNhdGU="]);
+    let header = json!({ "x5c": x5c }).as_object().cloned().expect("header");
+    provider.set_reply(StatusReply::token(&signer.sign(&header, &valid)));
+    lab.assert_status_refused(StatusError::UntrustedSigner)
+        .await;
 }
 
 /// Fail closed without a policy: a conformance server configured without one, and a hardened
@@ -725,15 +792,25 @@ async fn without_a_status_policy_a_referenced_status_is_refused() {
     assert!(provider.requests().is_empty());
 }
 
-/// A status policy needs a request timeout above the fetch deadline; otherwise the request
-/// would time out (408, no evidence) before the status check could record its own failure.
+/// A status policy needs a request timeout of at least the fetch deadline plus its margin;
+/// otherwise the request could time out (408, no evidence) before the status check records its
+/// own failure.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn status_policy_needs_a_request_timeout_above_the_fetch_deadline() {
     let provider = provider().await;
+    let needed = STATUS_LIST_FETCH_TIMEOUT + STATUS_CHECK_TIMEOUT_MARGIN;
+    for short in [STATUS_LIST_FETCH_TIMEOUT, needed - Duration::from_millis(1)] {
+        let mut config = config(Some(Lab::policy(&provider, pinned_issuer_key())));
+        config.request_timeout = short;
+        assert!(
+            matches!(
+                LabServer::start(config).await,
+                Err(lab_server::StartError::StatusFetchTimeout)
+            ),
+            "{short:?}"
+        );
+    }
     let mut config = config(Some(Lab::policy(&provider, pinned_issuer_key())));
-    config.request_timeout = STATUS_LIST_FETCH_TIMEOUT;
-    assert!(matches!(
-        LabServer::start(config).await,
-        Err(lab_server::StartError::StatusFetchTimeout)
-    ));
+    config.request_timeout = needed;
+    assert!(LabServer::start(config).await.is_ok());
 }

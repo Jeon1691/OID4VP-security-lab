@@ -287,6 +287,11 @@ pub enum ValidationError {
     /// step 1). The status itself is checked later, before commit (`crate::StatusError`).
     #[error("status claim is malformed")]
     StatusClaimMalformed,
+    /// Public `crate::verify_sd_jwt_vc` only: the credential references a status list, which
+    /// that function cannot check; refused rather than accepted unchecked. The Verifier
+    /// pipeline never returns it (its status check runs before commit).
+    #[error("credential references a status list this entry point cannot check")]
+    StatusUnchecked,
     /// The session's binding is not `direct_post.jwt` (unreachable: the lab issues no other).
     #[error("unsupported response mode")]
     UnsupportedMode,

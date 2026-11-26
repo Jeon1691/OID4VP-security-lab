@@ -23,16 +23,17 @@
 //! | 3 | `GET` with `Accept: application/statuslist+jwt`, TLS 1.3 to the pinned server certificate, within [`STATUS_LIST_FETCH_TIMEOUT`] | TSL §8.1; lab policy | [`StatusError::Fetch`] |
 //! | 4 | `200`, `Content-Type` `application/statuslist+jwt`, no `Content-Encoding`, body at most [`MAX_STATUS_LIST_TOKEN_BYTES`]; a `3xx` is not followed | TSL §8.2 (lab: stricter than "SHOULD follow", §11.4) | [`StatusError::Fetch`] |
 //! | 5 | compact JWS, no `crit`, `typ` `statuslist+jwt`, `alg` ES256 | TSL §5.1; RFC 7515; RFC 8725 §3.1, §3.11 | [`StatusError::TokenMalformed`] / [`StatusError::TokenTyp`] / [`StatusError::TokenAlg`] |
-//! | 6 | signature: the pinned key, or an `x5c` chain to the configured status trust anchor | TSL §5.1 rule 2, §8.3 step 3a, §11.3 | [`StatusError::UntrustedSigner`] / [`StatusError::TokenSignature`] |
+//! | 6 | signature: the pinned key, or an `x5c` chain to the configured status trust anchor (every entry a DER certificate) | TSL §5.1 rule 2, §8.3 step 3a, §11.3 | [`StatusError::UntrustedSigner`] / [`StatusError::TokenSignature`] |
 //! | 7 | `sub` = the reference's `uri`, exactly | TSL §5.1, §8.3 step 4a | [`StatusError::SubjectMismatch`] |
-//! | 8 | `iat` required, `exp` / `nbf` / `ttl` optional, integer NumericDates (`ttl` positive) | TSL §5.1, §8.3 step 3b; RFC 7519 §4.1 | [`StatusError::TokenMalformed`] |
-//! | 9 | `exp` not reached; `iat` / `nbf` not more than [`STATUS_LIST_MAX_FUTURE_SKEW_SECS`] ahead | TSL §8.3 steps 4b-4c; RFC 7519 §4.1.4-§4.1.6 | [`StatusError::TokenExpired`] / [`StatusError::TokenNotYetValid`] |
-//! | 10 | `status_list.bits` in {1, 2, 4, 8}, `lst` canonical base64url of ZLIB, inflated at most [`MAX_STATUS_LIST_BYTES`] | TSL §4.1, §4.2, §8.3 step 5 | [`StatusError::ListMalformed`] |
+//! | 8 | `iat` required, `exp` / `nbf` / `ttl` optional, integer NumericDates (`ttl` positive); no `aud` (the lab has no audience identifier, and RFC 7519 §4.1.3 rejects a JWT whose `aud` does not name its processor) | TSL §5.1, §8.3 step 3b; RFC 7519 §4.1 | [`StatusError::TokenMalformed`] / [`StatusError::TokenAudience`] |
+//! | 9 | `exp` not reached; `iat` / `nbf` not more than [`STATUS_LIST_MAX_FUTURE_SKEW_SECS`] ahead, judged on the clock read after the fetch | TSL §8.3 steps 4b-4c; RFC 7519 §4.1.4-§4.1.6 | [`StatusError::TokenExpired`] / [`StatusError::TokenNotYetValid`] |
+//! | 10 | `status_list.bits` in {1, 2, 4, 8}, `lst` canonical base64url of exactly one ZLIB stream (no trailing bytes), inflated at most [`MAX_STATUS_LIST_BYTES`] | TSL §4.1, §4.2, §8.3 step 5; RFC 1950 §2.2 | [`StatusError::ListMalformed`] |
 //! | 11 | `idx` inside the list | TSL §4.1 step 3, §8.3 step 6 | [`StatusError::IndexOutOfRange`] |
 //! | 12 | the value: `0x00` accepted; `0x01` [`StatusError::Revoked`], `0x02` [`StatusError::Suspended`], anything else [`StatusError::NotValid`] | TSL §7.1, §8.3 step 7 | as listed |
 //!
-//! Only steps 11-12 make a statement about the credential; every earlier failure means "no
-//! statement can be made" (TSL §8.3) and is recorded as its own variant, never as a revocation.
+//! Only step 12 makes a statement about the credential; every earlier failure, step 11's
+//! out-of-range index included, means "no statement can be made" (TSL §8.3) and is recorded as
+//! its own variant, never as a revocation.
 //! All of them refuse the response: a credential whose status was asked to be checked and could
 //! not be is not accepted.
 //!
@@ -168,8 +169,13 @@ pub enum StatusError {
     /// `iat` or `nbf` lies further in the future than the allowed skew.
     #[error("status list token is not yet valid")]
     TokenNotYetValid,
-    /// `status_list` with `bits` outside {1, 2, 4, 8}, `lst` not canonical base64url of a ZLIB
-    /// stream, or the inflated list over [`MAX_STATUS_LIST_BYTES`] (TSL §4.1, §4.2).
+    /// The token carries `aud`: the lab identifies itself by no audience value, so under RFC
+    /// 7519 §4.1.3 ("MUST be rejected") it is meant for someone else.
+    #[error("status list token is addressed to an audience")]
+    TokenAudience,
+    /// `status_list` with `bits` outside {1, 2, 4, 8}, `lst` not canonical base64url of exactly
+    /// one ZLIB stream (trailing bytes refused), or the inflated list over
+    /// [`MAX_STATUS_LIST_BYTES`] (TSL §4.1, §4.2).
     #[error("status list is malformed")]
     ListMalformed,
     /// `idx` lies outside the list (TSL §8.3 step 6).
@@ -209,21 +215,21 @@ pub(crate) enum StatusChecker {}
 pub(crate) use policy::StatusChecker;
 #[cfg(feature = "conformance")]
 pub use policy::{
-    MAX_STATUS_LIST_BYTES, MAX_STATUS_LIST_TOKEN_BYTES, STATUS_LIST_FETCH_TIMEOUT,
-    STATUS_LIST_JWT_MEDIA_TYPE, STATUS_LIST_JWT_TYP, STATUS_LIST_MAX_FUTURE_SKEW_SECS,
-    StatusListConfigError, StatusListPolicy, StatusListTrust,
+    MAX_STATUS_LIST_BYTES, MAX_STATUS_LIST_TOKEN_BYTES, STATUS_CHECK_TIMEOUT_MARGIN,
+    STATUS_LIST_FETCH_TIMEOUT, STATUS_LIST_JWT_MEDIA_TYPE, STATUS_LIST_JWT_TYP,
+    STATUS_LIST_MAX_FUTURE_SKEW_SECS, StatusListConfigError, StatusListPolicy, StatusListTrust,
 };
 
 /// The status step of the pipeline: [`StatusResult::NotReferenced`] without a reference;
-/// with one, [`StatusError::NoPolicy`] without a checker, else the checker's verdict. `now` is
-/// the Verifier's clock in NumericDate seconds.
+/// with one, [`StatusError::NoPolicy`] without a checker, else the checker's verdict. The
+/// checker reads the Verifier's clock itself, after the fetch, so a token that expired while it
+/// was being fetched is not accepted.
 ///
 /// # Errors
 /// The first failing [`StatusError`].
 pub(crate) async fn check(
     checker: Option<&StatusChecker>,
     reference: Option<&StatusReference>,
-    now: u64,
 ) -> Result<StatusResult, StatusError> {
     let Some(reference) = reference else {
         return Ok(StatusResult::NotReferenced);
@@ -233,11 +239,11 @@ pub(crate) async fn check(
     };
     #[cfg(feature = "conformance")]
     {
-        checker.check(reference, now).await
+        checker.check(reference).await
     }
     #[cfg(not(feature = "conformance"))]
     {
-        let _ = (reference, now);
+        let _ = reference;
         match *checker {}
     }
 }
@@ -308,23 +314,30 @@ mod policy {
         FetchFailure, MAX_STATUS_URI_LEN, STATUS_LIST, StatusError, StatusReference, StatusResult,
         status_at, verdict,
     };
+    use session_core::{Clock as _, SystemClock};
+
     use crate::conformance::{JwsEs256, MAX_CHAIN_CERTIFICATES};
     use crate::jose::{self, CompactJws, HeaderError};
     use crate::sd_jwt::TrustedIssuerKey;
+    use crate::server::MILLIS_PER_SECOND;
 
     /// `typ` of a Status List Token in JWT format (TSL §5.1).
     pub const STATUS_LIST_JWT_TYP: &str = "statuslist+jwt";
     /// Media type of a Status List Token in JWT format: the `Accept` the lab sends (TSL §8.1)
     /// and the only `Content-Type` it accepts (§8.2).
     pub const STATUS_LIST_JWT_MEDIA_TYPE: &str = "application/statuslist+jwt";
-    /// Whole-fetch deadline (lab policy): connect, TLS, request and body. Half the default
-    /// request timeout, so a stalled Status Provider fails the status check, which is
-    /// recorded, before the response POST itself times out. A server with a status policy
-    /// refuses to start unless its `request_timeout` exceeds it
-    /// (`StartError::StatusFetchTimeout`).
+    /// Whole-fetch deadline (lab policy): connect, TLS, request and body. A fixed half of the
+    /// *default* request timeout (`DEFAULT_REQUEST_TIMEOUT`, 10 s), whatever timeout a server is
+    /// configured with, so a stalled Status Provider fails the status check, which is recorded,
+    /// before the response POST itself times out.
     pub const STATUS_LIST_FETCH_TIMEOUT: Duration = crate::DEFAULT_REQUEST_TIMEOUT
         .checked_div(2)
         .expect("non-zero divisor");
+    /// Headroom a server with a status policy needs on top of [`STATUS_LIST_FETCH_TIMEOUT`] in
+    /// its `request_timeout` (lab policy), for the work before the fetch (admission, decryption
+    /// slot, trial); below the sum it refuses to start (`StartError::StatusFetchTimeout`). The
+    /// default request timeout leaves 5 s.
+    pub const STATUS_CHECK_TIMEOUT_MARGIN: Duration = Duration::from_secs(2);
     /// Largest Status List Token body the lab reads, in bytes (lab policy). The OIDF suite's
     /// token is about 2 KiB (its header carries the signer's `x5c` twice); a list of a million
     /// 1-bit entries compresses to well under this.
@@ -343,6 +356,7 @@ mod policy {
     const EXP: &str = "exp";
     const NBF: &str = "nbf";
     const TTL: &str = "ttl";
+    const AUD: &str = "aud";
     /// `status_list` members (TSL §4.2).
     const BITS: &str = "bits";
     const LST: &str = "lst";
@@ -504,6 +518,11 @@ mod policy {
                 && suffix
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || URI_SUFFIX_EXTRA.contains(&b))
+                // Every segment after the prefix is non-empty and no dot segment, whatever the
+                // prefix's own path (also `/`): no `//`, no trailing `/`.
+                && suffix
+                    .split('/')
+                    .all(|segment| !segment.is_empty() && !DOT_SEGMENTS.contains(&segment))
                 && split_https(uri).is_some_and(|(_, path)| path_is_plain(path))
         }
     }
@@ -577,11 +596,11 @@ mod policy {
             })
         }
 
-        /// Module table, steps 1-12, for `reference` at `now` (NumericDate seconds).
+        /// Module table, steps 1-12, for `reference`. Time checks (token and signer
+        /// certificate) use the clock read after the fetch completed.
         pub(crate) async fn check(
             &self,
             reference: &StatusReference,
-            now: u64,
         ) -> Result<StatusResult, StatusError> {
             if !self.policy.allows(&reference.uri) {
                 return Err(StatusError::UriNotAllowed);
@@ -591,6 +610,7 @@ mod policy {
                 .map_err(|_| StatusError::Fetch(FetchFailure::Timeout))?
                 .map_err(StatusError::Fetch)?;
             let token = std::str::from_utf8(&token).map_err(|_| StatusError::TokenMalformed)?;
+            let now = SystemClock.now().as_unix_millis() / MILLIS_PER_SECOND;
             verdict(token_status(token, reference, &self.policy.trust, now)?)
         }
 
@@ -701,6 +721,9 @@ mod policy {
         if numeric_date(claims, TTL)? == Some(0) {
             return Err(StatusError::TokenMalformed);
         }
+        if claims.contains_key(AUD) {
+            return Err(StatusError::TokenAudience);
+        }
         if exp.is_some_and(|exp| now >= exp) {
             return Err(StatusError::TokenExpired);
         }
@@ -723,12 +746,27 @@ mod policy {
             .and_then(Value::as_str)
             .and_then(jose::b64_decode)
             .ok_or(StatusError::ListMalformed)?;
-        let inflated = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
-            &compressed,
-            MAX_STATUS_LIST_BYTES,
-        )
-        .map_err(|_| StatusError::ListMalformed)?;
+        let inflated = inflate_one_zlib_stream(&compressed).ok_or(StatusError::ListMalformed)?;
         status_at(&inflated, bits, reference.idx).ok_or(StatusError::IndexOutOfRange)
+    }
+
+    /// Inflates `compressed` as exactly one ZLIB stream (RFC 1950: header, DEFLATE data, Adler-32
+    /// checked) into at most [`MAX_STATUS_LIST_BYTES`]; `None` for a malformed stream, a larger
+    /// output, or any byte after the stream's end (a second stream could say something else).
+    fn inflate_one_zlib_stream(compressed: &[u8]) -> Option<Vec<u8>> {
+        use miniz_oxide::inflate::stream::{InflateState, inflate};
+        use miniz_oxide::{DataFormat, MZFlush, MZStatus};
+        let mut state = InflateState::new_boxed(DataFormat::Zlib);
+        // One byte of headroom: a list that fills it is over the bound.
+        let mut out = vec![0u8; MAX_STATUS_LIST_BYTES + 1];
+        let result = inflate(&mut state, compressed, &mut out, MZFlush::Finish);
+        let complete = result.status == Ok(MZStatus::StreamEnd)
+            && result.bytes_consumed == compressed.len()
+            && result.bytes_written <= MAX_STATUS_LIST_BYTES;
+        complete.then(|| {
+            out.truncate(result.bytes_written);
+            out
+        })
     }
 
     /// An optional NumericDate claim, as an integer (RFC 7519 §2; lab policy: no fractions, as
@@ -789,11 +827,13 @@ mod policy {
         if entries.is_empty() || entries.len() > MAX_CHAIN_CERTIFICATES {
             return None;
         }
+        // Every entry must parse as a certificate, used on the path or not (RFC 7515 §4.1.6).
         entries
             .iter()
             .map(|entry| {
-                let der = STANDARD.decode(entry.as_str()?).ok()?;
-                Some(CertificateDer::from(der))
+                let der = CertificateDer::from(STANDARD.decode(entry.as_str()?).ok()?);
+                EndEntityCert::try_from(&der).ok()?;
+                Some(der)
             })
             .collect()
     }
@@ -899,6 +939,23 @@ mod policy {
                 StatusListPolicy::new("https://localhost:8443/lists/", trust, pem).expect("policy");
             assert!(policy.allows("https://localhost:8443/lists/abc-1_2.3~"));
             assert!(policy.allows("https://localhost:8443/lists/a/b"));
+            // A root prefix: `//` and a trailing `/` after it are refused too.
+            let root = StatusListPolicy::new(
+                "https://localhost:8443/",
+                StatusListTrust::pinned_key(include_str!("../tests/fixtures/lab_issuer.pub.jwk"))
+                    .expect("pinned key"),
+                pem,
+            )
+            .expect("root policy");
+            assert!(root.allows("https://localhost:8443/lists/1"));
+            for refused in [
+                "https://localhost:8443//",
+                "https://localhost:8443//1",
+                "https://localhost:8443/lists/",
+                "https://localhost:8443/lists//1",
+            ] {
+                assert!(!root.allows(refused), "{refused}");
+            }
             for refused in [
                 "https://localhost:8443/lists/",
                 "https://localhost:8443/lists",
@@ -1079,9 +1136,9 @@ mod tests {
             uri: "https://s.example/1".to_owned(),
             idx: 0,
         };
-        assert_eq!(check(None, None, 0).await, Ok(StatusResult::NotReferenced));
+        assert_eq!(check(None, None).await, Ok(StatusResult::NotReferenced));
         assert_eq!(
-            check(None, Some(&reference), 0).await,
+            check(None, Some(&reference)).await,
             Err(StatusError::NoPolicy)
         );
     }

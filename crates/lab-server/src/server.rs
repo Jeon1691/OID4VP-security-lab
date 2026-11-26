@@ -1551,8 +1551,7 @@ pub(crate) async fn commit(
     // leaves the session pending, like every validation failure. It also runs before the replay
     // guard, so a replayed presentation causes a fetch, and is recorded as a status failure if
     // the list fails it; the guard only sees responses that passed every credential check.
-    let now = SystemClock.now().as_unix_millis() / MILLIS_PER_SECOND;
-    match crate::status_list::check(state.status.as_ref(), status.as_ref(), now).await {
+    match crate::status_list::check(state.status.as_ref(), status.as_ref()).await {
         Ok(outcome) => record.status_result = outcome,
         Err(e) => {
             record.status_result = StatusResult::Failed(e);

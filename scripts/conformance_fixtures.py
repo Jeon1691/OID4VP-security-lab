@@ -38,6 +38,8 @@ Output (docs/adr/0002-conformance-mode.md):
                                 CA:FALSE, digitalSignature, no extended key usage (§10 leaves
                                 id-kp-oauthStatusSigning TBD; the lab refuses any EKU) and no SAN.
   * status_signer.jwk           its private key as an EC P-256 JWK (tests sign lists with it).
+  * status_signer_eku.pem       negative-test signer: the same CA and key, but with an extended
+                                key usage (serverAuth), which the lab refuses for status signers.
   * conformance_fixtures.json   derived values: x509_san_dns / x509_hash client ids, SANs,
                                 validity, SHA-256 of every file.
 
@@ -91,6 +93,7 @@ WILDCARD_LEAF_SERIAL = "3"
 FOREIGN_CA_SERIAL = "4"
 STATUS_CA_SERIAL = "5"
 STATUS_SIGNER_SERIAL = "6"
+STATUS_SIGNER_EKU_SERIAL = "7"
 CA_NOT_BEFORE = "20261101000000Z"
 CA_NOT_AFTER = "20361101000000Z"
 LEAF_NOT_BEFORE = "20261101000000Z"
@@ -108,6 +111,7 @@ OUTPUT_FILES = [
     "status_ca.pem",
     "status_signer.pem",
     "status_signer.jwk",
+    "status_signer_eku.pem",
 ]
 MANIFEST = "conformance_fixtures.json"
 
@@ -169,6 +173,12 @@ authorityKeyIdentifier = keyid
 [v3_status_signer]
 basicConstraints = critical,CA:FALSE
 keyUsage = critical,digitalSignature
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid
+[v3_status_signer_eku]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature
+extendedKeyUsage = serverAuth
 subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid
 [v3_wildcard_leaf]
@@ -245,6 +255,8 @@ def generate(out: Path, dns: list[str]) -> None:
                 STATUS_SIGNER_SUBJECT, "-out", str(signer_csr))
         issue_leaf(cnf, signer_csr, status_ca, status_ca_key, STATUS_SIGNER_SERIAL,
                    "v3_status_signer", out / "status_signer.pem")
+        issue_leaf(cnf, signer_csr, status_ca, status_ca_key, STATUS_SIGNER_EKU_SERIAL,
+                   "v3_status_signer_eku", out / "status_signer_eku.pem")
     (out / "conformance_leaf.jwk").write_text(
         json.dumps(private_jwk(point, LEAF_KEY_LABEL), indent=2) + "\n")
     (out / "status_signer.jwk").write_text(

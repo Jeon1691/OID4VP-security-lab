@@ -321,10 +321,11 @@ fn verify_with_permanent(
 /// plus evidence (holder key thumbprint, `vct`, JSON Pointers of the disclosed claims, which
 /// all point into the size-checked claims); never the presentation itself.
 ///
-/// A `status` claim must carry a well-formed `status.status_list` reference
-/// ([`ValidationError::StatusClaimMalformed`] otherwise), but the referenced status is not
-/// checked here: the Verifier pipeline checks it before commit (`crate::StatusError`), and a
-/// caller that accepts such a credential without a status check of its own skips that step.
+/// A credential with a `status` claim is refused: malformed as
+/// [`ValidationError::StatusClaimMalformed`], well-formed as
+/// [`ValidationError::StatusUnchecked`], because this function cannot check the referenced
+/// status and its `Ok` would read as acceptance. The Verifier pipeline uses the internal
+/// variant that hands the reference on to its status check (`crate::StatusError`).
 ///
 /// # Errors
 /// The first [`ValidationError`].
@@ -334,7 +335,10 @@ pub fn verify_sd_jwt_vc(
     query: &CredentialQuery<'_>,
     kb: &KeyBindingContext<'_>,
 ) -> Result<ValidatedResponse, ValidationError> {
-    verify_sd_jwt_vc_with_status(presentation, issuer, query, kb).map(|(response, _)| response)
+    match verify_sd_jwt_vc_with_status(presentation, issuer, query, kb)? {
+        (response, None) => Ok(response),
+        (_, Some(_)) => Err(ValidationError::StatusUnchecked),
+    }
 }
 
 /// [`verify_sd_jwt_vc`], plus the credential's Token Status List reference
@@ -1144,13 +1148,23 @@ mod tests {
             vct: PID_VCT,
             claims: &["given_name", "family_name", "birthdate"],
         };
-        let ok = verify_sd_jwt_vc(
-            &present(&issuer_jwt(&p), &[&given, &family, &birth]),
-            &trusted(),
-            &query,
-            &context(),
-        )
-        .expect("suite-shaped presentation");
+        let presentation = present(&issuer_jwt(&p), &[&given, &family, &birth]);
+        // The public entry point cannot check the status, so it refuses the credential; the
+        // pipeline's variant accepts it and hands the reference on to the status check.
+        assert_eq!(
+            verify_sd_jwt_vc(&presentation, &trusted(), &query, &context()),
+            Err(ValidationError::StatusUnchecked)
+        );
+        let (ok, status) =
+            verify_sd_jwt_vc_with_status(&presentation, &trusted(), &query, &context())
+                .expect("suite-shaped presentation");
+        assert_eq!(
+            status,
+            Some(StatusReference {
+                uri: "https://status.lab.invalid/1".to_owned(),
+                idx: 0
+            })
+        );
         assert_eq!(
             ok.claims,
             [
@@ -1342,11 +1356,11 @@ mod tests {
             check(&payload(json!({ "status": { "list": [1] } }))),
             Err(ValidationError::StatusClaimMalformed)
         );
-        assert!(
+        assert_eq!(
             check(&payload(json!({
                 "status": { "status_list": { "idx": 1, "uri": "https://status.lab.invalid/1" } }
-            })))
-            .is_ok()
+            }))),
+            Err(ValidationError::StatusUnchecked)
         );
     }
 }

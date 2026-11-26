@@ -25,6 +25,7 @@
     "conformance_foreign_ca.pem": "52a9848b1716a1bdf3f277c7302a1cbfd5cfa043a165b87bd5d40f6f33a96eb7",
     "status_ca.pem": "b7df36a36217effa8f873869eb3e8763ab93a4534a0ef01ef3ba4160891eca84",
     "status_signer.pem": "571b5ec50484e911d8f8f0387412da00947fb101e072d6e16f91da9f44a09a71",
-    "status_signer.jwk": "04ed5bb1edc5c4eee30ef9de7b9042c62528b0b231a2d8d76e9d5f45b3a64f40"
+    "status_signer.jwk": "04ed5bb1edc5c4eee30ef9de7b9042c62528b0b231a2d8d76e9d5f45b3a64f40",
+    "status_signer_eku.pem": "943787bdc1a23f3b04ed18395e061a358e0de28921d495b77a6f5e8056ff4d0f"
   }
 }
