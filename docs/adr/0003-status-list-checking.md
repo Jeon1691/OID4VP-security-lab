@@ -1,8 +1,9 @@
 # ADR 0003: Token Status List checking before commit
 
-- **Status:** Proposed, 2026-11-25. Implemented at the project owner's request (add status
-  checking per the owner's implementation and re-verification criteria, then re-run C3 / C4);
-  the owner has not yet accepted the decisions below as an ADR.
+- **Status:** Accepted, 2026-11-26, by the project owner. Implemented on 2026-11-25 at the
+  owner's request (status checking per the owner's implementation and re-verification
+  criteria, then a C3 / C4 re-run); accepted after the independent reviewer and Codex reviews
+  and the re-run at `8e487fa`.
 - **Scope:** `crates/lab-server` (`status_list`, the response pipeline's commit step, the
   `conformance` feature, the binary's `--status-list-*` flags, the test-only `status_sim`),
   `scripts/conformance_fixtures.py` (status CA and signer fixtures),
