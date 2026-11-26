@@ -34,6 +34,7 @@ use p256::ecdsa::VerifyingKey;
 use serde_json::{Map, Value};
 
 use crate::jose::{self, CompactJws, HeaderError};
+use crate::status_list::{self, StatusReference};
 use crate::validate::{ValidatedResponse, ValidationError};
 
 /// `typ` of an SD-JWT VC issuer-signed JWT (SD-JWT VC draft-27 §2.2.1; OpenID4VP 1.1 B.3.1
@@ -102,7 +103,7 @@ const NON_DISCLOSABLE_CLAIMS: [&str; 8] = [
     VCT,
     "vct#integrity",
     "aka_vcts",
-    "status",
+    status_list::STATUS,
 ];
 
 /// The issuer public key the Verifier trusts (RFC 9901 §7.1 step 2c: "the signing key belongs
@@ -144,6 +145,12 @@ impl TrustedIssuerKey {
     #[must_use]
     pub fn thumbprint(&self) -> String {
         jose::p256_thumbprint(&self.key)
+    }
+
+    /// The key itself (status list pinning reuses this type for its pinned key).
+    #[cfg(feature = "conformance")]
+    pub(crate) const fn verifying_key(&self) -> &VerifyingKey {
+        &self.key
     }
 }
 
@@ -314,6 +321,12 @@ fn verify_with_permanent(
 /// plus evidence (holder key thumbprint, `vct`, JSON Pointers of the disclosed claims, which
 /// all point into the size-checked claims); never the presentation itself.
 ///
+/// A credential with a `status` claim is refused: malformed as
+/// [`ValidationError::StatusClaimMalformed`], well-formed as
+/// [`ValidationError::StatusUnchecked`], because this function cannot check the referenced
+/// status and its `Ok` would read as acceptance. The Verifier pipeline uses the internal
+/// variant that hands the reference on to its status check (`crate::StatusError`).
+///
 /// # Errors
 /// The first [`ValidationError`].
 pub fn verify_sd_jwt_vc(
@@ -322,6 +335,22 @@ pub fn verify_sd_jwt_vc(
     query: &CredentialQuery<'_>,
     kb: &KeyBindingContext<'_>,
 ) -> Result<ValidatedResponse, ValidationError> {
+    match verify_sd_jwt_vc_with_status(presentation, issuer, query, kb)? {
+        (response, None) => Ok(response),
+        (_, Some(_)) => Err(ValidationError::StatusUnchecked),
+    }
+}
+
+/// [`verify_sd_jwt_vc`], plus the credential's Token Status List reference
+/// (`status.status_list`, draft-ietf-oauth-status-list-14 §6.2), parsed from the processed
+/// payload after every other check passed. A `status` claim is permanent here (SD-JWT VC
+/// §2.2.2.3, checked above), so the reference is issuer-signed and never disclosed.
+pub(crate) fn verify_sd_jwt_vc_with_status(
+    presentation: &str,
+    issuer: &TrustedIssuerKey,
+    query: &CredentialQuery<'_>,
+    kb: &KeyBindingContext<'_>,
+) -> Result<(ValidatedResponse, Option<StatusReference>), ValidationError> {
     use ValidationError as E;
     let processed = verify_with_permanent(
         presentation,
@@ -351,15 +380,19 @@ pub fn verify_sd_jwt_vc(
         }
         claims.push(((*name).to_owned(), value.clone()));
     }
+    let status = status_list::reference(&processed.payload)?;
     let mut disclosed_claim_names = processed.disclosed_claim_names;
     disclosed_claim_names.sort_unstable();
-    Ok(ValidatedResponse {
-        vct: query.vct.to_owned(),
-        holder_key_thumbprint: processed.holder_key_thumbprint,
-        claims,
-        disclosed_claim_names,
-        response_code: None,
-    })
+    Ok((
+        ValidatedResponse {
+            vct: query.vct.to_owned(),
+            holder_key_thumbprint: processed.holder_key_thumbprint,
+            claims,
+            disclosed_claim_names,
+            response_code: None,
+        },
+        status,
+    ))
 }
 
 /// A decoded Disclosure (RFC 9901 §4.2.1, §4.2.2).
@@ -1115,13 +1148,23 @@ mod tests {
             vct: PID_VCT,
             claims: &["given_name", "family_name", "birthdate"],
         };
-        let ok = verify_sd_jwt_vc(
-            &present(&issuer_jwt(&p), &[&given, &family, &birth]),
-            &trusted(),
-            &query,
-            &context(),
-        )
-        .expect("suite-shaped presentation");
+        let presentation = present(&issuer_jwt(&p), &[&given, &family, &birth]);
+        // The public entry point cannot check the status, so it refuses the credential; the
+        // pipeline's variant accepts it and hands the reference on to the status check.
+        assert_eq!(
+            verify_sd_jwt_vc(&presentation, &trusted(), &query, &context()),
+            Err(ValidationError::StatusUnchecked)
+        );
+        let (ok, status) =
+            verify_sd_jwt_vc_with_status(&presentation, &trusted(), &query, &context())
+                .expect("suite-shaped presentation");
+        assert_eq!(
+            status,
+            Some(StatusReference {
+                uri: "https://status.lab.invalid/1".to_owned(),
+                idx: 0
+            })
+        );
         assert_eq!(
             ok.claims,
             [
@@ -1307,6 +1350,17 @@ mod tests {
             verify(&present(&issuer_jwt(&p), &[])).map(|_| ()),
             Err(ValidationError::DigestInNonDisclosableClaim)
         );
-        assert!(check(&payload(json!({ "status": { "list": [1] } }))).is_ok());
+        // Digest-free, `status` passes the permanence check; without a `status_list` reference
+        // the status claim check refuses it instead (draft-ietf-oauth-status-list-14 §8.3 step 1).
+        assert_eq!(
+            check(&payload(json!({ "status": { "list": [1] } }))),
+            Err(ValidationError::StatusClaimMalformed)
+        );
+        assert_eq!(
+            check(&payload(json!({
+                "status": { "status_list": { "idx": 1, "uri": "https://status.lab.invalid/1" } }
+            }))),
+            Err(ValidationError::StatusUnchecked)
+        );
     }
 }

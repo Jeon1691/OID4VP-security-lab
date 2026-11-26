@@ -38,6 +38,7 @@ use crate::sd_jwt::{
     TrustedIssuerKey,
 };
 use crate::server::P256_COORDINATE_BYTES;
+use crate::status_list::StatusReference;
 
 /// DCQL Credential Query id of every lab request, and the only `vp_token` member accepted
 /// (OpenID4VP 1.1 §6.1: alphanumeric, `_` or `-`).
@@ -280,6 +281,17 @@ pub enum ValidationError {
     /// KB-JWT `sd_hash` is not the hash of the presented SD-JWT (RFC 9901 §4.3.1, §7.3 step 5g).
     #[error("key binding JWT sd_hash does not match the presentation")]
     KbSdHashMismatch,
+    /// A `status` claim without a well-formed `status_list` reference: not an object, no
+    /// `status_list` object, `idx` not a non-negative integer, or `uri` not a non-empty string
+    /// of at most `MAX_STATUS_URI_LEN` bytes (draft-ietf-oauth-status-list-14 §6.2, §8.3
+    /// step 1). The status itself is checked later, before commit (`crate::StatusError`).
+    #[error("status claim is malformed")]
+    StatusClaimMalformed,
+    /// Public `crate::verify_sd_jwt_vc` only: the credential references a status list, which
+    /// that function cannot check; refused rather than accepted unchecked. The Verifier
+    /// pipeline never returns it (its status check runs before commit).
+    #[error("credential references a status list this entry point cannot check")]
+    StatusUnchecked,
     /// The session's binding is not `direct_post.jwt` (unreachable: the lab issues no other).
     #[error("unsupported response mode")]
     UnsupportedMode,
@@ -458,6 +470,9 @@ pub(crate) struct Validated {
     pub(crate) response: ValidatedResponse,
     /// [`holder_proof_digest`] of the verified presentation.
     pub(crate) holder_proof: [u8; SHA256_DIGEST_BYTES],
+    /// The credential's Token Status List reference, checked before commit
+    /// (`crate::status_list::check`); never committed or logged.
+    pub(crate) status: Option<StatusReference>,
 }
 
 /// Digest of the verified holder proof, for the Verifier-wide replay guard: SHA-256 of the
@@ -564,7 +579,7 @@ pub(crate) fn validate_payload(
         .iter()
         .map(String::as_str)
         .collect();
-    let response = sd_jwt::verify_sd_jwt_vc(
+    let (response, status) = sd_jwt::verify_sd_jwt_vc_with_status(
         presentation,
         &acceptance.issuer,
         &CredentialQuery {
@@ -580,5 +595,6 @@ pub(crate) fn validate_payload(
     Ok(Validated {
         response,
         holder_proof: holder_proof_digest(presentation),
+        status,
     })
 }

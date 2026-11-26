@@ -35,11 +35,19 @@ ecdh-es-research = ["dep:jose-ecdh-es"]
 # `wallet-sim` also on, the simulator's HTTP client gets rustls (no provider of its own; it is
 # handed a ring-based config) to reach the HTTPS lab. Tests enable it through the self
 # dev-dependency.
+#
+# It also carries Token Status List checking (docs/adr/0003-status-list-checking.md): an HTTPS
+# GET of the list with hyper's HTTP/1.1 client over the same rustls stack (`hyper/client` adds
+# no crate: hyper's client half is already in the tree under reqwest), and zlib inflation
+# (`miniz_oxide`). The default build has neither and refuses every credential that references a
+# status list.
 conformance = [
     "dep:jose-ecdh-es",
+    "dep:miniz_oxide",
     "dep:rustls",
     "dep:tokio-rustls",
     "dep:webpki",
+    "hyper/client",
     "reqwest?/rustls-tls-manual-roots-no-provider",
 ]
 
@@ -53,6 +61,7 @@ hyper = { workspace = true }
 hyper-util = { workspace = true }
 jose-ecdh-es = { workspace = true, optional = true }
 jose-hpke = { workspace = true }
+miniz_oxide = { workspace = true, optional = true }
 p256 = { workspace = true }
 protocol-model = { workspace = true }
 reqwest = { workspace = true, optional = true }

@@ -10,6 +10,9 @@
 //!            --public-origin https://<host>[:<port>]
 //!            [--client-id-prefix x509_san_dns|x509_hash] [--max-runtime-secs <n>]
 //!            [--response-redirect-uri <https url>]
+//!            [--status-list-uri-prefix <https url ending in />
+//!             --status-list-tls-cert <pem>
+//!             --status-list-key <public jwk file> | --status-list-trust-anchor <ca pem>]
 //! ```
 //!
 //! `LAB_SIGNING_KEY` / `LAB_ISSUER_KEY` / `LAB_CLIENT_ID` / `LAB_MODE` / `LAB_BIND` /
@@ -41,6 +44,15 @@
 //! `--max-runtime-secs` (default `DEFAULT_CONFORMANCE_MAX_RUNTIME`, at most
 //! `MAX_CONFORMANCE_MAX_RUNTIME`). `--session-ttl-secs` must be 1 to `MAX_SESSION_TTL` seconds.
 //!
+//! **Token Status List checking** (conformance mode only, docs/adr/0003-status-list-checking.md)
+//! is on with `--status-list-uri-prefix` (the issuer policy: only `uri`s under this `https`
+//! prefix are fetched), `--status-list-tls-cert` (the Status Provider's TLS certificate, pinned
+//! byte for byte) and exactly one of `--status-list-key` (the list signing key, pinned: an EC
+//! P-256 public JWK) or `--status-list-trust-anchor` (the CA the token's `x5c` must chain to).
+//! Without them every credential that references a status list is refused. A conformance
+//! server prints its status policy at start and one `lab-server evidence:` line per response
+//! POST (outcomes only: no keys, claims, nonces or URIs), for the plan driver.
+//!
 //! Every mode refuses non-loopback addresses (lab policy; ADR 0002 keeps that for conformance
 //! mode too). Build release artifacts with a plain `cargo build -p lab-server`, so the
 //! test-only `wallet-sim` feature is not unified in.
@@ -63,14 +75,16 @@ const USAGE: &str = "usage: lab-server --signing-key <jwk file> --issuer-key <pu
 [--credential-query-id <id>] [--vct <vct>] [--claims <name,name,...>] \
 [conformance: --tls-cert <pem> --tls-key <pem> --trust-anchor <pem> \
 --public-origin https://<host>[:<port>] [--client-id-prefix x509_san_dns|x509_hash] \
-[--max-runtime-secs <n>] [--response-redirect-uri <url>]]";
+[--max-runtime-secs <n>] [--response-redirect-uri <url>] \
+[--status-list-uri-prefix <url> --status-list-tls-cert <pem> \
+(--status-list-key <jwk> | --status-list-trust-anchor <pem>)]]";
 /// Separator of the `--claims` list.
 const CLAIMS_SEPARATOR: char = ',';
 const TRIAL_PREFIX: &str = "research-trial=";
 /// The `--mode` value of conformance mode (CLI only, never from `LAB_MODE`).
 const CONFORMANCE_MODE: &str = "conformance";
 /// Every flag the binary takes; each takes one value.
-const FLAGS: [&str; 17] = [
+const FLAGS: [&str; 21] = [
     "--signing-key",
     "--issuer-key",
     "--client-id",
@@ -88,9 +102,13 @@ const FLAGS: [&str; 17] = [
     "--client-id-prefix",
     "--max-runtime-secs",
     "--response-redirect-uri",
+    "--status-list-uri-prefix",
+    "--status-list-tls-cert",
+    "--status-list-key",
+    "--status-list-trust-anchor",
 ];
 /// Flags meaningful only in conformance mode.
-const CONFORMANCE_FLAGS: [&str; 7] = [
+const CONFORMANCE_FLAGS: [&str; 11] = [
     "--tls-cert",
     "--tls-key",
     "--trust-anchor",
@@ -98,7 +116,17 @@ const CONFORMANCE_FLAGS: [&str; 7] = [
     "--client-id-prefix",
     "--max-runtime-secs",
     "--response-redirect-uri",
+    "--status-list-uri-prefix",
+    "--status-list-tls-cert",
+    "--status-list-key",
+    "--status-list-trust-anchor",
 ];
+/// How often a conformance server prints its new evidence records.
+#[cfg(feature = "conformance")]
+const EVIDENCE_PRINT_INTERVAL: Duration = Duration::from_millis(100);
+/// Prefix of the evidence lines (the plan driver matches it).
+#[cfg(feature = "conformance")]
+const EVIDENCE_LINE: &str = "lab-server evidence:";
 /// Environment fallbacks (flag, variable). Conformance flags have none, on purpose.
 const ENV_FALLBACKS: [(&str, &str); 8] = [
     ("--signing-key", "LAB_SIGNING_KEY"),
@@ -271,8 +299,65 @@ fn conformance(
         conformance.max_runtime = seconds(&runtime, "--max-runtime-secs")?;
     }
     conformance.response_redirect_uri = args.remove("--response-redirect-uri");
+    conformance.status_list = status_list_policy(args)?;
     config.conformance = Some(conformance);
     Ok(())
+}
+
+/// The status flags into a policy: all of prefix and TLS certificate and exactly one trust, or
+/// none of them.
+#[cfg(feature = "conformance")]
+fn status_list_policy(
+    args: &mut HashMap<&'static str, String>,
+) -> Result<Option<lab_server::StatusListPolicy>, String> {
+    use lab_server::{StatusListPolicy, StatusListTrust};
+    let needs = "status list checking needs --status-list-uri-prefix, --status-list-tls-cert and \
+                 exactly one of --status-list-key / --status-list-trust-anchor";
+    let (prefix, tls, key, anchor) = (
+        args.remove("--status-list-uri-prefix"),
+        args.remove("--status-list-tls-cert"),
+        args.remove("--status-list-key"),
+        args.remove("--status-list-trust-anchor"),
+    );
+    let (prefix, tls) = match (prefix, tls) {
+        (None, None) if key.is_none() && anchor.is_none() => return Ok(None),
+        (Some(prefix), Some(tls)) => (prefix, tls),
+        _ => return Err(needs.to_owned()),
+    };
+    let trust = match (key, anchor) {
+        (Some(key), None) => {
+            let jwk = std::fs::read_to_string(&key)
+                .map_err(|e| format!("cannot read status list key {key:?}: {e}"))?;
+            StatusListTrust::pinned_key(&jwk).map_err(|e| format!("{key:?}: {e}"))?
+        }
+        (None, Some(anchor)) => {
+            StatusListTrust::x509_from_pem(&read(&anchor, "status list trust anchor")?)
+                .map_err(|e| format!("{anchor:?}: {e}"))?
+        }
+        _ => return Err(needs.to_owned()),
+    };
+    let tls = read(&tls, "status list TLS certificate")?;
+    StatusListPolicy::new(prefix, trust, &tls)
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
+/// One line per evidence record: outcomes only (no keys, claims, nonces, URIs or digests).
+#[cfg(feature = "conformance")]
+fn print_evidence(evidence: &lab_server::EvidenceLog) {
+    for record in evidence.take() {
+        println!(
+            "{EVIDENCE_LINE} route={:?} candidates={} crypto={:?} validation={:?} status={:?} \
+             commit={:?} rejection={:?}",
+            record.route,
+            record.candidate_count,
+            record.crypto_result,
+            record.validation_result,
+            record.status_result,
+            record.commit_result,
+            record.rejection,
+        );
+    }
 }
 
 #[tokio::main]
@@ -286,6 +371,20 @@ async fn main() -> ExitCode {
     };
     let mode = config.mode;
     let client_id = config.client_id.as_str().to_owned();
+    #[cfg(feature = "conformance")]
+    if let Some(conformance) = &config.conformance {
+        match &conformance.status_list {
+            Some(policy) => println!(
+                "lab-server status list policy: uri prefix {}, trust {}",
+                policy.uri_prefix(),
+                policy.trust_description()
+            ),
+            None => println!(
+                "lab-server status list policy: none (credentials referencing a status list are \
+                 refused)"
+            ),
+        }
+    }
     let server = match LabServer::start(config).await {
         Ok(server) => server,
         Err(e) => {
@@ -298,7 +397,26 @@ async fn main() -> ExitCode {
         server.local_addr(),
         server.base_url()
     );
-    match server.wait().await {
+    #[cfg(feature = "conformance")]
+    let printer = (mode == Mode::Conformance).then(|| {
+        let evidence = server.evidence().clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(EVIDENCE_PRINT_INTERVAL);
+            loop {
+                tick.tick().await;
+                print_evidence(&evidence);
+            }
+        })
+    });
+    #[cfg(feature = "conformance")]
+    let evidence = server.evidence().clone();
+    let outcome = server.wait().await;
+    #[cfg(feature = "conformance")]
+    if let Some(printer) = printer {
+        printer.abort();
+        print_evidence(&evidence);
+    }
+    match outcome {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("lab-server: {e}");

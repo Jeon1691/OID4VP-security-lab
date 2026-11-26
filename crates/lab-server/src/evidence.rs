@@ -1,7 +1,7 @@
 //! Per-request evidence, kept in process for tests and scenario runs.
 //!
 //! Records hold counts, strategies, error variants and the HPKE trial's duration only: never
-//! keys, plaintext, nonces, route tokens or JWE bytes. The session id of a committed session is included; it names the
+//! keys, plaintext, nonces, route tokens, JWE bytes, or Status List URIs and indices. The session id of a committed session is included; it names the
 //! session in the lab's own result endpoint and is not a capability for posting responses.
 
 use std::collections::VecDeque;
@@ -12,6 +12,7 @@ use protocol_model::SessionId;
 use session_core::{ClaimError, ResolutionStrategy, ResolveError};
 
 use crate::config::RouteKind;
+use crate::status_list::{StatusError, StatusResult};
 use crate::validate::ValidationError;
 
 /// Records kept before the oldest is dropped: 16 times the largest concurrent scenario
@@ -64,6 +65,10 @@ pub enum Rejection {
     Decrypt,
     /// Decrypted, but no candidate validated; the first validation error.
     Validation(ValidationError),
+    /// Validated, but the credential's referenced status is not `0x00` VALID, or could not be
+    /// established (`crate::status_list`; draft-ietf-oauth-status-list-14 §8.3). Nothing is
+    /// committed and the session stays pending.
+    Status(StatusError),
     /// Bounded trial: more than one candidate decrypted and validated (integrity failure).
     Ambiguous {
         /// Candidates that validated.
@@ -153,6 +158,9 @@ pub struct EvidenceRecord {
     pub crypto_result: CryptoResult,
     /// Validation outcome.
     pub validation_result: ValidationResult,
+    /// Token Status List outcome of the validated candidate (`crate::status_list`): run after
+    /// validation and before the replay guard and the claim.
+    pub status_result: StatusResult,
     /// Commit outcome.
     pub commit_result: CommitResult,
     /// Final internal reason for refusing; `None` on success.
@@ -171,6 +179,7 @@ impl EvidenceRecord {
             trial_time: Duration::ZERO,
             crypto_result: CryptoResult::NotAttempted,
             validation_result: ValidationResult::NotRun,
+            status_result: StatusResult::NotRun,
             commit_result: CommitResult::NotRun,
             rejection: None,
             committed_session: None,

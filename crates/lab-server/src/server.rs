@@ -50,6 +50,7 @@ use crate::evidence::{
     ValidationResult,
 };
 use crate::jar::{REQUEST_OBJECT_AUD, REQUEST_OBJECT_MEDIA_TYPE, RequestSigner};
+use crate::status_list::{StatusChecker, StatusResult};
 use crate::validate::{
     self, Acceptance, MAX_RESEARCH_NONCE_LEN, MAX_RESEARCH_STATE_LEN, REQUEST_NONCE,
     RESPONSE_STATE, ValidatedResponse, ValidationError,
@@ -315,6 +316,10 @@ pub(crate) struct AppState {
     signer: RequestSigner,
     /// Verifies the issuer signature of every presented SD-JWT VC.
     pub(crate) acceptance: Arc<Acceptance>,
+    /// Checks a credential's referenced Token Status List before commit (conformance mode with
+    /// `ConformanceConfig::status_list` only). `None`: a credential that references one is
+    /// refused (`StatusError::NoPolicy`).
+    status: Option<StatusChecker>,
     session_ttl: Duration,
     base_url: String,
     /// Unique-uri sessions; `RoutePolicy::UniquePerSession`, in every mode.
@@ -512,15 +517,23 @@ impl LabServer {
         let base_url = format!("http://{addr}");
         let response_redirect_uri: Option<String> = None;
         // `config::check` admits a conformance configuration in conformance mode only.
+        let status: Option<StatusChecker> = None;
         #[cfg(feature = "conformance")]
-        let (base_url, response_redirect_uri, tls, max_runtime) = match &config.conformance {
+        let (base_url, response_redirect_uri, tls, max_runtime, status) = match &config.conformance
+        {
             Some(conformance) => (
                 conformance.public_origin.base_url(addr.port()),
                 conformance.response_redirect_uri.clone(),
                 Some(crate::conformance::tls_acceptor(&conformance.credentials)?),
                 Some(conformance.max_runtime),
+                conformance
+                    .status_list
+                    .clone()
+                    .map(StatusChecker::new)
+                    .transpose()
+                    .map_err(StartError::Tls)?,
             ),
-            None => (base_url, response_redirect_uri, None, None),
+            None => (base_url, response_redirect_uri, None, None, status),
         };
         // Only conformance mode has a time box.
         #[cfg(not(feature = "conformance"))]
@@ -569,6 +582,7 @@ impl LabServer {
                 issuer: config.trusted_issuer,
                 request: config.credential_request,
             }),
+            status,
             session_ttl: config.session_ttl,
             base_url: base_url.clone(),
             unique: registry(RoutePolicy::UniquePerSession),
@@ -1517,8 +1531,9 @@ pub(crate) fn select(
     }
 }
 
-/// Steps 9-10: the Verifier-wide replay guard, then the atomic claim of `candidate` with the
-/// digest of the compact JWE `response`.
+/// The end of step 8 and steps 9-10: the Token Status List check of the validated credential
+/// (`crate::status_list`), then the Verifier-wide replay guard, then the atomic claim of
+/// `candidate` with the digest of the compact JWE `response`.
 pub(crate) async fn commit(
     record: &mut EvidenceRecord,
     state: &AppState,
@@ -1530,7 +1545,19 @@ pub(crate) async fn commit(
     let validate::Validated {
         response: mut result,
         holder_proof,
+        status,
     } = validated;
+    // Before the commit guard: the fetch is network I/O, bounded by its own deadline. A refusal
+    // leaves the session pending, like every validation failure. It also runs before the replay
+    // guard, so a replayed presentation causes a fetch, and is recorded as a status failure if
+    // the list fails it; the guard only sees responses that passed every credential check.
+    match crate::status_list::check(state.status.as_ref(), status.as_ref()).await {
+        Ok(outcome) => record.status_result = outcome,
+        Err(e) => {
+            record.status_result = StatusResult::Failed(e);
+            return Err(Rejection::Status(e));
+        }
+    }
     // A fresh Response Code per committed response when the answer carries a `redirect_uri`
     // (OpenID4VP 1.0 §8.2, §13.3 step 6: created by the Response URI and bound to the stored
     // response). Drawn before the claim, so it is stored with the consumed session atomically.

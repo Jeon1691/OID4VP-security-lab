@@ -188,6 +188,18 @@ impl<'a> CompactJws<'a> {
         Ok(())
     }
 
+    /// `BASE64URL(header) '.' BASE64URL(payload)`, as received.
+    #[cfg(feature = "conformance")]
+    pub(crate) const fn signing_input(&self) -> &str {
+        self.signing_input
+    }
+
+    /// The decoded signature, any length.
+    #[cfg(feature = "conformance")]
+    pub(crate) fn signature(&self) -> &[u8] {
+        &self.signature
+    }
+
     /// ES256 signature check over the signing input (RFC 7515 §5.2 step 8, RFC 7518 §3.4).
     pub(crate) fn verify_es256(&self, key: &VerifyingKey) -> bool {
         self.signature.len() == ES256_SIGNATURE_BYTES

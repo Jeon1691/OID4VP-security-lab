@@ -104,6 +104,13 @@ tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring
 # Renamed to its library name `webpki`, which is what the code (and cargo-machete) sees.
 webpki = { package = "rustls-webpki", version = "0.103.17", default-features = false, features = ["ring", "std"] }
 
+# lab-server `conformance` feature only: zlib inflation of Token Status Lists
+# (draft-ietf-oauth-status-list-14 §4.1 step 4, §8.3 step 5) with an output bound. Already in the
+# tree (flate2 under reqwest / ssi), so no new crate enters Cargo.lock. `with-alloc` (the
+# default) is what `decompress_to_vec_zlib_with_limit` needs; no `std`, no `simd`.
+# MIT OR Zlib OR Apache-2.0 (adler2: 0BSD OR MIT OR Apache-2.0).
+miniz_oxide = { version = "0.9.1", default-features = false, features = ["with-alloc"] }
+
 # Workspace crates.
 protocol-model = { path = "crates/protocol-model" }
 jose-hpke = { path = "crates/jose-hpke" }

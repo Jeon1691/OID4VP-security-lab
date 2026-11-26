@@ -104,7 +104,9 @@ as reference text (`library/specs/…`); no test cites them.
 | `…WrongVct` | `sd_jwt::tests::sd_jwt_vc_profile_enforces_vct_and_exactly_the_requested_claims` | Unit level only |
 | `…RequestUriFetchedTwice` | `served_request_object_is_signed_once_and_never_changes` | |
 | `…RequestUriMethodPost` | none | The lab serves GET only (no `request_uri_method`) |
-| `…PresentRevokedCredential`, `…PresentCredentialWithoutStatus`, `…PresentCredentialOnIdentifierList` | none | Status and revocation are out of lab scope |
+| `…PresentRevokedCredential` | `same_credential_flips_from_accepted_to_revoked_when_only_the_list_changes` (`tests/status_list_e2e.rs`) | Added 2026-11-25 (ADR 0003): Token Status List checking in conformance mode with a status policy |
+| `…PresentCredentialWithoutStatus` | `credential_without_status_is_accepted_without_a_fetch` | Accepted without a fetch |
+| `…PresentCredentialOnIdentifierList` | none | mdoc only, out of scope |
 | `…InvalidSessionTranscript` | none | mdoc only, out of scope |
 
 The suite has no multi-session or response-correlation tests (nothing like #792 shared-route
@@ -251,7 +253,9 @@ stays unsupported.
    - The status must be exactly 200, with `Content-Type: application/json`.
    - Positive modules always end in REVIEW, which is completed through the image API.
    - `…PresentRevokedCredential` FAILS for any verifier that does not fetch the status list.
-     The lab has no status support, so this module stays FAILED for the lab [run].
+     Until ADR 0003 the lab had no status support, so this module was FAILED for the lab
+     [run, `20261125T044623Z-61dbb05`]; the lab now checks the list (see §7 of
+     `tools/oidf-suite/README.md` for the re-run).
 7. `request_uri_method=post` (§5.10) is not supported. That module would be skipped: it calls
    `fireTestSkipped` when the request has no `request_uri_method=post`
    (`VP1FinalVerifierRequestUriMethodPost.java` L37).
@@ -263,7 +267,7 @@ stays unsupported.
 | C0 (this document) | Desk research, mapping of suite modules to lab tests | Read public pages only | none |
 | C1 | Offline gap tests inside the lab: `MinimalCnfJwk`-style `cnf`, a corrupted (not foreign) issuer signature, a corrupted KB-JWT signature. Configurable DCQL query and issuer key. **Done:** `credential_with_minimal_cnf_jwk_is_accepted`, `issuer_jwt_with_corrupted_signature_is_rejected`, `kb_jwt_with_corrupted_signature_is_rejected`, `configured_credential_query_is_requested_and_enforced`. | Loopback | Default gate stages |
 | C2 | ADR: conformance mode (TLS loopback front, x509 client id with a synthetic CA, ECDH-ES as a separate mode, kill switch). **Done:** ADR 0002 (accepted 2026-11-25), implemented and tested over HTTPS on loopback (`tests/conformance_mode_e2e.rs`). | none | ADR approved before any code |
-| C3 | Self-hosted suite (`tools/oidf-suite/`, Option B on OrbStack), plain `oid4vp-1final-verifier-test-plan`, `sd_jwt_vc` + `direct_post.jwt` + `x509_san_dns` + `request_uri_signed`, against the ECDH-ES conformance mode. Synthetic credentials only. Results go into `evidence/` with commit SHAs. **Done (2026-11-25, lab `61dbb05`, run `evidence/oidf/20261125T044623Z-61dbb05/`):** all 14 modules as expected: 8 PASSED (negative), 4 REVIEW (positive), 1 SKIPPED (`request-uri-method-post`), 1 FAILED (`present-revoked-credential`, no status-list support); no lab bug found. | Loopback + TLS (per ADR) | Explicit approval (given 2026-11-25) |
+| C3 | Self-hosted suite (`tools/oidf-suite/`, Option B on OrbStack), plain `oid4vp-1final-verifier-test-plan`, `sd_jwt_vc` + `direct_post.jwt` + `x509_san_dns` + `request_uri_signed`, against the ECDH-ES conformance mode. Synthetic credentials only. Results go into `evidence/` with commit SHAs. **Done (2026-11-25, lab `61dbb05`, run `evidence/oidf/20261125T044623Z-61dbb05/`):** all 14 modules as expected: 8 PASSED (negative), 4 REVIEW (positive), 1 SKIPPED (`request-uri-method-post`), 1 FAILED (`present-revoked-credential`, no status-list support); no lab bug found. **Re-run with status checking (ADR 0003, lab `8e487fa` after the review fixes, `evidence/oidf/20261126T022001Z-8e487fa/`; first at `e91431d`, `20261125T113627Z-e91431d/`):** C3 and C4 all 14 as expected each, `present-revoked-credential` PASSED after a real list fetch, no WARNING. | Loopback + TLS (per ADR) | Explicit approval (given 2026-11-25) |
 | C4 | HAIP plan (`x509_hash`, A128GCM + A256GCM, trust anchor PEM). **Done (same run):** same 14 results as C3; the HAIP conditions (encryption metadata, no key reuse, `redirect_uri`, strict x5c chain to the trust anchor) all passed. | Same | Explicit approval (given 2026-11-25) |
 | C5 | HPKE / OpenID4VP 1.1: wait for suite support. Track the suite repo for `HPKE` / `session_info` (read-only). Until then, HPKE-0 conformance rests on jose-hpke draft-22 vectors, the lab's own suite, and INTEROP-02. | none | — |
 

@@ -295,6 +295,24 @@ REQUIRED_TESTS=(
   sd_jwt::tests::disclosures_outside_the_requested_claims_are_rejected_at_any_depth
   sd_jwt::tests::non_disclosable_claims_must_not_carry_digests
   jose::tests::strict_json_refuses_duplicate_members_at_any_depth
+  # lab-server Token Status List checking (ADR 0003; draft-ietf-oauth-status-list-14 §4.1,
+  # §5.1, §6.2, §7.1, §8.1-§8.3, §11.3): the 0x00 -> 0x01 flip of one credential, every
+  # failure class apart from revocation, the issuer URI policy, x5c to a separate status CA,
+  # and fail closed without a policy.
+  same_credential_flips_from_accepted_to_revoked_when_only_the_list_changes
+  credential_without_status_is_accepted_without_a_fetch
+  token_and_list_failures_are_refused_and_recorded_apart_from_revocation
+  fetch_failures_are_refused_and_recorded_apart_from_revocation
+  uri_outside_the_issuer_policy_is_refused_without_a_fetch
+  x509_trust_accepts_only_a_signer_certified_by_the_status_ca
+  without_a_status_policy_a_referenced_status_is_refused
+  status_policy_needs_a_request_timeout_above_the_fetch_deadline
+  status_list::tests::status_values_are_read_as_tsl_section_4_1_packs_them
+  status_list::tests::only_valid_is_accepted_and_every_other_value_has_its_own_refusal
+  status_list::tests::status_reference_is_parsed_strictly
+  status_list::tests::without_a_checker_a_referenced_status_is_refused
+  status_list::policy::tests::uri_prefix_and_uri_policy_are_strict
+  status_list::policy::tests::status_signer_certificates_must_carry_no_extended_key_usage
   # session-redis (IMP-014): the shared contract suite on MemoryRegistry, and the fail-closed
   # checks that need no server. The Redis side runs in the redis stage.
   memory::unique_uri_yields_exactly_one_candidate_among_sessions_sharing_kid

@@ -18,10 +18,10 @@ evidence.
 | `crates/evidence-report` | G6 benchmark rows → JSON / CSV / Markdown summary (IMP-016) |
 | `crates/scenario-runner` | G6 benchmark driver: in-process lab-server over loopback HTTP with the wallet simulator, store timings, criterion micro-benches (IMP-015) |
 | `crates/lab-server` | axum lab Verifier for HPKE-0 `direct_post.jwt` (IMP-008..010) with SD-JWT VC + KB-JWT holder binding (Evidence level 3), wallet simulator and synthetic issuer (`wallet-sim` feature), OpenID4VP 1.0-style ECDH-ES research route (`ecdh-es-research` feature, research mode only, not in the binary), time-boxed OIDF conformance mode (`conformance` feature, ADR 0002); G0-C API smoke test, G0-D ECDH-ES loopback e2e |
-| `docs/adr/` | Lab design decisions (`0001-ecdh-es-research-route.md`) |
+| `docs/adr/` | Lab design decisions (`0001-ecdh-es-research-route.md`, `0002-conformance-mode.md`, `0003-status-list-checking.md`) |
 | `docs/interop/` | G7: OIDF #792 reproduction map (`issue-792-reproduction.md`), OIDF conformance-suite plan and INTEROP-02 outline (`oidf-conformance-plan.md`) |
 | `tools/oidf-suite/` | Self-hosted OIDF conformance suite for C3/C4: digest-pinned compose file, runbook, plan configs, suite-side findings, suite-observation stand-in (not a verifier), plan driver (`driver/run_plan.py`) |
-| `evidence/oidf/` | C3/C4 runs of the OIDF suite against conformance mode, one directory per run (`summary.md`, `results.json`, manifests, sanitized logs). **Status (run `20261125T044623Z-61dbb05`):** both plans, 14 modules each, every module ended as expected: 8 PASSED (negative), 4 REVIEW (positive; REVIEW is not PASSED), 1 SKIPPED (`request_uri_method=post`), 1 FAILED (`present-revoked-credential`: no status-list support). Not a certification; nothing submitted to the OIDF; HPKE-0 / OpenID4VP 1.1 not covered by the suite |
+| `evidence/oidf/` | C3/C4 runs of the OIDF suite against conformance mode, one directory per run (`summary.md`, `results.json`, manifests, sanitized logs). **Status (run `20261126T022001Z-8e487fa`, with Token Status List checking and the review fixes, ADR 0003):** both plans, 14 modules each, all 28 as expected with the lab-side checks: 9 PASSED (8 negative + `present-revoked-credential`, refused as revoked after fetching the list), 4 REVIEW (positive, no WARNING; REVIEW is not PASSED), 1 SKIPPED (`request_uri_method=post`). The earlier run `20261125T044623Z-61dbb05` (no status support) had `present-revoked-credential` FAILED. Not a certification; nothing submitted to the OIDF; HPKE-0 / OpenID4VP 1.1 not covered by the suite |
 | `scripts/` | Gate stages (shared by local and CI), upstream reproduction, evidence manifest, OIDF suite reachability probe |
 | `.github/workflows/` | `ci.yml` PR/main gate, `security.yml` daily advisory scan, `bench.yml` manual G6 benchmark |
 | `docs/benchmarks.md` | G6 methodology, metrics, invariants, caveats, how to reproduce |
@@ -114,10 +114,25 @@ bounded before any crypto. The consumed session keeps only the requested claims 
 256 bytes), the `vct`, the holder key's RFC 7638 thumbprint and the JSON Pointers of all
 disclosed claims, never the presentation; none of these go into the evidence log. Every failure answers the generic 400; the failing check is recorded
 as evidence. HPKE decryption alone is never holder authentication. Out of scope: issuer trust
-beyond one configured key, status/revocation, Wallet attestation, mdoc.
+beyond one configured key, Wallet attestation, mdoc.
+
+Token Status List (draft-ietf-oauth-status-list-14, [ADR 0003](docs/adr/0003-status-list-checking.md)):
+after holder binding and before the session commits, a credential's `status.status_list`
+reference is checked, in conformance mode with a status policy only (`--status-list-uri-prefix`,
+`--status-list-tls-cert`, and `--status-list-key` or `--status-list-trust-anchor`): one `GET`
+of an allowed `https` loopback URI (TLS certificate pinned, no redirects, bounded, 5 s),
+the Status List Token verified (`typ` `statuslist+jwt`, ES256 by the pinned key or an `x5c`
+leaf of the status CA with no EKU, `sub` = `uri`, `iat` / `exp` / `nbf` on the clock after the
+fetch, no `aud`), `lst` inflated as exactly one ZLIB stream with a bound, and only `0x00`
+accepted. The public `verify_sd_jwt_vc` refuses any credential with a `status` claim
+(`StatusUnchecked`), since it cannot check it. Revoked, suspended, and every case where the status cannot be
+established (fetch, TLS, signature, chain, expiry, subject, index range) are refused with
+distinct evidence. Without a policy (every build without `conformance`), a credential that
+references a status list is refused; one without a `status` claim is unaffected.
 
 Pinned specifications: OpenID4VP 1.1 Editor's draft of 11 November 2026, RFC 9901 (SD-JWT,
-November 2025), draft-ietf-oauth-sd-jwt-vc-27 (16 November 2026). The RFC 9901 §5.2 and
+November 2025), draft-ietf-oauth-sd-jwt-vc-27 (16 November 2026), draft-ietf-oauth-status-list-14
+(December 2025; -19 checked for §8.3 changes). The RFC 9901 §5.2 and
 Appendix A.3 examples are verified as fixtures (`tests/fixtures/rfc9901_examples.json`, with
 URL, document SHA-256 and retrieval date). SpruceID ssi 0.16's SD-JWT code (test-only) is
 used as an independent implementation in both directions; note that its `KbJwtPayload`

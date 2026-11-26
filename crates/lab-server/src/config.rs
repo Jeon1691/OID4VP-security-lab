@@ -360,6 +360,13 @@ pub enum StartError {
     #[cfg(feature = "conformance")]
     #[error("TLS configuration: {0}")]
     Tls(rustls::Error),
+    /// A status policy with a [`LabConfig::request_timeout`] below `STATUS_LIST_FETCH_TIMEOUT`
+    /// plus `STATUS_CHECK_TIMEOUT_MARGIN`: the request could time out (408, no evidence) before
+    /// the status check recorded its own failure. The margin covers the work before the fetch
+    /// (admission, decryption slot, trial); a decryption-slot wait beyond it still ends in 408.
+    #[cfg(feature = "conformance")]
+    #[error("request timeout must exceed the status list fetch timeout plus its margin")]
+    StatusFetchTimeout,
 }
 
 /// Checks `config` before anything is bound; returns how the Request Object header names its
@@ -398,6 +405,13 @@ pub(crate) fn check(config: &LabConfig) -> Result<KeyHint, StartError> {
     #[cfg(feature = "conformance")]
     match (config.mode, &config.conformance) {
         (Mode::Conformance, Some(conformance)) => {
+            if conformance.status_list.is_some()
+                && config.request_timeout
+                    < crate::status_list::STATUS_LIST_FETCH_TIMEOUT
+                        .saturating_add(crate::status_list::STATUS_CHECK_TIMEOUT_MARGIN)
+            {
+                return Err(StartError::StatusFetchTimeout);
+            }
             return crate::conformance::check(config, conformance).map(KeyHint::X5c);
         }
         (Mode::Conformance, None) | (_, Some(_)) => return Err(StartError::ConformanceConfig),

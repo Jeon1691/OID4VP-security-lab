@@ -1,0 +1,15 @@
+lab-server status list policy: uri prefix https://localhost:8443/test/a/oid4vp-lab-c4-2146713b2e4bf736/statuslists/, trust pinned key (thumbprint 4Vfes1N2h2msnV9WmtWt1VE03QEQSNksLUEK43jSABY), TLS certificate pinned (sha-256 S5Eqk6kZS2dypRaJN6xY-g3r4idJCcxjjjd9E7nWJCk)
+lab-server listening on 127.0.0.1:18444 as https://host.docker.internal:18444 (Conformance, client_id x509_hash:u84GnwYsxIzaMIop_GNsNmSPi-KqkDE301hxQA6_HJA)
+lab-server evidence: route=Unique candidates=1 crypto=Opened { opened: 1 } validation=Passed { validated: 1 } status=Valid commit=Committed rejection=None
+lab-server evidence: route=Unique candidates=1 crypto=Opened { opened: 1 } validation=Passed { validated: 1 } status=Valid commit=Committed rejection=None
+lab-server evidence: route=Unique candidates=1 crypto=Opened { opened: 1 } validation=Passed { validated: 1 } status=Valid commit=Committed rejection=None
+lab-server evidence: route=Unique candidates=1 crypto=Opened { opened: 1 } validation=Failed(KbSignature) status=NotRun commit=NotRun rejection=Some(Validation(KbSignature))
+lab-server evidence: route=Unique candidates=1 crypto=Opened { opened: 1 } validation=Failed(IssuerSignature) status=NotRun commit=NotRun rejection=Some(Validation(IssuerSignature))
+lab-server evidence: route=Unique candidates=1 crypto=Opened { opened: 1 } validation=Failed(KbSdHashMismatch) status=NotRun commit=NotRun rejection=Some(Validation(KbSdHashMismatch))
+lab-server evidence: route=Unique candidates=1 crypto=Opened { opened: 1 } validation=Failed(KbNonceMismatch) status=NotRun commit=NotRun rejection=Some(Validation(KbNonceMismatch))
+lab-server evidence: route=Unique candidates=1 crypto=Opened { opened: 1 } validation=Failed(KbAudienceMismatch) status=NotRun commit=NotRun rejection=Some(Validation(KbAudienceMismatch))
+lab-server evidence: route=Unique candidates=1 crypto=Opened { opened: 1 } validation=Failed(KbIatOutOfWindow) status=NotRun commit=NotRun rejection=Some(Validation(KbIatOutOfWindow))
+lab-server evidence: route=Unique candidates=1 crypto=Opened { opened: 1 } validation=Failed(KbIatOutOfWindow) status=NotRun commit=NotRun rejection=Some(Validation(KbIatOutOfWindow))
+lab-server evidence: route=Unique candidates=1 crypto=Opened { opened: 1 } validation=Passed { validated: 1 } status=Failed(Revoked) commit=NotRun rejection=Some(Status(Revoked))
+lab-server evidence: route=Unique candidates=1 crypto=Opened { opened: 1 } validation=Passed { validated: 1 } status=NotReferenced commit=Committed rejection=None
+lab-server evidence: route=Unique candidates=1 crypto=Opened { opened: 1 } validation=Failed(VctMismatch) status=NotRun commit=NotRun rejection=Some(Validation(VctMismatch))

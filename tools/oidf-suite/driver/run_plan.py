@@ -20,14 +20,24 @@ Usage (repository root, suite stack up per tools/oidf-suite/README.md §2):
      https://host.docker.internal:<port>, with the committed synthetic conformance fixtures, the
      issuer's public key, the DCQL query the suite answers (`urn:eudi:pid:1`, given_name,
      family_name, birthdate), a time box, and for C4 `x509_hash` plus a response
-     `redirect_uri`;
+     `redirect_uri`. Token Status List checking (docs/adr/0003-status-list-checking.md) is on:
+     the issuer policy allows only this run's suite lists
+     (`https://localhost:8443/test/a/<alias>/statuslists/`), the list signing key is pinned
+     explicitly (`--status-list-key`, the public half of the issuer key, which the suite signs
+     its lists with; README §5a), and the suite nginx's TLS certificate, read from
+     localhost:8443 at the start of the run and stored in OUT_DIR as `suite-tls.pem`, is pinned
+     (`--status-list-tls-cert`);
   3. creates the plan, then for every module, one at a time: starts it, creates a lab session
      (POST /lab/v1/sessions over HTTPS, the lab's certificate checked against the synthetic CA
      with SNI host.docker.internal, connected to 127.0.0.1), GETs the suite's authorization
      endpoint with that session's client_id + request_uri, polls the module, and when the module
      waits for a screenshot uploads a PNG rendering of the lab's result endpoint JSON for that
      session (what the lab itself reports: pending / consumed with the committed claims);
-     then fetches the final status, result and log;
+     then fetches the final status, result and log. Per module it also checks the lab side:
+     the lab's `lab-server evidence:` console lines for that module (status outcome, commit,
+     rejection), whether the suite log shows the lab fetching the status list, and the lab's
+     result endpoint (a revoked credential must leave the session pending). A module is "as
+     expected" only if the suite result and all of these match (LAB_EXPECTED);
   4. writes OUT_DIR: results.json, manifest.json, sanitized per-module logs (every private JWK
      `d`, and the issuer's private scalar wherever it appears, replaced by "REDACTED"), the
      uploaded PNGs, the sanitized rendered config and the lab's console log. Every file is
@@ -59,6 +69,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import zlib
@@ -71,7 +82,13 @@ FIXTURES = ROOT / "crates" / "lab-server" / "tests" / "fixtures"
 LAB_BIN = ROOT / "target" / "debug" / "lab-server"
 DOCKER = ["docker", "--context", "orbstack"]
 # docker-compose.yml: nginx publishes the suite on host loopback only.
-SUITE = "https://localhost:8443"
+SUITE_HOST = "localhost"
+SUITE_PORT = 8443
+SUITE = f"https://{SUITE_HOST}:{SUITE_PORT}"
+# Where each test serves the status list its credential references (README §2: under the alias).
+STATUS_LIST_SEGMENT = "statuslists/"
+# The suite nginx's TLS certificate, pinned by the lab for its status list fetches.
+SUITE_TLS_PEM = "suite-tls.pem"
 # How the suite container reaches host 127.0.0.1 on OrbStack (README §3); the leaf SAN.
 LAB_HOST = "host.docker.internal"
 LAB_BIND_IP = "127.0.0.1"
@@ -98,6 +115,17 @@ DCQL_ID = "pid"
 # nothing there (404) and the suite never fetches it, it only lists it (README §5d).
 REDIRECT_PATH = "/lab/v1/complete"
 LAB_READY_MARKER = "lab-server listening on "
+# Lines the lab prints in conformance mode (crates/lab-server/src/main.rs).
+LAB_EVIDENCE_MARKER = "lab-server evidence: "
+LAB_STATUS_POLICY_MARKER = "lab-server status list policy: "
+LAB_EVIDENCE_RE = re.compile(r"status=(?P<status>\S+) commit=(?P<commit>.+?) rejection=(?P<rejection>.+)$")
+# The lab prints new evidence every 100 ms; after a module, wait until no new line has arrived
+# for this long (at most LAB_EVIDENCE_MAX_WAIT_SECS) before reading the module's lines, so a late
+# record is not attributed to the next module.
+LAB_EVIDENCE_SETTLE_SECS = 1.0
+LAB_EVIDENCE_MAX_WAIT_SECS = 10.0
+# The suite's log entry when the verifier GETs the list (AbstractVP1FinalVerifierTest.java).
+SUITE_FETCHED_LIST_MSG = "The verifier fetched the status list the presented credential references."
 LAB_READY_TIMEOUT_SECS = 30
 LAB_STOP_TIMEOUT_SECS = 10
 SESSIONS_PATH = "/lab/v1/sessions"
@@ -166,19 +194,56 @@ EXPECTED = {
     "kb-jwt-iat-in-future": ("PASSED", HOLDER, "kb_jwt_with_future_iat_is_rejected"),
     "wrong-vct": ("PASSED", "crates/lab-server/src/sd_jwt.rs",
                   "sd_jwt_vc_profile_enforces_vct_and_exactly_the_requested_claims"),
-    "present-revoked-credential": ("FAILED", None, None),
+    "present-revoked-credential": ("PASSED", "crates/lab-server/tests/status_list_e2e.rs",
+                                   "same_credential_flips_from_accepted_to_revoked_when_only_the_list_changes"),
 }
+# What the lab itself must show per module (one response POST each): its status outcome and
+# commit (from its evidence lines), its rejection, whether the suite saw it fetch the status list,
+# and the session state on the lab's result endpoint. Positive modules with a status reference
+# must fetch the list and find it VALID; the module without status must not fetch; the revoked
+# credential must be fetched and refused as revoked with nothing committed; every other negative
+# module is refused while validating, for the reason the module tests, before any status work.
+# `fetches` is the exact number of list fetches the suite must have logged.
+STATUS_VALID = {"status": "Valid", "commit": "Committed", "rejection": "None", "fetches": 1,
+                "state": "consumed"}
+
+
+def validation_refused(error: str) -> dict:
+    """A negative module the lab must refuse while validating, with this ValidationError."""
+    return {"status": "NotRun", "commit": "NotRun", "rejection": f"Some(Validation({error}))",
+            "fetches": 0, "state": "pending"}
+
+
+LAB_EXPECTED = {
+    "happy-flow": STATUS_VALID,
+    "minimal-cnf-jwk": STATUS_VALID,
+    "request-uri-fetched-twice": STATUS_VALID,
+    "present-credential-without-status": {"status": "NotReferenced", "commit": "Committed",
+                                          "rejection": "None", "fetches": 0, "state": "consumed"},
+    "present-revoked-credential": {"status": "Failed(Revoked)", "commit": "NotRun",
+                                   "rejection": "Some(Status(Revoked))", "fetches": 1,
+                                   "state": "pending"},
+    "invalid-kb-jwt-signature": validation_refused("KbSignature"),
+    "invalid-credential-signature": validation_refused("IssuerSignature"),
+    "invalid-sd-hash": validation_refused("KbSdHashMismatch"),
+    "invalid-kb-jwt-nonce": validation_refused("KbNonceMismatch"),
+    "invalid-kb-jwt-aud": validation_refused("KbAudienceMismatch"),
+    "kb-jwt-iat-in-past": validation_refused("KbIatOutOfWindow"),
+    "kb-jwt-iat-in-future": validation_refused("KbIatOutOfWindow"),
+    "wrong-vct": validation_refused("VctMismatch"),
+}
+# Any WARNING or FAILURE finding fails the lab-side check (the suite's request checks on the
+# status list fetch included: method, query, body, Accept). Only the REVIEW marker of positive
+# modules is a non-SUCCESS result that belongs to a clean run, and it is not a finding.
 HAPPY_FLOW_C4_TEST = "conformance_round_trip_with_x509_hash_a256gcm_and_redirect_uri"
 MODULE_PREFIX = "oid4vp-1final-verifier-"
 EXPECTED_NOTES = {
     "REVIEW": "positive module: REVIEW after the screenshot upload is its best result (not PASSED)",
     "SKIPPED": "the lab sends no request_uri_method=post, so the suite skips this module",
-    "FAILED": "expected: the lab has no status-list support, and the module fails any verifier "
-              "that does not fetch the status list",
 }
 # Suite conditions whose finding has a known lab-side cause.
 KNOWN_FINDINGS = {
-    "EnsureVerifierFetchedRevocationList": "the lab does not fetch status lists, out of lab scope",
+    "EnsureVerifierFetchedRevocationList": "the lab did not fetch the status list",
 }
 
 # The suite's nginx serves a throwaway self-signed certificate on host loopback (README §2).
@@ -426,7 +491,9 @@ def write_json(path: Path, value, issuer_jwk: dict):
 
 # --- lab process --------------------------------------------------------------------------------
 
-def start_lab(plan: dict, port: int, alias: str, log_path: Path):
+def start_lab(plan: dict, port: int, alias: str, log_path: Path, suite_tls: Path):
+    """Starts the lab; returns the process, its command line, and the list its evidence lines
+    are appended to (and, first, its status policy line) as it prints them."""
     origin = f"https://{LAB_HOST}:{port}"
     args = [
         str(LAB_BIN), "--mode", "conformance",
@@ -443,6 +510,9 @@ def start_lab(plan: dict, port: int, alias: str, log_path: Path):
         "--vct", DCQL_VCT,
         "--claims", ",".join(DCQL_CLAIMS),
         "--authorization-endpoint", f"{SUITE}/test/a/{alias}/authorize",
+        "--status-list-uri-prefix", f"{SUITE}/test/a/{alias}/{STATUS_LIST_SEGMENT}",
+        "--status-list-key", str(FIXTURES / "lab_issuer.pub.jwk"),
+        "--status-list-tls-cert", str(suite_tls),
     ]
     if plan["redirect"]:
         args += ["--response-redirect-uri", origin + REDIRECT_PATH]
@@ -450,6 +520,7 @@ def start_lab(plan: dict, port: int, alias: str, log_path: Path):
     proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             env={"PATH": os.environ.get("PATH", "")})
     ready = threading.Event()
+    lines = {"evidence": [], "status_policy": None, "consumed": 0}
 
     def pump():
         for line in proc.stdout:
@@ -457,6 +528,10 @@ def start_lab(plan: dict, port: int, alias: str, log_path: Path):
             log.flush()
             if line.startswith(LAB_READY_MARKER):
                 ready.set()
+            elif line.startswith(LAB_EVIDENCE_MARKER):
+                lines["evidence"].append(line.rstrip("\n"))
+            elif line.startswith(LAB_STATUS_POLICY_MARKER):
+                lines["status_policy"] = line.removeprefix(LAB_STATUS_POLICY_MARKER).strip()
         log.close()
 
     threading.Thread(target=pump, daemon=True).start()
@@ -464,7 +539,7 @@ def start_lab(plan: dict, port: int, alias: str, log_path: Path):
         proc.kill()
         raise SystemExit(f"lab did not start; see {log_path}")
     cmdline = " ".join(a.replace(str(ROOT) + "/", "") for a in args)
-    return proc, cmdline
+    return proc, cmdline, lines
 
 
 def stop_lab(proc):
@@ -580,6 +655,11 @@ def response_jwe_header(log: list):
     return None
 
 
+# 3xx (RFC 9110 §15.4): the authorize GET's redirects are recorded and never followed.
+HTTP_REDIRECT_MIN = 300
+HTTP_REDIRECT_MAX = 399
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     """The authorize GET must be answered by the suite itself: a 3xx is an error, not followed."""
 
@@ -590,8 +670,48 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 SUITE_NO_REDIRECT = urllib.request.build_opener(urllib.request.HTTPSHandler(context=SUITE_TLS), NoRedirect)
 
 
-def run_module(module: str, plan_id: str, lab: LabClient, out: Path, issuer_jwk: dict) -> dict:
+def settle_evidence(lab_lines: dict):
+    """Waits until the lab's evidence lines stop growing (LAB_EVIDENCE_SETTLE_SECS of quiet)."""
+    deadline = time.monotonic() + LAB_EVIDENCE_MAX_WAIT_SECS
+    count = -1
+    while time.monotonic() < deadline and count != len(lab_lines["evidence"]):
+        count = len(lab_lines["evidence"])
+        time.sleep(LAB_EVIDENCE_SETTLE_SECS)
+
+
+def lab_evidence(lines: list) -> list:
+    """The status outcome, commit and rejection of each `lab-server evidence:` line."""
+    parsed = []
+    for line in lines:
+        match = LAB_EVIDENCE_RE.search(line)
+        parsed.append(match.groupdict() if match else {"unparsed": line})
+    return parsed
+
+
+def lab_check(short: str, record: dict, log: list) -> dict:
+    """The module's lab-side outcome against LAB_EXPECTED (see there)."""
+    expected = LAB_EXPECTED.get(short)
+    fetches = sum(1 for e in log if e.get("msg") == SUITE_FETCHED_LIST_MSG)
+    flagged = sorted({e.get("src") for e in log if e.get("result") in ("FAILURE", "WARNING")})
+    evidence = record.get("lab_evidence", [])
+    observed = {"evidence": evidence, "suite_logged_list_fetches": fetches,
+                "state": (record.get("lab_result") or {}).get("state"), "findings": flagged}
+    if expected is None:
+        return {"expected": None, "observed": observed,
+                "ok": not evidence and not fetches and not flagged}
+    ok = (len(evidence) == 1
+          and all(evidence[0].get(k) == v for k, v in expected.items() if k in ("status", "commit", "rejection"))
+          and fetches == expected["fetches"]
+          and observed["state"] == expected["state"]
+          and not flagged)
+    return {"expected": expected, "observed": observed, "ok": ok}
+
+
+def run_module(module: str, plan_id: str, lab: LabClient, out: Path, issuer_jwk: dict,
+               lab_lines: dict) -> dict:
     short = module.removeprefix(MODULE_PREFIX)
+    # Each module's lines start where the previous module's ended, so no line is left out.
+    evidence_mark = lab_lines["consumed"]
     test_id = suite_api("POST", "/api/runner?" + urllib.parse.urlencode({"test": module, "plan": plan_id}))["id"]
     state = wait_state(test_id, "WAITING,FINISHED,INTERRUPTED")
     runner = suite_api("GET", f"/api/runner/{test_id}")
@@ -610,10 +730,18 @@ def run_module(module: str, plan_id: str, lab: LabClient, out: Path, issuer_jwk:
         record.update(session_id=session["session_id"], client_id=session["client_id"],
                       lab_tls=lab.last_tls)
         started = time.monotonic()
-        with SUITE_NO_REDIRECT.open(authz, timeout=AUTHORIZE_TIMEOUT_SECS) as resp:
-            if resp.url != authz:
-                raise SystemExit(f"authorize GET ended at {resp.url}, not {authz}")
-            record["authorize_status"] = resp.status
+        try:
+            with SUITE_NO_REDIRECT.open(authz, timeout=AUTHORIZE_TIMEOUT_SECS) as resp:
+                if resp.url != authz:
+                    raise SystemExit(f"authorize GET ended at {resp.url}, not {authz}")
+                record["authorize_status"] = resp.status
+        except urllib.error.HTTPError as e:
+            # The suite answers a module it skips (request-uri-method-post without
+            # request_uri_method=post) with a redirect of its own: recorded, never followed.
+            if not HTTP_REDIRECT_MIN <= e.code <= HTTP_REDIRECT_MAX:
+                raise
+            record["authorize_status"] = e.code
+            record["authorize_redirect_not_followed"] = True
         record["authorize_seconds"] = round(time.monotonic() - started, 2)
         state = wait_state(test_id, "WAITING,FINISHED,INTERRUPTED")
         result_status, result_body = lab.request("GET", session["result_uri"])
@@ -644,9 +772,15 @@ def run_module(module: str, plan_id: str, lab: LabClient, out: Path, issuer_jwk:
     info = suite_api("GET", f"/api/info/{test_id}")
     log = suite_api("GET", f"/api/log/{test_id}")
     write_json(out / "logs" / f"{short}.json", log, issuer_jwk)
+    settle_evidence(lab_lines)
+    evidence_end = len(lab_lines["evidence"])
+    lab_lines["consumed"] = evidence_end
+    record["lab_evidence"] = lab_evidence(lab_lines["evidence"][evidence_mark:evidence_end])
+    check = lab_check(short, record, log)
     expected, test_file, test_name = EXPECTED.get(short, (None, None, None))
     record.update(final_state=state, status=info.get("status"), result=info.get("result"),
-                  expected=expected, as_expected=info.get("result") == expected,
+                  expected=expected, lab_check=check,
+                  as_expected=info.get("result") == expected and check["ok"],
                   findings=findings(log), response_jwe=response_jwe_header(log),
                   log=f"logs/{short}.json", lab_test=test_name and {"file": test_file, "test": test_name})
     return record
@@ -676,11 +810,16 @@ def cmd_run(args):
     with os.fdopen(fd, "w") as f:
         f.write(json.dumps(config, indent=1) + "\n")
 
+    # The suite nginx's certificate (public; self-signed CN=localhost, no SAN), read from host
+    # loopback now and pinned by the lab for its status list fetches during this run.
+    suite_tls = out / SUITE_TLS_PEM
+    suite_tls.write_text(ssl.get_server_certificate((SUITE_HOST, SUITE_PORT), timeout=LAB_TIMEOUT_SECS))
     results = {"plan": plan["plan_name"], "variant": variant, "alias": alias, "modules": []}
     export_sha = None
     proc = None
+    lab_lines = {"evidence": [], "status_policy": None, "consumed": 0}
     try:
-        proc, lab_cmd = start_lab(plan, args.lab_port, alias, out / "lab-console.log")
+        proc, lab_cmd, lab_lines = start_lab(plan, args.lab_port, alias, out / "lab-console.log", suite_tls)
         deadline = time.monotonic() + DRIVER_DEADLINE_SECS
         lab = LabClient(args.lab_port, FIXTURES / "conformance_ca.pem")
         status, _ = lab.request("GET", "/health")
@@ -694,9 +833,11 @@ def cmd_run(args):
         for module in modules:
             if time.monotonic() > deadline:
                 raise SystemExit(f"driver deadline ({DRIVER_DEADLINE_SECS} s) passed before {module}")
-            record = run_module(module, plan_id, lab, out, issuer_jwk)
+            record = run_module(module, plan_id, lab, out, issuer_jwk, lab_lines)
             results["modules"].append(record)
-            print(f"{module}: {record['status']} {record['result']} (expected {record['expected']})", flush=True)
+            print(f"{module}: {record['status']} {record['result']} (expected {record['expected']}); "
+                  f"lab {record['lab_evidence']} -> {'as expected' if record['as_expected'] else 'UNEXPECTED'}",
+                  flush=True)
         # The export holds the issuer private key too: owner-only, git-ignored, kept for review.
         export = SUITE_DIR / f"{plan['template']}-{alias}.zip"
         fd = os.open(export, os.O_WRONLY | os.O_CREAT | os.O_EXCL, PRIVATE_FILE_MODE)
@@ -707,11 +848,19 @@ def cmd_run(args):
         if proc is not None:
             stop_lab(proc)
         local.unlink(missing_ok=True)
+    results["lab_status_policy"] = lab_lines["status_policy"]
     write_json(out / "results.json", results, issuer_jwk)
-    write_json(out / "manifest.json",
-               manifest(args.plan, plan, variant, alias, results.get("plan_id"), lab_cmd, started, export_sha,
-                        build, tree),
-               issuer_jwk)
+    mani = manifest(args.plan, plan, variant, alias, results.get("plan_id"), lab_cmd, started, export_sha,
+                    build, tree)
+    mani["lab"]["status_list"] = {
+        "policy_line": lab_lines["status_policy"],
+        "uri_prefix": f"{SUITE}/test/a/{alias}/{STATUS_LIST_SEGMENT}",
+        "pinned_key": "crates/lab-server/tests/fixtures/lab_issuer.pub.jwk",
+        "pinned_key_sha256": sha256_file(FIXTURES / "lab_issuer.pub.jwk"),
+        "suite_tls_certificate": SUITE_TLS_PEM,
+        "suite_tls_certificate_sha256": sha256_file(suite_tls),
+    }
+    write_json(out / "manifest.json", mani, issuer_jwk)
     forms = forbidden_forms(issuer_jwk)
     for path in sorted(p for p in out.rglob("*") if p.is_file()):
         assert_clean(path.read_bytes().decode("latin-1"), forms, path)
@@ -733,7 +882,8 @@ def cmd_summarize(args):
         raise SystemExit(f"plans ran at different lab commits: {commits}")
     (run / "results.json").write_text(json.dumps(
         {k: [{key: m.get(key) for key in ("module", "status", "result", "expected", "as_expected",
-                                          "findings", "response_jwe", "lab_test", "log", "screenshot")}
+                                          "lab_check", "findings", "response_jwe", "lab_test", "log",
+                                          "screenshot")}
              for m in p["modules"]] for k, p in plans.items()}, indent=1) + "\n")
     (run / "manifest.json").write_text(json.dumps(
         {"lab_commit": commits.pop(), "plans": {k: f"{k}/manifest.json" for k in plans},
@@ -754,8 +904,9 @@ def cmd_summarize(args):
         lines += [f"## {key.upper()}: `{plan['plan']}`", "",
                   f"Variant `{json.dumps(plan['variant'])}`, alias `{plan['alias']}`, lab commit "
                   f"`{mani['lab']['commit'][:12]}` (dirty: {mani['lab']['dirty']}).", "",
-                  "| Module | Status | Result | Expected | Reason (non-PASSED) | Lab test |",
-                  "| --- | --- | --- | --- | --- | --- |"]
+                  f"Lab status list policy: {plan.get('lab_status_policy')}.", "",
+                  "| Module | Status | Result | Expected | Lab: status / commit (suite-logged list fetches, session) | Reason (non-PASSED) | Lab test |",
+                  "| --- | --- | --- | --- | --- | --- | --- |"]
         for m in plan["modules"]:
             short = m["module"].removeprefix(MODULE_PREFIX)
             reason = ""
@@ -771,8 +922,14 @@ def cmd_summarize(args):
             if test and short == "happy-flow" and key == "c4":
                 test = {"file": CONF, "test": HAPPY_FLOW_C4_TEST}
             link = f"[`{test['test']}`]({depth}{test['file']})" if test else "none"
+            obs = (m.get("lab_check") or {}).get("observed") or {}
+            ev = obs.get("evidence") or []
+            lab_cell = "; ".join(f"{e.get('status')} / {e.get('commit')}" for e in ev) or "no response"
+            lab_cell += f" ({obs.get('suite_logged_list_fetches', 0)}, {obs.get('state')})"
+            if not (m.get("lab_check") or {}).get("ok"):
+                lab_cell += " UNEXPECTED"
             lines.append(f"| [{short}]({key}/{m['log']}) | {m['status']} | {m['result']} | "
-                         f"{m['expected']} | {reason.strip('; ')} | {link} |")
+                         f"{m['expected']} | {lab_cell} | {reason.strip('; ')} | {link} |")
         jwes = [m["response_jwe"] for m in plan["modules"] if m.get("response_jwe")]
         algs = sorted({f"{j.get('alg')} / {j.get('enc')}" for j in jwes})
         kids = {j.get("kid") for j in jwes}
